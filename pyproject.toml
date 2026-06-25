@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "memoria"
@@ -25,5 +25,9 @@ memoria = "memoria.cli.main:cli"
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "black>=24", "ruff>=0.7"]
 
+[tool.setuptools]
+packages = ["memoria", "memoria.core", "memoria.storage", "memoria.models", "memoria.llm", "memoria.server", "memoria.server.routes", "memoria.cli"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
