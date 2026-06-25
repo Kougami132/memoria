@@ -73,7 +73,7 @@ base-ref: initial
 **Interfaces:**
 - Produces: 包名 `memoria`，entrypoint `memoria = "memoria.cli.main:cli"`，pytest 可发现 `tests/`
 
-- [ ] **Step 1: 创建 `pyproject.toml`**
+- [x] **Step 1: 创建 `pyproject.toml`**
 
 ```toml
 [build-system]
@@ -107,7 +107,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24", "black>=24", "ruff>=0.7"]
 testpaths = ["tests"]
 ```
 
-- [ ] **Step 2: 验证文件存在且 TOML 语法有效**
+- [x] **Step 2: 验证文件存在且 TOML 语法有效**
 
 ```bash
 python -c "import tomllib; tomllib.load(open('N:/Data/Projects/memoria/pyproject.toml','rb'))" && echo OK
@@ -115,7 +115,7 @@ python -c "import tomllib; tomllib.load(open('N:/Data/Projects/memoria/pyproject
 
 Expected: `OK`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add pyproject.toml && git commit -m "chore: add pyproject.toml with Phase 1 dependencies"
@@ -131,7 +131,7 @@ cd N:/Data/Projects/memoria && git add pyproject.toml && git commit -m "chore: a
 **Interfaces:**
 - Produces: 与 `memoria/config.py` Settings 字段一一对应的键名（供下游任务核对）
 
-- [ ] **Step 1: 创建 `.env.example`**
+- [x] **Step 1: 创建 `.env.example`**
 
 ```ini
 NEWAPI_BASE_URL=https://api.example.com
@@ -146,7 +146,7 @@ CHROMA_PATH=./data/chroma
 UPLOAD_DIR=./data/uploads
 ```
 
-- [ ] **Step 2: 验证键名完整性**
+- [x] **Step 2: 验证键名完整性**
 
 ```bash
 grep -c "=" N:/Data/Projects/memoria/.env.example
@@ -154,7 +154,7 @@ grep -c "=" N:/Data/Projects/memoria/.env.example
 
 Expected: `10`（10 个键）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add .env.example && git commit -m "chore: add .env.example with all config keys"
@@ -167,7 +167,7 @@ cd N:/Data/Projects/memoria && git add .env.example && git commit -m "chore: add
 **Files:**
 - Create: `.gitignore`
 
-- [ ] **Step 1: 创建 `.gitignore`**
+- [x] **Step 1: 创建 `.gitignore`**
 
 ```gitignore
 .env
@@ -181,7 +181,7 @@ dist/
 .eggs/
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add .gitignore && git commit -m "chore: add .gitignore"
@@ -199,7 +199,7 @@ cd N:/Data/Projects/memoria && git add .gitignore && git commit -m "chore: add .
 **Interfaces:**
 - Produces: `from memoria import __version__` 可用
 
-- [ ] **Step 1: 创建目录和 `__init__.py`**
+- [x] **Step 1: 创建目录和 `__init__.py`**
 
 ```bash
 mkdir -p N:/Data/Projects/memoria/memoria
@@ -211,7 +211,7 @@ mkdir -p N:/Data/Projects/memoria/memoria
 __version__ = "0.1.0"
 ```
 
-- [ ] **Step 2: 验证可导入**
+- [x] **Step 2: 验证可导入**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "import memoria; print(memoria.__version__)"
@@ -219,7 +219,7 @@ cd N:/Data/Projects/memoria && python -c "import memoria; print(memoria.__versio
 
 Expected: `0.1.0`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/__init__.py && git commit -m "feat: create memoria package"
@@ -236,7 +236,7 @@ cd N:/Data/Projects/memoria && git add memoria/__init__.py && git commit -m "fea
 - Consumes: pydantic-settings（需已安装）
 - Produces: `from memoria.config import settings`，`settings.newapi_base_url` 等 10 个字段可访问
 
-- [ ] **Step 1: 创建 `memoria/config.py`**
+- [x] **Step 1: 创建 `memoria/config.py`**
 
 ```python
 from pydantic_settings import BaseSettings
@@ -261,13 +261,13 @@ class Settings(BaseSettings):
 settings = Settings()
 ```
 
-- [ ] **Step 2: 创建测试用 `.env` 验证导入**
+- [x] **Step 2: 创建测试用 `.env` 验证导入**
 
 ```bash
 echo "NEWAPI_BASE_URL=http://test\nNEWAPI_API_KEY=testkey" > N:/Data/Projects/memoria/.env.test
 ```
 
-- [ ] **Step 3: 验证模块可导入（使用测试 .env）**
+- [x] **Step 3: 验证模块可导入（使用测试 .env）**
 
 ```bash
 cd N:/Data/Projects/memoria && NEWAPI_BASE_URL=http://test NEWAPI_API_KEY=testkey python -c "
@@ -281,13 +281,13 @@ print('config OK')
 
 Expected: `config OK`
 
-- [ ] **Step 4: 清理测试 .env**
+- [x] **Step 4: 清理测试 .env**
 
 ```bash
 rm -f N:/Data/Projects/memoria/.env.test
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/config.py && git commit -m "feat: add config.py with pydantic-settings"
@@ -311,12 +311,12 @@ cd N:/Data/Projects/memoria && git add memoria/config.py && git commit -m "feat:
   - `chunker.Chunker.split(text: str) -> list[str]`
   - `embedder.Embedder.embed(texts: list[str]) -> list[list[float]]`
 
-- [ ] **Step 1: 创建 `memoria/core/__init__.py`（空文件）**
+- [x] **Step 1: 创建 `memoria/core/__init__.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `memoria/core/pipeline.py`**
+- [x] **Step 2: 创建 `memoria/core/pipeline.py`**
 
 ```python
 def ingest(kb_id: str, path: str | list[str]) -> dict:
@@ -331,7 +331,7 @@ def query(bot_id: str, query: str, stream: bool = False) -> dict:
     raise NotImplementedError
 ```
 
-- [ ] **Step 3: 创建 `memoria/core/chunker.py`**
+- [x] **Step 3: 创建 `memoria/core/chunker.py`**
 
 ```python
 class Chunker:
@@ -342,7 +342,7 @@ class Chunker:
         raise NotImplementedError
 ```
 
-- [ ] **Step 4: 创建 `memoria/core/embedder.py`**
+- [x] **Step 4: 创建 `memoria/core/embedder.py`**
 
 ```python
 class Embedder:
@@ -353,7 +353,7 @@ class Embedder:
         raise NotImplementedError
 ```
 
-- [ ] **Step 5: 验证可导入**
+- [x] **Step 5: 验证可导入**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "
@@ -364,7 +364,7 @@ print('core OK')
 
 Expected: `core OK`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/core/ && git commit -m "feat: add core/ skeleton (pipeline, chunker, embedder)"
@@ -386,12 +386,12 @@ cd N:/Data/Projects/memoria && git add memoria/core/ && git commit -m "feat: add
   - `chroma_store.ChromaStore(VectorStore)`，方法均 `raise NotImplementedError`
   - `db.DB`，方法：`get(id)`, `list()`, `create(obj)`, `delete(id)` 均 `raise NotImplementedError`
 
-- [ ] **Step 1: 创建 `memoria/storage/__init__.py`（空文件）**
+- [x] **Step 1: 创建 `memoria/storage/__init__.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `memoria/storage/base.py`**
+- [x] **Step 2: 创建 `memoria/storage/base.py`**
 
 ```python
 from abc import ABC, abstractmethod
@@ -411,7 +411,7 @@ class VectorStore(ABC):
         raise NotImplementedError
 ```
 
-- [ ] **Step 3: 创建 `memoria/storage/chroma_store.py`**
+- [x] **Step 3: 创建 `memoria/storage/chroma_store.py`**
 
 ```python
 from memoria.storage.base import VectorStore
@@ -431,7 +431,7 @@ class ChromaStore(VectorStore):
         raise NotImplementedError
 ```
 
-- [ ] **Step 4: 创建 `memoria/storage/db.py`**
+- [x] **Step 4: 创建 `memoria/storage/db.py`**
 
 ```python
 class DB:
@@ -451,7 +451,7 @@ class DB:
         raise NotImplementedError
 ```
 
-- [ ] **Step 5: 验证可导入**
+- [x] **Step 5: 验证可导入**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "
@@ -464,7 +464,7 @@ print('storage OK')
 
 Expected: `storage OK`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/storage/ && git commit -m "feat: add storage/ skeleton (VectorStore ABC, ChromaStore, DB)"
@@ -487,7 +487,7 @@ cd N:/Data/Projects/memoria && git add memoria/storage/ && git commit -m "feat: 
   - `KnowledgeBase(id, name, description)`
   - `Document(id, kb_id, filename, path, chunk_count)`
 
-- [ ] **Step 1: 创建 `memoria/models/bot.py`**
+- [x] **Step 1: 创建 `memoria/models/bot.py`**
 
 ```python
 from pydantic import BaseModel
@@ -501,7 +501,7 @@ class Bot(BaseModel):
     model_override: str | None = None
 ```
 
-- [ ] **Step 2: 创建 `memoria/models/knowledge_base.py`**
+- [x] **Step 2: 创建 `memoria/models/knowledge_base.py`**
 
 ```python
 from pydantic import BaseModel
@@ -513,7 +513,7 @@ class KnowledgeBase(BaseModel):
     description: str = ""
 ```
 
-- [ ] **Step 3: 创建 `memoria/models/document.py`**
+- [x] **Step 3: 创建 `memoria/models/document.py`**
 
 ```python
 from pydantic import BaseModel
@@ -527,7 +527,7 @@ class Document(BaseModel):
     chunk_count: int = 0
 ```
 
-- [ ] **Step 4: 创建 `memoria/models/__init__.py`**
+- [x] **Step 4: 创建 `memoria/models/__init__.py`**
 
 ```python
 from memoria.models.bot import Bot
@@ -537,7 +537,7 @@ from memoria.models.document import Document
 __all__ = ["Bot", "KnowledgeBase", "Document"]
 ```
 
-- [ ] **Step 5: 验证模型可实例化**
+- [x] **Step 5: 验证模型可实例化**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "
@@ -554,7 +554,7 @@ print('models OK')
 
 Expected: `models OK`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/models/ && git commit -m "feat: add models/ with Bot, KnowledgeBase, Document"
@@ -571,12 +571,12 @@ cd N:/Data/Projects/memoria && git add memoria/models/ && git commit -m "feat: a
 **Interfaces:**
 - Produces: `llm.caller.LLMCaller.call(messages: list[dict], stream: bool) -> dict | Iterator`
 
-- [ ] **Step 1: 创建 `memoria/llm/__init__.py`（空文件）**
+- [x] **Step 1: 创建 `memoria/llm/__init__.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `memoria/llm/caller.py`**
+- [x] **Step 2: 创建 `memoria/llm/caller.py`**
 
 ```python
 from typing import Iterator
@@ -590,7 +590,7 @@ class LLMCaller:
         raise NotImplementedError
 ```
 
-- [ ] **Step 3: 验证可导入**
+- [x] **Step 3: 验证可导入**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "
@@ -601,7 +601,7 @@ print('llm OK')
 
 Expected: `llm OK`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/llm/ && git commit -m "feat: add llm/ skeleton (LLMCaller)"
@@ -624,12 +624,12 @@ cd N:/Data/Projects/memoria && git add memoria/llm/ && git commit -m "feat: add 
 **Interfaces:**
 - Produces: `from memoria.server.app import create_app` 返回 `FastAPI` 实例
 
-- [ ] **Step 1: 创建 `memoria/server/__init__.py`（空文件）**
+- [x] **Step 1: 创建 `memoria/server/__init__.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `memoria/server/app.py`**
+- [x] **Step 2: 创建 `memoria/server/app.py`**
 
 ```python
 from fastapi import FastAPI
@@ -641,19 +641,19 @@ def create_app() -> FastAPI:
     return app
 ```
 
-- [ ] **Step 3: 创建 `memoria/server/deps.py`**
+- [x] **Step 3: 创建 `memoria/server/deps.py`**
 
 ```python
 def get_settings():
     raise NotImplementedError
 ```
 
-- [ ] **Step 4: 创建 `memoria/server/routes/__init__.py`（空文件）**
+- [x] **Step 4: 创建 `memoria/server/routes/__init__.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 5: 创建 `memoria/server/routes/knowledge_bases.py`**
+- [x] **Step 5: 创建 `memoria/server/routes/knowledge_bases.py`**
 
 ```python
 from fastapi import APIRouter
@@ -661,7 +661,7 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 ```
 
-- [ ] **Step 6: 创建 `memoria/server/routes/bots.py`**
+- [x] **Step 6: 创建 `memoria/server/routes/bots.py`**
 
 ```python
 from fastapi import APIRouter
@@ -669,7 +669,7 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/bots", tags=["bots"])
 ```
 
-- [ ] **Step 7: 创建 `memoria/server/routes/documents.py`**
+- [x] **Step 7: 创建 `memoria/server/routes/documents.py`**
 
 ```python
 from fastapi import APIRouter
@@ -677,7 +677,7 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/documents", tags=["documents"])
 ```
 
-- [ ] **Step 8: 创建 `memoria/server/routes/chat.py`**
+- [x] **Step 8: 创建 `memoria/server/routes/chat.py`**
 
 ```python
 from fastapi import APIRouter
@@ -685,7 +685,7 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/chat", tags=["chat"])
 ```
 
-- [ ] **Step 9: 验证 FastAPI app 可创建**
+- [x] **Step 9: 验证 FastAPI app 可创建**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "
@@ -698,7 +698,7 @@ print('server OK')
 
 Expected: `server OK`
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/server/ && git commit -m "feat: add server/ skeleton (FastAPI app + route stubs)"
@@ -716,12 +716,12 @@ cd N:/Data/Projects/memoria && git add memoria/server/ && git commit -m "feat: a
 - Consumes: click 8.1+
 - Produces: `cli` Click group，子命令：`serve`、`kb create/list/delete`、`bot create/list/delete`、`ingest`、`query`
 
-- [ ] **Step 1: 创建 `memoria/cli/__init__.py`（空文件）**
+- [x] **Step 1: 创建 `memoria/cli/__init__.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `memoria/cli/main.py`**
+- [x] **Step 2: 创建 `memoria/cli/main.py`**
 
 ```python
 import click
@@ -806,7 +806,7 @@ def query(bot_id: str, question: str) -> None:
     raise NotImplementedError
 ```
 
-- [ ] **Step 3: 验证 `memoria --help` 输出**
+- [x] **Step 3: 验证 `memoria --help` 输出**
 
 先确认包已安装（若尚未安装则先执行 `pip install -e .`）：
 
@@ -828,7 +828,7 @@ Commands:
   serve   Start the Memoria API server.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add memoria/cli/ && git commit -m "feat: add cli/ with full command tree stub"
@@ -847,12 +847,12 @@ cd N:/Data/Projects/memoria && git add memoria/cli/ && git commit -m "feat: add 
 **Interfaces:**
 - Produces: `pytest` 可运行，退出码 0 或 5（no tests collected 时为 5，有测试时为 0）
 
-- [ ] **Step 1: 创建 `tests/conftest.py`（空文件）**
+- [x] **Step 1: 创建 `tests/conftest.py`（空文件）**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `tests/test_placeholder.py`**
+- [x] **Step 2: 创建 `tests/test_placeholder.py`**
 
 ```python
 def test_import_memoria() -> None:
@@ -872,7 +872,7 @@ def test_models_instantiation() -> None:
     assert doc.chunk_count == 0
 ```
 
-- [ ] **Step 3: 运行测试确认通过**
+- [x] **Step 3: 运行测试确认通过**
 
 ```bash
 cd N:/Data/Projects/memoria && pytest -v
@@ -885,7 +885,7 @@ tests/test_placeholder.py::test_models_instantiation PASSED
 2 passed
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add tests/ && git commit -m "test: add placeholder tests for import and models"
@@ -898,7 +898,7 @@ cd N:/Data/Projects/memoria && git add tests/ && git commit -m "test: add placeh
 **Files:**
 - Create: `README.md`（注：项目根已有 DESIGN.md，README.md 是新文件）
 
-- [ ] **Step 1: 创建 `README.md`**
+- [x] **Step 1: 创建 `README.md`**
 
 ```markdown
 # Memoria
@@ -940,7 +940,7 @@ black .         # Format
 ```
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria && git add README.md && git commit -m "docs: add README with install and CLI usage"
@@ -954,7 +954,7 @@ cd N:/Data/Projects/memoria && git add README.md && git commit -m "docs: add REA
 
 这一组不创建新文件，执行所有验收命令并确认结果。
 
-- [ ] **Step 1: 确认包安装无报错**
+- [x] **Step 1: 确认包安装无报错**
 
 ```bash
 cd N:/Data/Projects/memoria && pip install -e . 2>&1 | tail -5
@@ -962,7 +962,7 @@ cd N:/Data/Projects/memoria && pip install -e . 2>&1 | tail -5
 
 Expected: 最后一行包含 `Successfully installed` 或 `already satisfied`，无 `ERROR`
 
-- [ ] **Step 2: 确认 import 无报错**
+- [x] **Step 2: 确认 import 无报错**
 
 ```bash
 cd N:/Data/Projects/memoria && python -c "import memoria; print('import OK')"
@@ -970,7 +970,7 @@ cd N:/Data/Projects/memoria && python -c "import memoria; print('import OK')"
 
 Expected: `import OK`
 
-- [ ] **Step 3: 确认 CLI 可运行**
+- [x] **Step 3: 确认 CLI 可运行**
 
 ```bash
 cd N:/Data/Projects/memoria && memoria --help
@@ -984,7 +984,7 @@ echo "Exit code: $?"
 
 Expected: `Exit code: 0`
 
-- [ ] **Step 4: 确认 pytest 可启动**
+- [x] **Step 4: 确认 pytest 可启动**
 
 ```bash
 cd N:/Data/Projects/memoria && pytest -v 2>&1
@@ -992,7 +992,7 @@ cd N:/Data/Projects/memoria && pytest -v 2>&1
 
 Expected: 退出码 0（有测试通过）或 5（no tests collected）；无 `ImportError` 或 `ModuleNotFoundError`
 
-- [ ] **Step 5: 确认 `memoria kb --help` 和 `memoria bot --help` 子命令可见**
+- [x] **Step 5: 确认 `memoria kb --help` 和 `memoria bot --help` 子命令可见**
 
 ```bash
 cd N:/Data/Projects/memoria && memoria kb --help && memoria bot --help
@@ -1000,7 +1000,7 @@ cd N:/Data/Projects/memoria && memoria kb --help && memoria bot --help
 
 Expected: 两个命令均输出各自的 help 文本，退出码 0
 
-- [ ] **Step 6: Final commit（若有遗漏未提交的文件）**
+- [x] **Step 6: Final commit（若有遗漏未提交的文件）**
 
 ```bash
 cd N:/Data/Projects/memoria && git status
