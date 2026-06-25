@@ -7,7 +7,7 @@ subagent_dispatch: null
 tdd_mode: direct
 review_mode: standard
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: null
 design_doc: docs/superpowers/specs/2026-06-25-setup-project-skeleton-design.md
