@@ -19,6 +19,6 @@ verification_report: docs/superpowers/reports/2026-06-26-setup-project-skeleton-
 branch_status: handled
 created_at: 2026-06-25
 verified_at: 2026-06-25
-archived: false
+archived: true
 handoff_context: openspec/changes/setup-project-skeleton/.comet/handoff/design-context.json
 handoff_hash: 305f7777de28525f1641abd28f61b4866da3d91d1b7ea685639d2f497211a96b
