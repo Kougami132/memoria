@@ -1,0 +1,22 @@
+{
+  "change": "implement-phase1-rag-core",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "e7767ce67594b7c1132157a863429c3153c45a85ba74fbe862701cd012e341df",
+  "files": [
+    { "path": "openspec/changes/implement-phase1-rag-core/proposal.md", "sha256": "02ba003f5d9383c0e9f806afb1c8b962a272c95b189bc68423739a0ef9d2df52" },
+    { "path": "openspec/changes/implement-phase1-rag-core/design.md", "sha256": "c768c4e24392c1f6a86e92d8576c7acaf6330016ab3c34e84a9da0661354639e" },
+    { "path": "openspec/changes/implement-phase1-rag-core/tasks.md", "sha256": "a0338f16df6ec705889d76606732d0693619d146b42b0ef0e4d54f5d2b7e78e0" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/bot-management/spec.md", "sha256": "68ec9a6d7e31518ed92ab74027efaa5b7841be37a241293313c7b7b61bd431a3" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/chat-session/spec.md", "sha256": "4892f4d99d4f23c6e36ece4fe8c30ab0be1dddc9dd7828b4cbd3dd06a1f55f18" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/document-management/spec.md", "sha256": "a0997072e19dfda5f1fe3d2a8228ea872d747edfc3b5e0a1bd3cfa857048097a" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/kb-management/spec.md", "sha256": "757bc67d2444c909b8c3ec27a846a30288bfccd69e832cb0e51eac6e1b6c595b" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/mock-mode/spec.md", "sha256": "ba1b009abf44f4292ad3a9df49cb0584adfc9ff3fb7ec2ba4ab5539cf7724802" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/project-skeleton/spec.md", "sha256": "05b0a76dd2f39b77766e16c1e73e7f891bb8e6b0826d31e3519d40ae7b5639a4" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/rag-ingest/spec.md", "sha256": "cbb0bd2c2234e0c3bdc1db32b8751ceeb5c795e06cdd5cc236b8ba256c33d58d" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/rag-query/spec.md", "sha256": "42f2d80c3b9f3d4e5d0a8722c72738071ca5dbfdc83a5bd196bc9decfad56256" },
+    { "path": "openspec/changes/implement-phase1-rag-core/specs/rag-retrieve/spec.md", "sha256": "bd0f2cb6d14d924d0a0cdeac27ec7ada2529759329483a4817c8caf022063ec3" }
+  ]
+}
