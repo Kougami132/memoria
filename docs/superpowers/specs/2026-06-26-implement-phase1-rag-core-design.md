@@ -2,6 +2,8 @@
 comet_change: implement-phase1-rag-core
 role: technical-design
 canonical_spec: openspec
+status: archived-with-change
+archived_at: 2026-06-26
 ---
 
 # Memoria Phase 1 实现 — 技术设计文档

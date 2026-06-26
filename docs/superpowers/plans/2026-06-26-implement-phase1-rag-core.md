@@ -2,6 +2,8 @@
 change: implement-phase1-rag-core
 design-doc: docs/superpowers/specs/2026-06-26-implement-phase1-rag-core-design.md
 base-ref: 1fef31b640942e6c32af0129e59a855128f32e42
+status: archived-with-change
+archived_at: 2026-06-26
 ---
 
 # Memoria Phase 1 实施计划
