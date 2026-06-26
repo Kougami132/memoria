@@ -34,7 +34,7 @@ base-ref: 1fef31b640942e6c32af0129e59a855128f32e42
 `DB(db_path)`, `create_kb/get_kb/list_kbs/delete_kb`, `create_bot/get_bot/list_bots/update_bot/delete_bot`,
 `create_doc/list_docs/delete_doc`, `create_session/get_session/get_messages/add_message`
 
-- [ ] **Step 1: 写 tests/test_storage.py**
+- [x] **Step 1: 写 tests/test_storage.py**
 
 ```python
 import pytest
@@ -87,13 +87,13 @@ def test_get_messages_limit(db):
     assert len(msgs) == 10
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```bash
 python -m pytest tests/test_storage.py -v
 ```
 
-- [ ] **Step 3: 实现 memoria/storage/db.py**
+- [x] **Step 3: 实现 memoria/storage/db.py**
 
 完整替换文件，包含 6 个 ORM 模型类和 DB 类。ORM 模型：
 - KnowledgeBaseRow: id/name/description/created_at
@@ -109,14 +109,14 @@ get_messages 按 created_at desc limit 后 reversed 返回（保持时间正序�
 
 参考 design doc 中的完整接口签名实现所有方法。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 python -m pytest tests/test_storage.py -v
 ```
 预期：全部 PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add memoria/storage/db.py tests/test_storage.py
@@ -133,7 +133,7 @@ git commit -m "feat: implement SQLAlchemy ORM and DB class"
 **Interfaces — Consumes:** ChromaDB 库 (import chromadb)
 **Interfaces — Produces:** `ChromaStore(path, collection_name)`, `add(ids, embeddings, documents, metadatas)`, `query(embedding, k)->list[dict]`, `delete(where)`
 
-- [ ] **Step 1: 写 tests/test_chroma_store.py**
+- [x] **Step 1: 写 tests/test_chroma_store.py**
 
 ```python
 import pytest
@@ -160,13 +160,13 @@ def test_delete(store):
     assert len(results) == 0
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```bash
 python -m pytest tests/test_chroma_store.py -v
 ```
 
-- [ ] **Step 3: 实现 memoria/storage/chroma_store.py**
+- [x] **Step 3: 实现 memoria/storage/chroma_store.py**
 
 ```python
 import chromadb
@@ -199,13 +199,13 @@ class ChromaStore(VectorStore):
         self._col.delete(where=where)
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 python -m pytest tests/test_chroma_store.py -v
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add memoria/storage/chroma_store.py tests/test_chroma_store.py
@@ -224,7 +224,7 @@ git commit -m "feat: implement ChromaStore with persistent storage"
 - `Embedder(base_url, api_key, model)`, `embed(texts: list[str]) -> list[list[float]]`
 - `MockEmbedder()`, `embed(texts) -> list[list[float]]` — 固定 1536 维随机向量
 
-- [ ] **Step 1: 写 tests/test_core.py**
+- [x] **Step 1: 写 tests/test_core.py**
 
 ```python
 import pytest, os
@@ -261,13 +261,13 @@ def test_mock_embedder():
     assert all(isinstance(v, float) for v in embs[0])
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```bash
 python -m pytest tests/test_core.py -v
 ```
 
-- [ ] **Step 3: 实现 memoria/core/chunker.py**
+- [x] **Step 3: 实现 memoria/core/chunker.py**
 
 ```python
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -294,7 +294,7 @@ class Chunker:
         return self._splitter.split_text(text)
 ```
 
-- [ ] **Step 4: 实现 memoria/core/embedder.py**
+- [x] **Step 4: 实现 memoria/core/embedder.py**
 
 ```python
 import random
@@ -315,13 +315,13 @@ class MockEmbedder:
         return [[random.random() for _ in range(1536)] for _ in texts]
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```bash
 python -m pytest tests/test_core.py -v
 ```
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add memoria/core/chunker.py memoria/core/embedder.py tests/test_core.py
@@ -339,7 +339,7 @@ git commit -m "feat: implement Chunker, Embedder, MockEmbedder"
 - `LLMCaller(base_url, api_key, model)`, `call(messages, stream=False) -> dict | Iterator`
 - `MockLLMCaller()`, `call(messages, stream=False) -> dict | Iterator`
 
-- [ ] **Step 1: 写 tests/test_llm.py**
+- [x] **Step 1: 写 tests/test_llm.py**
 
 ```python
 from memoria.llm.caller import MockLLMCaller
@@ -354,13 +354,13 @@ def test_mock_streaming():
     assert len(chunks) > 1
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 ```bash
 python -m pytest tests/test_llm.py -v
 ```
 
-- [ ] **Step 3: 实现 memoria/llm/caller.py**
+- [x] **Step 3: 实现 memoria/llm/caller.py**
 
 ```python
 from typing import Iterator
@@ -395,13 +395,13 @@ class MockLLMCaller:
         return {"content": self._RESPONSE}
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 ```bash
 python -m pytest tests/test_llm.py -v
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add memoria/llm/caller.py tests/test_llm.py
@@ -418,15 +418,15 @@ test with single quote: if not bot: return None
 
 **Interfaces — Produces:** `settings.use_mock: bool`, `Pipeline(db, embedder, llm, chroma_path)`, `Pipeline.ingest/retrieve/query`, `get_db()`, `get_pipeline()`
 
-- [ ] **Step 1: 更新 memoria/config.py**
+- [x] **Step 1: 更新 memoria/config.py**
 
 Settings 类新增字段 `use_mock: bool = False`，pydantic-settings 会从环境变量 `USE_MOCK` 读取（将 newapi_base_url 和 newapi_api_key 的默认值改为可选以便测试：`newapi_base_url: str = "http://localhost"`, `newapi_api_key: str = "mock"`）。
 
-- [ ] **Step 2: 追加 .env.example**
+- [x] **Step 2: 追加 .env.example**
 
 末尾新增一行：`USE_MOCK=false`
 
-- [ ] **Step 3: 写 tests/test_pipeline.py**
+- [x] **Step 3: 写 tests/test_pipeline.py**
 
 测试逻辑：
 - fixture `pipeline(tmp_path)`: 创建 `DB(tmp_path/test.db)` + `MockEmbedder()` + `MockLLMCaller()` + `Pipeline(..., chroma_path=tmp_path/chroma)`
@@ -436,13 +436,13 @@ Settings 类新增字段 `use_mock: bool = False`，pydantic-settings 会从环�
 - `test_query_multi_turn`: 两次 query 复用 session_id，get_messages 返回 4 条
 - `test_query_invalid_session`: query 传入不存在的 session_id 抛 ValueError
 
-- [ ] **Step 4: 运行确认失败**
+- [x] **Step 4: 运行确认失败**
 
 ```bash
 python -m pytest tests/test_pipeline.py -v
 ```
 
-- [ ] **Step 5: 实现 memoria/core/pipeline.py**
+- [x] **Step 5: 实现 memoria/core/pipeline.py**
 
 实现 Pipeline 类（参考 design doc 第"核心类 Pipeline"和"数据流"节）：
 - `__init__`: 保存 db/embedder/llm/chroma_path，初始化 `_stores: dict = {}`
@@ -454,7 +454,7 @@ python -m pytest tests/test_pipeline.py -v
 - `retrieve(kb_id, query, k=None)`: embed([query])[0] → store.query(emb, k or settings.top_k)
 - `query(bot_id, query, session_id=None)`: 按 design doc 数据流实现；session_id 不存在时抛 ValueError
 
-- [ ] **Step 6: 实现 memoria/server/deps.py**
+- [x] **Step 6: 实现 memoria/server/deps.py**
 
 ```python
 import os
@@ -482,13 +482,13 @@ def get_pipeline() -> Pipeline:
     return Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path)
 ```
 
-- [ ] **Step 7: 运行测试确认通过**
+- [x] **Step 7: 运行测试确认通过**
 
 ```bash
 python -m pytest tests/test_pipeline.py -v
 ```
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add memoria/config.py memoria/core/pipeline.py memoria/server/deps.py .env.example tests/test_pipeline.py
@@ -503,7 +503,7 @@ git commit -m "feat: implement Pipeline class, config use_mock, deps injection"
 
 **Interfaces — Consumes:** `get_db()`, `get_pipeline()` from deps.py
 
-- [ ] **Step 1: 实现 memoria/server/app.py**
+- [x] **Step 1: 实现 memoria/server/app.py**
 
 ```python
 from fastapi import FastAPI
@@ -525,7 +525,7 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 2: 实现 memoria/server/routes/knowledge_bases.py**
+- [x] **Step 2: 实现 memoria/server/routes/knowledge_bases.py**
 
 Router prefix="/knowledge-bases"。端点：
 - POST /: body={name,description}，创建 KB，返回 201
@@ -536,13 +536,13 @@ Router prefix="/knowledge-bases"。端点：
 删除 KB 时调用 pipeline._get_store(kb_id)._client.delete_collection(f"kb_{kb_id}") 再 db.delete_kb(kb_id)。
 404 时抛 HTTPException(status_code=404)。
 
-- [ ] **Step 3: 实现 memoria/server/routes/bots.py**
+- [x] **Step 3: 实现 memoria/server/routes/bots.py**
 
 Router prefix="/bots"。端点：POST/GET/GET{id}/PUT{id}/DELETE{id}。
 PUT 接收 {name?, system_prompt?, kb_ids?, model_override?}，调用 db.update_bot。
 404 时抛 HTTPException(404)。
 
-- [ ] **Step 4: 实现 memoria/server/routes/documents.py**
+- [x] **Step 4: 实现 memoria/server/routes/documents.py**
 
 Router prefix="/documents"。端点：
 - POST /knowledge-bases/{kb_id}/documents: UploadFile，只允许 .md/.txt，保存到 settings.upload_dir/{kb_id}/，调用 pipeline.ingest()，返回 201
@@ -551,14 +551,14 @@ Router prefix="/documents"。端点：
 
 文件格式检查：suffix not in {".md", ".txt"} 时抛 HTTPException(422)。
 
-- [ ] **Step 5: 实现 memoria/server/routes/chat.py**
+- [x] **Step 5: 实现 memoria/server/routes/chat.py**
 
 Router prefix="/chat"。端点：
 - POST /{bot_id}: body={message, session_id?}，调用 pipeline.query(bot_id, message, session_id)，返回 {answer, context, session_id}
 - ValueError("session") 时返回 HTTPException(404)
 - ValueError("Bot") 时返回 HTTPException(404)
 
-- [ ] **Step 6: 写 tests/test_server.py**
+- [x] **Step 6: 写 tests/test_server.py**
 
 使用 FastAPI TestClient + dependency_overrides：
 
@@ -632,13 +632,13 @@ def test_upload_unsupported_format(client, tmp_path):
     assert r.status_code == 422
 ```
 
-- [ ] **Step 7: 运行测试确认通过**
+- [x] **Step 7: 运行测试确认通过**
 
 ```bash
 python -m pytest tests/test_server.py -v
 ```
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add memoria/server/ tests/test_server.py
@@ -652,7 +652,7 @@ git commit -m "feat: implement FastAPI routes and server app"
 
 **Interfaces — Consumes:** `get_db()`, `get_pipeline()` from deps.py, uvicorn
 
-- [ ] **Step 1: 实现 memoria/cli/main.py**
+- [x] **Step 1: 实现 memoria/cli/main.py**
 
 完整替换文件内容：
 
@@ -749,7 +749,7 @@ def query(bot_id: str, question: str, session_id: str | None) -> None:
     click.echo(f"[session_id: {result["session_id"]}]")
 ```
 
-- [ ] **Step 2: 验证 memoria --help 可运行**
+- [x] **Step 2: 验证 memoria --help 可运行**
 
 ```bash
 memoriam --help
@@ -761,7 +761,7 @@ memoriam kb --help
 ```
 预期：输出 kb 子命令帮助
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add memoria/cli/main.py
@@ -773,7 +773,7 @@ git commit -m "feat: implement CLI commands"
 **Files:**
 - Modify: `tests/conftest.py`
 
-- [ ] **Step 1: 更新 tests/conftest.py — 设置 USE_MOCK=true 环境变量**
+- [x] **Step 1: 更新 tests/conftest.py — 设置 USE_MOCK=true 环境变量**
 
 ```python
 import os
@@ -783,7 +783,7 @@ os.environ.setdefault("NEWAPI_BASE_URL", "http://localhost")
 os.environ.setdefault("NEWAPI_API_KEY", "mock")
 ```
 
-- [ ] **Step 2: 运行全量测试确认通过**
+- [x] **Step 2: 运行全量测试确认通过**
 
 ```bash
 python -m pytest tests/ -q
@@ -792,13 +792,13 @@ python -m pytest tests/ -q
 预期：所有测试通过（或仅有 warning），退出码 0。
 若有失败，修复对应模块后重新运行。
 
-- [ ] **Step 3: 确认 memoria --help 正常**
+- [x] **Step 3: 确认 memoria --help 正常**
 
 ```bash
 memoriam --help
 ```
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add tests/conftest.py
