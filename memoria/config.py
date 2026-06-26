@@ -2,8 +2,9 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    newapi_base_url: str
-    newapi_api_key: str
+    newapi_base_url: str = "http://localhost"
+    newapi_api_key: str = "mock"
+    use_mock: bool = False
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "deepseek-v4-flash"
     chunk_size: int = 512
