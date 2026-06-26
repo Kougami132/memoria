@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 context_compression: off
 build_mode: executing-plans
 build_pause: null
@@ -20,3 +20,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/implement-phase1-rag-core/.comet/handoff/design-context.json
 handoff_hash: e7767ce67594b7c1132157a863429c3153c45a85ba74fbe862701cd012e341df
+build_command: python -m pytest tests/ -q
+verify_command: python -m pytest tests/ -q
