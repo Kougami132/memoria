@@ -11,5 +11,5 @@ class VectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, ids: list[str]) -> None:
+    def delete(self, where: dict) -> None:
         raise NotImplementedError
