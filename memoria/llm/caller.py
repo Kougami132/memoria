@@ -1,9 +1,31 @@
 from typing import Iterator
 
+from openai import OpenAI
+
 
 class LLMCaller:
     def __init__(self, base_url: str, api_key: str, model: str) -> None:
-        raise NotImplementedError
+        self._client = OpenAI(base_url=base_url, api_key=api_key)
+        self._model = model
 
     def call(self, messages: list[dict], stream: bool = False) -> dict | Iterator:
-        raise NotImplementedError
+        if stream:
+            def _gen():
+                resp = self._client.chat.completions.create(
+                    model=self._model, messages=messages, stream=True)
+                for chunk in resp:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        yield delta
+            return _gen()
+        resp = self._client.chat.completions.create(model=self._model, messages=messages)
+        return {"content": resp.choices[0].message.content}
+
+
+class MockLLMCaller:
+    _RESPONSE = "[mock response]"
+
+    def call(self, messages: list[dict], stream: bool = False) -> dict | Iterator:
+        if stream:
+            return iter(self._RESPONSE)
+        return {"content": self._RESPONSE}
