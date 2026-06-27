@@ -6,7 +6,7 @@ base-ref: 3be0745b8574412e9543643878b98405a804c239
 
 # Web UI Playground Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build a Web UI for Memoria Phase 1 REST API so users can experience RAG capabilities without curl/Swagger.
 
@@ -59,7 +59,7 @@ base-ref: 3be0745b8574412e9543643878b98405a804c239
   - `db.list_sessions(bot_id: str) -> list[dict]` -- each entry: `{id, bot_id, created_at}`, ordered by `created_at` DESC
   - `db.get_messages_all(session_id: str) -> list[dict]` -- all messages, ordered by `created_at` ASC
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to `tests/test_storage.py`:
 
@@ -99,7 +99,7 @@ def test_get_messages_all_session_not_exist(db):
     assert msgs == []
 ```
 
-- [ ] **Step 2: Run tests, confirm failure**
+- [x] **Step 2: Run tests, confirm failure**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -108,7 +108,7 @@ python -m pytest tests/test_storage.py::test_runtime_settings -v
 
 Expected: FAILED (AttributeError: 'DB' object has no attribute 'get_setting')
 
-- [ ] **Step 3: Modify `memoria/storage/db.py`**
+- [x] **Step 3: Modify `memoria/storage/db.py`**
 
 Insert `RuntimeSettingRow` ORM model after `MessageRow` class definition, before `_now()` function:
 
@@ -162,7 +162,7 @@ Append 5 new methods after `DB.add_message`:
                     for r in rows]
 ```
 
-- [ ] **Step 4: Run all storage tests**
+- [x] **Step 4: Run all storage tests**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -171,7 +171,7 @@ python -m pytest tests/test_storage.py -v
 
 Expected: all PASSED
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -195,7 +195,7 @@ git commit -m "feat: extend DB with runtime_settings table and list_sessions/get
   - `get_pipeline() -> Pipeline` -- module-level cache, builds on first call
   - `reset_pipeline() -> None` -- sets cache to None, next `get_pipeline()` call rebuilds
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `tests/test_config_override.py`:
 
@@ -236,7 +236,7 @@ python -m pytest tests/test_config_override.py -v
 
 Expected: FAILED (ImportError: cannot import name 'get_effective_settings')
 
-- [ ] **Step 2: Modify `memoria/config.py`**
+- [x] **Step 2: Modify `memoria/config.py`**
 
 Append at end of file:
 
@@ -256,7 +256,7 @@ def get_effective_settings(db) -> dict:
     return fields
 ```
 
-- [ ] **Step 3: Run config tests**
+- [x] **Step 3: Run config tests**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -265,7 +265,7 @@ python -m pytest tests/test_config_override.py -v
 
 Expected: all PASSED
 
-- [ ] **Step 4: Replace `memoria/server/deps.py`**
+- [x] **Step 4: Replace `memoria/server/deps.py`**
 
 ```python
 import os
@@ -309,7 +309,7 @@ def reset_pipeline() -> None:
     _pipeline = None
 ```
 
-- [ ] **Step 5: Verify existing server tests still pass**
+- [x] **Step 5: Verify existing server tests still pass**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -318,7 +318,7 @@ python -m pytest tests/test_server.py -v
 
 Expected: all PASSED (dependency_overrides covers get_pipeline -- no test changes needed)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -352,7 +352,7 @@ git commit -m "feat: add get_effective_settings and resettable pipeline"
   - `GET /api/sessions/{session_id}/messages` -> `list[{id, session_id, role, content, created_at}]`, 404 if session missing
   - `pipeline.query()` return value includes `sources: list[{text, score, doc_id}]`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to `tests/test_server.py`:
 
@@ -422,7 +422,7 @@ def test_chat_has_sources(client):
     assert isinstance(data["sources"], list)
 ```
 
-- [ ] **Step 2: Run, confirm failure**
+- [x] **Step 2: Run, confirm failure**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -431,7 +431,7 @@ python -m pytest tests/test_server.py::test_settings_get tests/test_server.py::t
 
 Expected: FAILED
 
-- [ ] **Step 3: Modify `memoria/core/pipeline.py` -- replace return in `query()`**
+- [x] **Step 3: Modify `memoria/core/pipeline.py` -- replace return in `query()`**
 
 Replace the final `return` statement in `query()` (currently `return {"answer": answer, "context": context_chunks, "session_id": session_id}`) with:
 
@@ -446,7 +446,7 @@ Replace the final `return` statement in `query()` (currently `return {"answer": 
         }
 ```
 
-- [ ] **Step 4: Create `memoria/server/routes/settings.py`**
+- [x] **Step 4: Create `memoria/server/routes/settings.py`**
 
 ```python
 from typing import Optional
@@ -494,7 +494,7 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
     return get_effective_settings(db)
 ```
 
-- [ ] **Step 5: Create `memoria/server/routes/sessions.py`**
+- [x] **Step 5: Create `memoria/server/routes/sessions.py`**
 
 ```python
 from fastapi import APIRouter, Depends, HTTPException
@@ -512,7 +512,7 @@ def get_messages(session_id: str, db: DB = Depends(get_db)):
     return db.get_messages_all(session_id)
 ```
 
-- [ ] **Step 6: Modify `memoria/server/routes/bots.py` -- append sessions subpath**
+- [x] **Step 6: Modify `memoria/server/routes/bots.py` -- append sessions subpath**
 
 Append after `delete_bot` function:
 
@@ -524,7 +524,7 @@ def list_bot_sessions(bot_id: str, db: DB = Depends(get_db)):
     return db.list_sessions(bot_id)
 ```
 
-- [ ] **Step 7: Replace `memoria/server/app.py`**
+- [x] **Step 7: Replace `memoria/server/app.py`**
 
 ```python
 import logging
@@ -561,7 +561,7 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 8: Run full test suite**
+- [x] **Step 8: Run full test suite**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -570,7 +570,7 @@ python -m pytest tests/ -v
 
 Expected: all PASSED
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -590,14 +590,14 @@ git commit -m "feat: add settings/sessions routes, bot sessions subpath, sources
   - `npm run dev`: serves at http://localhost:5173, `/api/*` proxied to http://localhost:8000
   - `npm run build`: outputs to `memoria/static/` (relative `../../memoria/static` from `web/`)
 
-- [ ] **Step 1: Initialize Vite React TypeScript project**
+- [x] **Step 1: Initialize Vite React TypeScript project**
 
 ```bash
 cd N:/Data/Projects/memoria
 npm create vite@latest web -- --template react-ts
 ```
 
-- [ ] **Step 2: Install dependencies**
+- [x] **Step 2: Install dependencies**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -607,7 +607,7 @@ npm install -D tailwindcss@3 postcss autoprefixer
 npx tailwindcss init -p
 ```
 
-- [ ] **Step 3: Install shadcn/ui**
+- [x] **Step 3: Install shadcn/ui**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -620,7 +620,7 @@ Choose: Style=Default, Base color=Slate, CSS variables=yes
 npx shadcn@latest add button input textarea card label select checkbox badge
 ```
 
-- [ ] **Step 4: Replace `web/vite.config.ts`**
+- [x] **Step 4: Replace `web/vite.config.ts`**
 
 ```typescript
 import { defineConfig } from 'vite'
@@ -649,7 +649,7 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 5: Ensure `web/tsconfig.json` includes path alias**
+- [x] **Step 5: Ensure `web/tsconfig.json` includes path alias**
 
 Add to `compilerOptions` if not already present:
 
@@ -664,7 +664,7 @@ Add to `compilerOptions` if not already present:
 }
 ```
 
-- [ ] **Step 6: Verify TypeScript compiles**
+- [x] **Step 6: Verify TypeScript compiles**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -673,7 +673,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -697,7 +697,7 @@ git commit -m "feat: initialize React+Vite frontend with shadcn/ui"
   - `chat(botId, message, sessionId?) -> Promise<ChatResponse>`, `getMessages(sessionId) -> Promise<Message[]>`
   - `getSettings() -> Promise<Settings>`, `updateSettings(data) -> Promise<Settings>`
 
-- [ ] **Step 1: Create `web/src/api.ts`**
+- [x] **Step 1: Create `web/src/api.ts`**
 
 ```typescript
 const BASE = '/api'
@@ -765,7 +765,7 @@ export const updateSettings = (data: SettingsUpdate) =>
   req<Settings>('/settings', { method: 'PUT', ...json(data) })
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -774,7 +774,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -798,7 +798,7 @@ git commit -m "feat: add api.ts REST client"
 **Interfaces:**
 - Produces: 4 routes `/knowledge-bases`, `/bots`, `/chat`, `/settings` with top nav switching
 
-- [ ] **Step 1: Create `web/src/components/Layout.tsx`**
+- [x] **Step 1: Create `web/src/components/Layout.tsx`**
 
 ```tsx
 import { NavLink, Outlet } from 'react-router-dom'
@@ -837,7 +837,7 @@ export default function Layout() {
 }
 ```
 
-- [ ] **Step 2: Create page stubs**
+- [x] **Step 2: Create page stubs**
 
 `web/src/pages/KnowledgeBases.tsx`:
 ```tsx
@@ -859,7 +859,7 @@ export default function Chat() { return <div>Chat</div> }
 export default function Settings() { return <div>Settings</div> }
 ```
 
-- [ ] **Step 3: Replace `web/src/App.tsx`**
+- [x] **Step 3: Replace `web/src/App.tsx`**
 
 ```tsx
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
@@ -891,7 +891,7 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 4: Replace `web/src/main.tsx`**
+- [x] **Step 4: Replace `web/src/main.tsx`**
 
 ```tsx
 import { StrictMode } from 'react'
@@ -906,7 +906,7 @@ createRoot(document.getElementById('root')!).render(
 )
 ```
 
-- [ ] **Step 5: Verify compilation**
+- [x] **Step 5: Verify compilation**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -915,7 +915,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -933,7 +933,7 @@ git commit -m "feat: add Layout, App router, and page stubs"
 **Interfaces:**
 - Consumes: `listKBs`, `createKB`, `deleteKB`, `listDocs`, `uploadDocument`, `deleteDocument`, `KB`, `Doc` (from `api.ts`)
 
-- [ ] **Step 1: Implement `web/src/pages/KnowledgeBases.tsx`**
+- [x] **Step 1: Implement `web/src/pages/KnowledgeBases.tsx`**
 
 ```tsx
 import { useState } from 'react'
@@ -1047,7 +1047,7 @@ export default function KnowledgeBases() {
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -1056,7 +1056,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -1074,7 +1074,7 @@ git commit -m "feat: implement KnowledgeBases page"
 **Interfaces:**
 - Consumes: `listBots`, `listKBs`, `createBot`, `updateBot`, `deleteBot`, `Bot`, `BotCreate`, `BotUpdate`, `KB` (from `api.ts`)
 
-- [ ] **Step 1: Implement `web/src/pages/Bots.tsx`**
+- [x] **Step 1: Implement `web/src/pages/Bots.tsx`**
 
 ```tsx
 import { useState } from 'react'
@@ -1190,7 +1190,7 @@ export default function Bots() {
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -1199,7 +1199,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -1217,7 +1217,7 @@ git commit -m "feat: implement Bots page with CRUD and KB multi-select"
 **Interfaces:**
 - Consumes: `listBots`, `listSessions`, `getMessages`, `chat`, `Bot`, `Session`, `Message`, `Source`, `ChatResponse` (from `api.ts`)
 
-- [ ] **Step 1: Implement `web/src/pages/Chat.tsx`**
+- [x] **Step 1: Implement `web/src/pages/Chat.tsx`**
 
 ```tsx
 import { useState, useRef, useEffect } from 'react'
@@ -1347,7 +1347,7 @@ export default function Chat() {
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -1356,7 +1356,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -1374,7 +1374,7 @@ git commit -m "feat: implement Chat page with session management and sources dis
 **Interfaces:**
 - Consumes: `getSettings`, `updateSettings`, `Settings`, `SettingsUpdate` (from `api.ts`)
 
-- [ ] **Step 1: Implement `web/src/pages/Settings.tsx`**
+- [x] **Step 1: Implement `web/src/pages/Settings.tsx`**
 
 ```tsx
 import { useState, useEffect } from 'react'
@@ -1473,7 +1473,7 @@ export default function Settings() {
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -1482,7 +1482,7 @@ npx tsc --noEmit
 
 Expected: zero errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -1496,7 +1496,7 @@ git commit -m "feat: implement Settings page with api_key toggle and save notifi
 
 **Files:** No new files
 
-- [ ] **Step 1: Build frontend**
+- [x] **Step 1: Build frontend**
 
 ```bash
 cd N:/Data/Projects/memoria/web
@@ -1505,7 +1505,7 @@ npm run build
 
 Expected: no errors, output at `N:/Data/Projects/memoria/memoria/static/` containing `index.html`
 
-- [ ] **Step 2: Verify static files**
+- [x] **Step 2: Verify static files**
 
 ```bash
 ls N:/Data/Projects/memoria/memoria/static/
@@ -1513,7 +1513,7 @@ ls N:/Data/Projects/memoria/memoria/static/
 
 Expected: `index.html` and `assets/` directory present
 
-- [ ] **Step 3: Run full backend test suite**
+- [x] **Step 3: Run full backend test suite**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -1522,7 +1522,7 @@ python -m pytest tests/ -v
 
 Expected: all PASSED
 
-- [ ] **Step 4: Start backend and verify UI accessible**
+- [x] **Step 4: Start backend and verify UI accessible**
 
 ```bash
 cd N:/Data/Projects/memoria
@@ -1535,7 +1535,7 @@ Open http://localhost:8000 in browser:
 
 Press Ctrl+C to stop.
 
-- [ ] **Step 5: End-to-end manual acceptance**
+- [x] **Step 5: End-to-end manual acceptance**
 
 Start backend then perform in browser at http://localhost:8000:
 
@@ -1545,7 +1545,7 @@ Start backend then perform in browser at http://localhost:8000:
 4. **History**: Refresh page -> select same Bot -> session appears in sidebar -> click to load history
 5. **Settings**: Modify top_k to 3 -> Save -> see "Settings saved. Pipeline rebuilt." notification
 
-- [ ] **Step 6: Commit build artifacts**
+- [x] **Step 6: Commit build artifacts**
 
 ```bash
 cd N:/Data/Projects/memoria
