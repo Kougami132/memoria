@@ -73,3 +73,68 @@ def test_upload_unsupported_format(client, tmp_path):
         r = client.post(f"/api/knowledge-bases/{kb['id']}/documents",
                         files={"file": ("doc.pdf", fh, "application/pdf")})
     assert r.status_code == 422
+
+
+def test_settings_get(client):
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    data = r.json()
+    assert "openai_base_url" in data
+    assert "openai_api_key" in data
+    assert "top_k" in data
+
+
+def test_settings_put(client):
+    r = client.put("/api/settings", json={"top_k": 8, "llm_model": "gpt-4o"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["top_k"] == "8"
+    assert data["llm_model"] == "gpt-4o"
+
+
+def test_settings_put_skip_empty_api_key(client):
+    r = client.put("/api/settings", json={"top_k": 3, "api_key": None})
+    assert r.status_code == 200
+    assert client.get("/api/settings").json()["openai_api_key"] == "mock"
+
+
+def test_bot_sessions(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+    r = client.post(f"/api/chat/{bot['id']}", json={"message": "hello"})
+    assert r.status_code == 200
+    r2 = client.get(f"/api/bots/{bot['id']}/sessions")
+    assert r2.status_code == 200
+    assert len(r2.json()) == 1
+
+
+def test_bot_sessions_not_found(client):
+    r = client.get("/api/bots/nonexistent/sessions")
+    assert r.status_code == 404
+
+
+def test_session_messages(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+    r = client.post(f"/api/chat/{bot['id']}", json={"message": "hello"})
+    session_id = r.json()["session_id"]
+    r2 = client.get(f"/api/sessions/{session_id}/messages")
+    assert r2.status_code == 200
+    msgs = r2.json()
+    assert len(msgs) == 2
+    assert msgs[0]["role"] == "user"
+
+
+def test_session_messages_not_found(client):
+    r = client.get("/api/sessions/nonexistent/messages")
+    assert r.status_code == 404
+
+
+def test_chat_has_sources(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+    r = client.post(f"/api/chat/{bot['id']}", json={"message": "hello"})
+    assert r.status_code == 200
+    data = r.json()
+    assert "sources" in data
+    assert isinstance(data["sources"], list)

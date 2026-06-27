@@ -55,3 +55,10 @@ def delete_bot(bot_id: str, db: DB = Depends(get_db)):
     if db.get_bot(bot_id) is None:
         raise HTTPException(status_code=404, detail="Bot not found")
     db.delete_bot(bot_id)
+
+
+@router.get("/{bot_id}/sessions")
+def list_bot_sessions(bot_id: str, db: DB = Depends(get_db)):
+    if db.get_bot(bot_id) is None:
+        raise HTTPException(status_code=404, detail="Bot not found")
+    return db.list_sessions(bot_id)

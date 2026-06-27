@@ -80,4 +80,11 @@ class Pipeline:
         self.db.add_message(session_id, "user", query)
         self.db.add_message(session_id, "assistant", answer)
 
-        return {"answer": answer, "context": context_chunks, "session_id": session_id}
+        return {
+            "answer": answer,
+            "session_id": session_id,
+            "sources": [
+                {"text": c["text"], "score": c["score"], "doc_id": c["doc_id"]}
+                for c in context_chunks
+            ],
+        }
