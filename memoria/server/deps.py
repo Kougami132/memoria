@@ -1,11 +1,13 @@
 import os
 from functools import lru_cache
 
-from memoria.config import settings
+from memoria.config import settings, get_effective_settings
 from memoria.core.embedder import Embedder, MockEmbedder
 from memoria.core.pipeline import Pipeline
 from memoria.llm.caller import LLMCaller, MockLLMCaller
 from memoria.storage.db import DB
+
+_pipeline: Pipeline | None = None
 
 
 @lru_cache
@@ -14,14 +16,24 @@ def get_db() -> DB:
     return DB(settings.db_path)
 
 
-@lru_cache
 def get_pipeline() -> Pipeline:
-    db = get_db()
-    if settings.use_mock:
-        embedder: Embedder | MockEmbedder = MockEmbedder()
-        llm: LLMCaller | MockLLMCaller = MockLLMCaller()
-    else:
-        embedder = Embedder(settings.newapi_base_url, settings.newapi_api_key, settings.embedding_model)
-        llm = LLMCaller(settings.newapi_base_url, settings.newapi_api_key, settings.llm_model)
-    os.makedirs(settings.chroma_path, exist_ok=True)
-    return Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path)
+    global _pipeline
+    if _pipeline is None:
+        db = get_db()
+        effective = get_effective_settings(db)
+        if settings.use_mock:
+            embedder: Embedder | MockEmbedder = MockEmbedder()
+            llm: LLMCaller | MockLLMCaller = MockLLMCaller()
+        else:
+            embedder = Embedder(effective["openai_base_url"], effective["openai_api_key"],
+                                effective["embedding_model"])
+            llm = LLMCaller(effective["openai_base_url"], effective["openai_api_key"],
+                            effective["llm_model"])
+        os.makedirs(settings.chroma_path, exist_ok=True)
+        _pipeline = Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path)
+    return _pipeline
+
+
+def reset_pipeline() -> None:
+    global _pipeline
+    _pipeline = None
