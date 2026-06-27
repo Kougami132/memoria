@@ -1,3 +1,4 @@
+import time
 import pytest
 from memoria.storage.db import DB
 
@@ -66,6 +67,7 @@ def test_runtime_settings(db):
 def test_list_sessions(db):
     bot = db.create_bot("b", "", [])
     s1 = db.create_session(bot["id"])
+    time.sleep(0.002)
     s2 = db.create_session(bot["id"])
     sessions = db.list_sessions(bot["id"])
     assert len(sessions) == 2

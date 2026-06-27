@@ -36,8 +36,11 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
         "chunk_size": str(body.chunk_size) if body.chunk_size is not None else None,
         "chunk_overlap": str(body.chunk_overlap) if body.chunk_overlap is not None else None,
     }
+    changed = False
     for key, value in mapping.items():
         if value is not None and value != "":
             db.set_setting(key, value)
-    reset_pipeline()
+            changed = True
+    if changed:
+        reset_pipeline()
     return get_effective_settings(db)

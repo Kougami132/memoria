@@ -30,7 +30,8 @@ def get_pipeline() -> Pipeline:
             llm = LLMCaller(effective["openai_base_url"], effective["openai_api_key"],
                             effective["llm_model"])
         os.makedirs(settings.chroma_path, exist_ok=True)
-        _pipeline = Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path)
+        _pipeline = Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path,
+                             top_k=int(effective["top_k"]))
     return _pipeline
 
 

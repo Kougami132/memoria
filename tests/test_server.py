@@ -18,7 +18,7 @@ def client(tmp_path):
 
     def _get_test_pipeline():
         return Pipeline(db=db, embedder=MockEmbedder(), llm=MockLLMCaller(),
-                        chroma_path=str(tmp_path / "chroma"))
+                        chroma_path=str(tmp_path / "chroma"), top_k=5)
 
     app = create_app()
     app.dependency_overrides[get_db] = _get_test_db

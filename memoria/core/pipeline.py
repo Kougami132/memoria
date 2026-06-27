@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-from memoria.config import settings
 from memoria.core.chunker import Chunker
 from memoria.core.embedder import Embedder, MockEmbedder
 from memoria.llm.caller import LLMCaller, MockLLMCaller
@@ -12,11 +11,13 @@ from memoria.storage.db import DB
 
 class Pipeline:
     def __init__(self, db: DB, embedder: Embedder | MockEmbedder,
-                 llm: LLMCaller | MockLLMCaller, chroma_path: str) -> None:
+                 llm: LLMCaller | MockLLMCaller, chroma_path: str,
+                 top_k: int = 5) -> None:
         self.db = db
         self._embedder = embedder
         self._llm = llm
         self._chroma_path = chroma_path
+        self._top_k = top_k
         self._stores: dict[str, ChromaStore] = {}
 
     def _get_store(self, kb_id: str) -> ChromaStore:
@@ -39,7 +40,7 @@ class Pipeline:
 
     def retrieve(self, kb_id: str, query: str, k: int | None = None) -> list[dict]:
         embedding = self._embedder.embed([query])[0]
-        return self._get_store(kb_id).query(embedding, k=k or settings.top_k)
+        return self._get_store(kb_id).query(embedding, k=k or self._top_k)
 
     def query(self, bot_id: str, query: str, session_id: str | None = None) -> dict:
         bot = self.db.get_bot(bot_id)
@@ -51,7 +52,7 @@ class Pipeline:
         for kb_id in bot["kb_ids"]:
             all_chunks.extend(self.retrieve(kb_id, query))
         all_chunks.sort(key=lambda x: x["score"], reverse=True)
-        context_chunks = all_chunks[:settings.top_k]
+        context_chunks = all_chunks[:self._top_k]
 
         # Session handling
         if session_id is not None:

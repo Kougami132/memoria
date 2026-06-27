@@ -1,6 +1,7 @@
 import pytest
 from memoria.storage.db import DB
 from memoria.config import get_effective_settings
+from memoria.core.pipeline import Pipeline
 
 
 @pytest.fixture
@@ -25,3 +26,15 @@ def test_get_effective_settings_override(db):
     assert result["top_k"] == "10"
     assert result["llm_model"] == "gpt-4o"
     assert result["chunk_size"] == "512"  # unchanged default
+
+
+def test_reset_pipeline_rebuilds(monkeypatch):
+    monkeypatch.setenv("USE_MOCK", "true")
+    from memoria.server import deps
+    deps.reset_pipeline()
+    assert deps._pipeline is None
+    pipeline = deps.get_pipeline()
+    assert pipeline is not None
+    assert deps._pipeline is pipeline
+    deps.reset_pipeline()
+    assert deps._pipeline is None
