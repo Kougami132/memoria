@@ -1,0 +1,19 @@
+{
+  "change": "web-ui-playground",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "195dd0c447fb388856f8d28ee11befe7f6ce97b847f3ef9ba28b214c3f2982fc",
+  "files": [
+    { "path": "openspec/changes/web-ui-playground/proposal.md", "sha256": "07e64b4887b661f9c6d8e1abc370484932423facfb30dd58cd8a36956175b558" },
+    { "path": "openspec/changes/web-ui-playground/design.md", "sha256": "4f06e4fd78ade37538be6b9d51c44de0ea8e7f5ead8fcccad56289d89bd21003" },
+    { "path": "openspec/changes/web-ui-playground/tasks.md", "sha256": "db4299716738b1d66ca672d52c8ff12b49cb92be01cd171c222bcdbd830fe13c" },
+    { "path": "openspec/changes/web-ui-playground/specs/chat-session/spec.md", "sha256": "8856aeb14245d2217ea237f81eb1b7328f9ecbabd5b8a626c3c92395d7da2386" },
+    { "path": "openspec/changes/web-ui-playground/specs/chat-sources/spec.md", "sha256": "a25a9d2ec64e08a5d04cc8ab5387e710730cbd20d18c186587b9493b8b40ed1d" },
+    { "path": "openspec/changes/web-ui-playground/specs/rag-query/spec.md", "sha256": "29956500ea89d7b19d6e4427142f256caa6fd447921442f5cae40e9ffbcf237b" },
+    { "path": "openspec/changes/web-ui-playground/specs/runtime-settings/spec.md", "sha256": "446e62640b69f45963a5e40b13d21b1805b63ae9428cea722883f7097c2cadf3" },
+    { "path": "openspec/changes/web-ui-playground/specs/session-list/spec.md", "sha256": "2d0c1bca860c9b5bb00f5c8a5d52bcfe8dfa02cedf60b68079f4292e5659b85d" },
+    { "path": "openspec/changes/web-ui-playground/specs/web-ui/spec.md", "sha256": "7f1c88fe8917cefdd3e380602ab61353ca6eebd6912f2ecc182075c3af5fdaa6" }
+  ]
+}
