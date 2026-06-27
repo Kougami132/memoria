@@ -19,7 +19,7 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
     if os.path.isdir(static_dir):
         from fastapi.staticfiles import StaticFiles
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

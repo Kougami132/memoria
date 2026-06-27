@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../../memoria/static',
+    outDir: '../memoria/static',
     emptyOutDir: true,
   },
   server: {
