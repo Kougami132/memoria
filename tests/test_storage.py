@@ -52,3 +52,38 @@ def test_get_messages_limit(db):
         db.add_message(sess["id"], "user", f"msg{i}")
     msgs = db.get_messages(sess["id"], limit=10)
     assert len(msgs) == 10
+
+
+def test_runtime_settings(db):
+    assert db.get_setting("top_k") is None
+    db.set_setting("top_k", "10")
+    assert db.get_setting("top_k") == "10"
+    db.set_setting("top_k", "20")
+    assert db.get_setting("top_k") == "20"
+    assert db.get_all_settings() == {"top_k": "20"}
+
+
+def test_list_sessions(db):
+    bot = db.create_bot("b", "", [])
+    s1 = db.create_session(bot["id"])
+    s2 = db.create_session(bot["id"])
+    sessions = db.list_sessions(bot["id"])
+    assert len(sessions) == 2
+    assert sessions[0]["id"] == s2["id"]  # DESC: s2 first
+    assert sessions[1]["id"] == s1["id"]
+
+
+def test_get_messages_all(db):
+    bot = db.create_bot("b", "", [])
+    sess = db.create_session(bot["id"])
+    for i in range(15):
+        db.add_message(sess["id"], "user", f"msg{i}")
+    msgs = db.get_messages_all(sess["id"])
+    assert len(msgs) == 15
+    assert msgs[0]["content"] == "msg0"
+    assert msgs[14]["content"] == "msg14"
+
+
+def test_get_messages_all_session_not_exist(db):
+    msgs = db.get_messages_all("nonexistent-id")
+    assert msgs == []

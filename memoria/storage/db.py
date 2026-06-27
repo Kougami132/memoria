@@ -61,6 +61,13 @@ class MessageRow(Base):
     created_at = Column(String, nullable=False)
 
 
+class RuntimeSettingRow(Base):
+    __tablename__ = "runtime_settings"
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -234,3 +241,41 @@ class DB:
         with self._s() as s:
             s.add(MessageRow(id=_uid(), session_id=session_id, role=role,
                              content=content, created_at=_now()))
+
+    # -- Runtime Settings ---------------------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        with self._s() as s:
+            row = s.get(RuntimeSettingRow, key)
+            return row.value if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._s() as s:
+            row = s.get(RuntimeSettingRow, key)
+            if row:
+                row.value = value
+                row.updated_at = _now()
+            else:
+                s.add(RuntimeSettingRow(key=key, value=value, updated_at=_now()))
+
+    def get_all_settings(self) -> dict[str, str]:
+        with self._s() as s:
+            return {r.key: r.value for r in s.query(RuntimeSettingRow).all()}
+
+    def list_sessions(self, bot_id: str) -> list[dict]:
+        with self._s() as s:
+            rows = (s.query(SessionRow)
+                    .filter(SessionRow.bot_id == bot_id)
+                    .order_by(desc(SessionRow.created_at))
+                    .all())
+            return [{"id": r.id, "bot_id": r.bot_id, "created_at": r.created_at} for r in rows]
+
+    def get_messages_all(self, session_id: str) -> list[dict]:
+        with self._s() as s:
+            rows = (s.query(MessageRow)
+                    .filter(MessageRow.session_id == session_id)
+                    .order_by(MessageRow.created_at)
+                    .all())
+            return [{"id": r.id, "session_id": r.session_id, "role": r.role,
+                     "content": r.content, "created_at": r.created_at}
+                    for r in rows]
