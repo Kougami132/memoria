@@ -17,7 +17,7 @@ verification_report: docs/superpowers/reports/2026-06-28-web-ui-playground-verif
 branch_status: handled
 created_at: 2026-06-27
 verified_at: 2026-06-27
-archived: false
+archived: true
 handoff_context: openspec/changes/web-ui-playground/.comet/handoff/design-context.json
 handoff_hash: 195dd0c447fb388856f8d28ee11befe7f6ce97b847f3ef9ba28b214c3f2982fc
 verify_command: python -m pytest tests/ -q
