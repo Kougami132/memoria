@@ -1,6 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 文档列表与删除
+系统 SHALL 同时支持按 KB 路径和按查询参数两种方式列出文档。
 
 #### MODIFIED Scenario: 列出文档（按 KB 路径）
 - **WHEN** GET `/api/knowledge-bases/{kb_id}/documents`
