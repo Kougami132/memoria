@@ -66,11 +66,14 @@ def test_embedding(db: DB = Depends(get_db)):
 
 @router.post("/test-chat")
 def test_chat(db: DB = Depends(get_db)):
+    import time
     effective = get_effective_settings(db)
     llm = LLMCaller(effective["openai_base_url"], effective["openai_api_key"],
                     effective["llm_model"])
     try:
-        result = llm.call([{"role": "user", "content": "hi"}])
-        return {"ok": True, "preview": result["content"][:80]}
+        t0 = time.monotonic()
+        llm.call([{"role": "user", "content": "hi"}])
+        elapsed_ms = round((time.monotonic() - t0) * 1000)
+        return {"ok": True, "elapsed_ms": elapsed_ms}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))

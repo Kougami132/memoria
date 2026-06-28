@@ -46,12 +46,12 @@ export default function Settings() {
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }))
 
-  const runTest = (fn: () => Promise<{ ok: boolean; dimensions?: number; preview?: string }>,
+  const runTest = (fn: () => Promise<{ ok: boolean; dimensions?: number; elapsed_ms?: number }>,
                    set: (s: TestState) => void) => async () => {
     set({ status: 'loading' })
     try {
       const r = await fn()
-      set({ status: 'ok', msg: r.dimensions != null ? `✓ ${r.dimensions}维` : `✓ ${r.preview}` })
+      set({ status: 'ok', msg: r.dimensions != null ? `✓ ${r.dimensions}维` : `✓ ${r.elapsed_ms}ms` })
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       set({ status: 'err', msg })

@@ -64,4 +64,4 @@ export const updateSettings = (data: SettingsUpdate) =>
 export const testEmbedding = () =>
   req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', { method: 'POST' })
 export const testChat = () =>
-  req<{ ok: boolean; preview: string }>('/settings/test-chat', { method: 'POST' })
+  req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', { method: 'POST' })
