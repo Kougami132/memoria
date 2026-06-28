@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from memoria.core.pipeline import Pipeline
 from memoria.server.deps import get_pipeline
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
@@ -24,4 +26,5 @@ def chat(bot_id: str, body: ChatRequest, pipeline: Pipeline = Depends(get_pipeli
     except APIConnectionError as e:
         raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
     except (APIError, RuntimeError) as e:
+        logger.error("Chat 502: bot=%s %s: %s", bot_id, type(e).__name__, e)
         raise HTTPException(status_code=502, detail=str(e))

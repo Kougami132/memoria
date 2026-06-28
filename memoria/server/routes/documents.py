@@ -40,6 +40,11 @@ async def upload_document(kb_id: str, file: UploadFile,
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/knowledge-bases/{kb_id}/documents")
+def list_kb_documents(kb_id: str, db: DB = Depends(get_db)):
+    return db.list_docs(kb_id)
+
+
 @router.get("/documents")
 def list_documents(kb_id: Optional[str] = None, db: DB = Depends(get_db)):
     if kb_id:
