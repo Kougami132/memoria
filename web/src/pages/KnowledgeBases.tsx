@@ -49,9 +49,9 @@ function DocList({ kbId }: { kbId: string }) {
       ) : (
         <div className="space-y-1.5">
           {docs.map(doc => (
-            <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+            <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 transition-colors hover:bg-muted/60">
               <div className="flex items-center gap-2 min-w-0">
-                <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                <FileText className="h-4 w-4 text-purple-500 shrink-0" />
                 <span className="text-sm truncate">{doc.filename}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -110,7 +110,7 @@ export default function KnowledgeBases() {
           <h1 className="text-2xl font-semibold tracking-tight">知识库</h1>
           <p className="text-sm text-muted-foreground mt-1">管理文档集合，为机器人提供知识来源</p>
         </div>
-        <Button onClick={() => setShowForm(v => !v)} className="gap-2 shrink-0">
+        <Button variant="gradient" onClick={() => setShowForm(v => !v)} className="gap-2 shrink-0">
           <Plus className="h-4 w-4" />
           新建知识库
         </Button>
@@ -145,14 +145,16 @@ export default function KnowledgeBases() {
 
       {kbs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Database className="h-12 w-12 text-muted-foreground/25 mb-4" />
-          <p className="font-medium text-muted-foreground">暂无知识库</p>
+          <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-2xl p-5 mb-4 inline-block">
+            <Database className="h-10 w-10 text-purple-500" />
+          </div>
+          <p className="font-medium">暂无知识库</p>
           <p className="text-sm text-muted-foreground mt-1">点击右上角「新建知识库」开始</p>
         </div>
       ) : (
         <div className="space-y-3">
           {kbs.map(kb => (
-            <Card key={kb.id} className="overflow-hidden">
+            <Card key={kb.id} className="overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5">
               <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between gap-2">
                   <button
