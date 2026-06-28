@@ -11,6 +11,10 @@ import { Bot, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import * as api from '@/api'
 import type { Bot as BotType } from '@/api'
 
+const DEFAULT_SYSTEM_PROMPT = `你是一个专业的智能助手，请始终用用户所使用的语言回复。
+
+如果系统提供了参考资料，请优先基于参考资料回答问题，并保持回答简洁准确。若参考资料不足以回答问题，可结合自身知识补充，但需说明哪部分来自推断而非资料。`
+
 function BotForm({
   initial, kbs, onSubmit, onCancel, isPending,
 }: {
@@ -21,7 +25,7 @@ function BotForm({
   isPending: boolean
 }) {
   const [name, setName] = useState(initial?.name ?? '')
-  const [prompt, setPrompt] = useState(initial?.system_prompt ?? '')
+  const [prompt, setPrompt] = useState(initial?.system_prompt ?? DEFAULT_SYSTEM_PROMPT)
   const [selectedKBs, setSelectedKBs] = useState<Set<string>>(new Set(initial?.kb_ids ?? []))
   const [modelOverride, setModelOverride] = useState(initial?.model_override ?? '')
 
