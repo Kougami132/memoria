@@ -17,7 +17,7 @@ verification_report: docs/superpowers/reports/2026-06-28-refine-web-ui-verify.md
 branch_status: handled
 created_at: 2026-06-28
 verified_at: 2026-06-28
-archived: false
+archived: true
 handoff_context: openspec/changes/refine-web-ui/.comet/handoff/design-context.json
 handoff_hash: 7357ec94745b4a5fe8e67eb36cfd0d4b8761e0b8184753e24d5491e93c16babf
 build_command: scripts/build.sh
