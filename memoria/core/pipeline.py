@@ -29,7 +29,9 @@ class Pipeline:
         return self._stores[kb_id]
 
     def ingest(self, kb_id: str, path: str) -> dict:
-        chunks = Chunker().split(path)
+        chunks = [c for c in Chunker().split(path) if c.strip()]
+        if not chunks:
+            raise ValueError("File produced no embeddable content")
         doc_id = os.path.basename(path).replace(".", "_") + "_" + kb_id[:8]
         vectors = self._embedder.embed(chunks)
         ids = [f"{doc_id}__{i}" for i in range(len(chunks))]
@@ -39,6 +41,8 @@ class Pipeline:
         return {"doc_id": doc_id, "chunk_count": len(chunks), "doc": doc}
 
     def retrieve(self, kb_id: str, query: str, k: int | None = None) -> list[dict]:
+        if not query or not query.strip():
+            return []
         embedding = self._embedder.embed([query])[0]
         return self._get_store(kb_id).query(embedding, k=k or self._top_k)
 
