@@ -1,5 +1,5 @@
 workflow: hotfix
-phase: build
+phase: archive
 context_compression: off
 build_mode: direct
 build_pause: null
@@ -12,9 +12,9 @@ auto_transition: true
 base_ref: 89c0860bc0e3c5ff97f497171c354468deae9c6a
 design_doc: null
 plan: null
-verify_result: pending
-verification_report: null
-branch_status: pending
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-06-29-fix-kb-docs-list-and-chat-502-verify.md
+branch_status: handled
 created_at: 2026-06-28
-verified_at: null
-archived: false
+verified_at: 2026-06-28
+archived: true

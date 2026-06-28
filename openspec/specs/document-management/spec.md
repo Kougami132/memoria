@@ -19,9 +19,13 @@ TBD - created by archiving change implement-phase1-rag-core. Update Purpose afte
 - **THEN** 返回 404
 
 ### Requirement: 文档列表与删除
-系统 SHALL 提供文档列表查询和删除端点。
+系统 SHALL 同时支持按 KB 路径和按查询参数两种方式列出文档。
 
-#### Scenario: 列出文档
+#### Scenario: 列出文档（按 KB 路径）
+- **WHEN** GET `/api/knowledge-bases/{kb_id}/documents`
+- **THEN** 返回该 KB 下所有文档信息（JSON 数组）
+
+#### Scenario: 列出文档（按查询参数）
 - **WHEN** GET `/api/documents?kb_id={kb_id}`
 - **THEN** 返回该 KB 下所有文档信息
 
