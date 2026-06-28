@@ -11,7 +11,7 @@ export default defineConfig({
   },
   build: {
     outDir: '../memoria/static',
-    emptyOutDir: true,
+    emptyOutDir: false,
   },
   server: {
     proxy: {
