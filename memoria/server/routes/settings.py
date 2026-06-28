@@ -1,9 +1,11 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from memoria.config import get_effective_settings
+from memoria.core.embedder import Embedder
+from memoria.llm.caller import LLMCaller
 from memoria.server.deps import get_db, reset_pipeline
 from memoria.storage.db import DB
 
@@ -48,3 +50,27 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
     if changed:
         reset_pipeline()
     return get_effective_settings(db)
+
+
+@router.post("/test-embedding")
+def test_embedding(db: DB = Depends(get_db)):
+    effective = get_effective_settings(db)
+    embedder = Embedder(effective["openai_base_url"], effective["openai_api_key"],
+                        effective["embedding_model"])
+    try:
+        vec = embedder.embed(["test"])
+        return {"ok": True, "dimensions": len(vec[0])}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/test-chat")
+def test_chat(db: DB = Depends(get_db)):
+    effective = get_effective_settings(db)
+    llm = LLMCaller(effective["openai_base_url"], effective["openai_api_key"],
+                    effective["llm_model"])
+    try:
+        result = llm.call([{"role": "user", "content": "hi"}])
+        return {"ok": True, "preview": result["content"][:80]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))

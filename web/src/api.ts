@@ -61,3 +61,7 @@ export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${se
 export const getSettings = () => req<Settings>('/settings')
 export const updateSettings = (data: SettingsUpdate) =>
   req<Settings>('/settings', { method: 'PUT', ...json(data) })
+export const testEmbedding = () =>
+  req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', { method: 'POST' })
+export const testChat = () =>
+  req<{ ok: boolean; preview: string }>('/settings/test-chat', { method: 'POST' })

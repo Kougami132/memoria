@@ -4,9 +4,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Eye, EyeOff, Save, Check } from 'lucide-react'
+import { Eye, EyeOff, Save, Check, FlaskConical } from 'lucide-react'
 import * as api from '@/api'
 import type { SettingsUpdate } from '@/api'
+
+type TestState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
 
 export default function Settings() {
   const qc = useQueryClient()
@@ -14,6 +16,8 @@ export default function Settings() {
   const [form, setForm] = useState<Partial<Record<string, string>>>({})
   const [showKey, setShowKey] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [embedTest, setEmbedTest] = useState<TestState>({ status: 'idle' })
+  const [chatTest, setChatTest] = useState<TestState>({ status: 'idle' })
 
   useEffect(() => { if (settings) setForm({ ...settings }) }, [settings])
 
@@ -41,6 +45,25 @@ export default function Settings() {
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }))
+
+  const runTest = (fn: () => Promise<{ ok: boolean; dimensions?: number; preview?: string }>,
+                   set: (s: TestState) => void) => async () => {
+    set({ status: 'loading' })
+    try {
+      const r = await fn()
+      set({ status: 'ok', msg: r.dimensions != null ? `✓ ${r.dimensions}维` : `✓ ${r.preview}` })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      set({ status: 'err', msg })
+    }
+  }
+
+  const testBadge = (s: TestState) => {
+    if (s.status === 'idle') return null
+    if (s.status === 'loading') return <span className="text-xs text-muted-foreground">测试中…</span>
+    if (s.status === 'ok') return <span className="text-xs text-green-600 dark:text-green-400 break-all">{s.msg}</span>
+    return <span className="text-xs text-red-500 break-all">{s.msg}</span>
+  }
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
@@ -83,22 +106,50 @@ export default function Settings() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">嵌入模型</Label>
-              <Input
-                placeholder="text-embedding-3-small"
-                value={form.embedding_model ?? ''}
-                onChange={set('embedding_model')}
-              />
+              <div className="flex gap-2 items-center">
+                <Input
+                  placeholder="text-embedding-3-small"
+                  value={form.embedding_model ?? ''}
+                  onChange={set('embedding_model')}
+                  className="flex-1"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  disabled={embedTest.status === 'loading'}
+                  onClick={runTest(api.testEmbedding, setEmbedTest)}
+                >
+                  <FlaskConical className="h-3.5 w-3.5" />
+                  测试
+                </Button>
+              </div>
+              {testBadge(embedTest)}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">对话模型</Label>
-              <Input
-                placeholder="gpt-4o-mini"
-                value={form.llm_model ?? ''}
-                onChange={set('llm_model')}
-              />
+              <div className="flex gap-2 items-center">
+                <Input
+                  placeholder="gpt-4o-mini"
+                  value={form.llm_model ?? ''}
+                  onChange={set('llm_model')}
+                  className="flex-1"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  disabled={chatTest.status === 'loading'}
+                  onClick={runTest(api.testChat, setChatTest)}
+                >
+                  <FlaskConical className="h-3.5 w-3.5" />
+                  测试
+                </Button>
+              </div>
+              {testBadge(chatTest)}
             </div>
           </div>
         </CardContent>

@@ -34,4 +34,8 @@ def get_effective_settings(db) -> dict:
         "chunk_overlap": str(settings.chunk_overlap),
     }
     fields.update({k: v for k, v in overrides.items() if k in fields})
+    url = fields["openai_base_url"].rstrip("/")
+    if not url.endswith("/v1"):
+        url += "/v1"
+    fields["openai_base_url"] = url
     return fields
