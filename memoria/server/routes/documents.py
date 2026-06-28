@@ -2,6 +2,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from openai import APIConnectionError
 
 from memoria.config import settings
 from memoria.core.pipeline import Pipeline
@@ -31,7 +32,10 @@ async def upload_document(kb_id: str, file: UploadFile,
     with open(save_path, "wb") as f:
         f.write(content)
 
-    return pipeline.ingest(kb_id, save_path)
+    try:
+        return pipeline.ingest(kb_id, save_path)
+    except APIConnectionError as e:
+        raise HTTPException(status_code=503, detail=f"Embedding service unavailable: {e}")
 
 
 @router.get("/documents")
