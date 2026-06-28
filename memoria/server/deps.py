@@ -1,3 +1,4 @@
+import logging
 import os
 from functools import lru_cache
 
@@ -6,6 +7,8 @@ from memoria.core.embedder import Embedder, MockEmbedder
 from memoria.core.pipeline import Pipeline
 from memoria.llm.caller import LLMCaller, MockLLMCaller
 from memoria.storage.db import DB
+
+logger = logging.getLogger(__name__)
 
 _pipeline: Pipeline | None = None
 
@@ -29,6 +32,8 @@ def get_pipeline() -> Pipeline:
                                 effective["embedding_model"])
             llm = LLMCaller(effective["openai_base_url"], effective["openai_api_key"],
                             effective["llm_model"])
+            logger.info("Pipeline using base_url=%s embedding_model=%s llm_model=%s",
+                        effective["openai_base_url"], effective["embedding_model"], effective["llm_model"])
         os.makedirs(settings.chroma_path, exist_ok=True)
         _pipeline = Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path,
                              top_k=int(effective["top_k"]))
