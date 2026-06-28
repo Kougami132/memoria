@@ -54,7 +54,11 @@ function BotForm({
             {kbs.map(kb => (
               <label
                 key={kb.id}
-                className="flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                  selectedKBs.has(kb.id)
+                    ? 'border-purple-400/60 bg-purple-500/5'
+                    : 'hover:bg-muted/50'
+                }`}
               >
                 <Checkbox
                   id={kb.id}
@@ -129,7 +133,7 @@ export default function Bots() {
           <h1 className="text-2xl font-semibold tracking-tight">机器人</h1>
           <p className="text-sm text-muted-foreground mt-1">配置 AI 助手，关联知识库，体验 RAG 检索对话</p>
         </div>
-        <Button onClick={() => setShowCreate(v => !v)} className="gap-2 shrink-0">
+        <Button variant="gradient" onClick={() => setShowCreate(v => !v)} className="gap-2 shrink-0">
           <Plus className="h-4 w-4" />
           新建机器人
         </Button>
@@ -150,19 +154,21 @@ export default function Bots() {
 
       {bots.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Bot className="h-12 w-12 text-muted-foreground/25 mb-4" />
-          <p className="font-medium text-muted-foreground">暂无机器人</p>
+          <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-2xl p-5 mb-4 inline-block">
+            <Bot className="h-10 w-10 text-purple-500" />
+          </div>
+          <p className="font-medium">暂无机器人</p>
           <p className="text-sm text-muted-foreground mt-1">点击右上角「新建机器人」开始</p>
         </div>
       ) : (
         <div className="space-y-3">
           {bots.map(bot => (
-            <Card key={bot.id} className="overflow-hidden">
+            <Card key={bot.id} className="overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5">
               <CardHeader className="py-3 px-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center gap-2">
-                      <Bot className="h-4 w-4 text-primary shrink-0" />
+                      <Bot className="h-4 w-4 text-purple-500 shrink-0" />
                       <span className="font-medium text-sm">{bot.name}</span>
                     </div>
                     {bot.kb_ids.length > 0 && (
