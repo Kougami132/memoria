@@ -93,9 +93,10 @@ def test_settings_put(client):
 
 
 def test_settings_put_skip_empty_api_key(client):
+    from memoria.config import settings
     r = client.put("/api/settings", json={"top_k": 3, "api_key": None})
     assert r.status_code == 200
-    assert client.get("/api/settings").json()["openai_api_key"] == "mock"
+    assert client.get("/api/settings").json()["openai_api_key"] == settings.openai_api_key
 
 
 def test_bot_sessions(client):

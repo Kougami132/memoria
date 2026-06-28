@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from openai import APIConnectionError
+from openai import APIConnectionError, APIError
 from pydantic import BaseModel
 
 from memoria.core.pipeline import Pipeline
@@ -23,3 +23,5 @@ def chat(bot_id: str, body: ChatRequest, pipeline: Pipeline = Depends(get_pipeli
         raise HTTPException(status_code=404, detail=str(e))
     except APIConnectionError as e:
         raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
+    except (APIError, RuntimeError) as e:
+        raise HTTPException(status_code=502, detail=str(e))
