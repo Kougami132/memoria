@@ -30,6 +30,10 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       colors: {
+        brand: {
+          from: '#9333ea',
+          to:   '#3b82f6',
+        },
         background: 'var(--background)',
         foreground: 'var(--foreground)',
         card: {
