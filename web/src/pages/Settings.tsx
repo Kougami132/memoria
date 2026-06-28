@@ -51,7 +51,7 @@ export default function Settings() {
 
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-base">API 配置</CardTitle>
+          <CardTitle className="text-base font-semibold text-foreground">API 配置</CardTitle>
           <CardDescription>OpenAI 兼容接口，支持 OpenAI、Azure、本地部署模型等</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -106,7 +106,7 @@ export default function Settings() {
 
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-base">RAG 参数</CardTitle>
+          <CardTitle className="text-base font-semibold text-foreground">RAG 参数</CardTitle>
           <CardDescription>控制文档检索和分块的核心参数</CardDescription>
         </CardHeader>
         <CardContent>
@@ -147,9 +147,10 @@ export default function Settings() {
 
       <div className="flex items-center gap-3">
         <Button
+          variant="gradient"
           onClick={() => update.mutate()}
           disabled={update.isPending}
-          className="gap-2"
+          className={`gap-2 ${saved ? 'from-green-500 to-emerald-400' : ''}`}
         >
           {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
           {update.isPending ? '保存中…' : saved ? '已保存' : '保存设置'}
