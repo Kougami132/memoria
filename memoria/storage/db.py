@@ -258,6 +258,12 @@ class DB:
             else:
                 s.add(RuntimeSettingRow(key=key, value=value, updated_at=_now()))
 
+    def delete_setting(self, key: str) -> None:
+        with self._s() as s:
+            row = s.get(RuntimeSettingRow, key)
+            if row:
+                s.delete(row)
+
     def get_all_settings(self) -> dict[str, str]:
         with self._s() as s:
             return {r.key: r.value for r in s.query(RuntimeSettingRow).all()}

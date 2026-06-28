@@ -38,9 +38,13 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
     }
     changed = False
     for key, value in mapping.items():
-        if value is not None and value != "":
+        if value is None:
+            continue
+        if value == "":
+            db.delete_setting(key)
+        else:
             db.set_setting(key, value)
-            changed = True
+        changed = True
     if changed:
         reset_pipeline()
     return get_effective_settings(db)
