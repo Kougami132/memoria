@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen } from 'lucide-react'
+import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain } from 'lucide-react'
 import * as api from '@/api'
 import type { Source } from '@/api'
 
@@ -120,17 +120,17 @@ export default function Chat() {
           {botId && sessions.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-6">暂无历史会话</p>
           )}
-          {sessions.map(s => (
+          {sessions.map((s, index) => (
             <button
               key={s.id}
-              className={`w-full text-left rounded-lg px-3 py-2.5 text-xs transition-colors ${
+              className={`w-full text-left rounded-xl px-3 py-3 text-xs transition-colors ${
                 s.id === sessionId
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-muted text-muted-foreground'
+                  ? 'bg-gradient-to-r from-purple-600/90 to-blue-500/90 text-white shadow-sm'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
               onClick={() => loadSession(s.id)}
             >
-              <p className="font-medium">会话</p>
+              <p className="font-medium truncate">会话 {index + 1}</p>
               <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
             </button>
           ))}
@@ -141,10 +141,10 @@ export default function Chat() {
       <div className="flex-1 flex flex-col min-w-0">
         {!botId ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <div className="rounded-2xl bg-muted/50 p-6 mb-4">
-              <MessageSquare className="h-10 w-10 text-muted-foreground/40 mx-auto" />
+            <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-2xl p-5 mb-4 inline-block">
+              <MessageSquare className="h-10 w-10 text-purple-500" />
             </div>
-            <p className="font-medium text-muted-foreground">从左侧选择机器人开始对话</p>
+            <p className="font-medium">从左侧选择机器人开始对话</p>
             <p className="text-sm text-muted-foreground mt-1">机器人将基于关联知识库进行 RAG 检索</p>
           </div>
         ) : (
@@ -158,31 +158,45 @@ export default function Chat() {
               )}
               {messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className="max-w-[75%]">
-                    <div
-                      className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                        m.role === 'user'
-                          ? 'bg-primary text-primary-foreground rounded-br-sm'
-                          : 'bg-card border rounded-bl-sm shadow-sm'
-                      }`}
-                    >
-                      {m.content}
+                  {m.role === 'assistant' ? (
+                    <div className="flex items-start gap-3 max-w-[75%]">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shrink-0 shadow-sm">
+                        <Brain className="h-4 w-4 text-white" />
+                      </div>
+                      <div>
+                        <div className="rounded-2xl rounded-tl-sm bg-white border px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap">
+                          {m.content}
+                        </div>
+                        {m.sources && <SourceList sources={m.sources} />}
+                      </div>
                     </div>
-                    {m.role === 'assistant' && m.sources && <SourceList sources={m.sources} />}
-                  </div>
+                  ) : (
+                    <div className="max-w-[75%]">
+                      <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
+                        {m.content}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               {sendMsg.isPending && (
-                <div className="flex justify-start">
-                  <div className="bg-card border rounded-2xl rounded-bl-sm px-4 py-2.5 shadow-sm">
-                    <span className="text-sm text-muted-foreground">正在思考…</span>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shrink-0">
+                    <Brain className="h-4 w-4 text-white" />
+                  </div>
+                  <div className="bg-white border rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm">
+                    <div className="flex gap-1.5 items-center h-5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-1" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-2" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-3" />
+                    </div>
                   </div>
                 </div>
               )}
               <div ref={bottomRef} />
             </div>
-            <div className="border-t p-4 bg-background shrink-0">
-              <div className="flex gap-2">
+            <div className="border-t bg-background/80 backdrop-blur-sm px-4 py-4 shrink-0">
+              <div className="flex gap-2 max-w-3xl mx-auto">
                 <Input
                   ref={inputRef}
                   placeholder="输入消息，按 Enter 发送…"
@@ -190,12 +204,13 @@ export default function Chat() {
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={sendMsg.isPending}
-                  className="rounded-xl"
+                  className="rounded-2xl text-sm"
                 />
                 <Button
+                  variant="gradient"
                   onClick={() => sendMsg.mutate()}
                   disabled={!input.trim() || sendMsg.isPending}
-                  className="rounded-xl px-4 shrink-0"
+                  className="rounded-2xl px-4 shrink-0"
                 >
                   <Send className="h-4 w-4" />
                 </Button>
