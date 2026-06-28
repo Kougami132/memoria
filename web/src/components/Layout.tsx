@@ -37,7 +37,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="px-5 py-3 shrink-0">
-          <p className="text-xs text-white/30">RAG 记忆系统  v0.1</p>
+          <p className="text-xs text-white/30">RAG 记忆系统 v0.1</p>
         </div>
       </aside>
       <main className="flex-1 min-h-0 overflow-auto">

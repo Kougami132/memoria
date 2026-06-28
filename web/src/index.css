@@ -23,8 +23,6 @@
     --input: oklch(0.92 0.004 286.32);
     --ring: oklch(0.52 0.22 293);
     --radius: 0.625rem;
-    --gradient-sidebar: linear-gradient(to bottom, #0f172a, #3b0764, #0f172a);
-    --gradient-primary: linear-gradient(to right, #9333ea, #3b82f6);
   }
   .dark {
     --background: oklch(0.141 0.005 285.823);

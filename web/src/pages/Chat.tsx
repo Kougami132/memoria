@@ -67,8 +67,12 @@ export default function Chat() {
 
   const loadSession = async (sid: string) => {
     setSessionId(sid)
-    const msgs = await api.getMessages(sid)
-    setMessages(msgs.map(m => ({ role: m.role, content: m.content })))
+    try {
+      const msgs = await api.getMessages(sid)
+      setMessages(msgs.map(m => ({ role: m.role, content: m.content })))
+    } catch {
+      setMessages([])
+    }
   }
 
   const newSession = () => {
@@ -86,6 +90,10 @@ export default function Chat() {
     onSuccess: data => {
       if (!sessionId) { setSessionId(data.session_id); refetchSessions() }
       setMessages(prev => [...prev, { role: 'assistant', content: data.answer, sources: data.sources }])
+    },
+    onError: () => {
+      setMessages(prev => prev.slice(0, -1))
+      setInput(input)
     },
   })
 
@@ -164,7 +172,7 @@ export default function Chat() {
                         <Brain className="h-4 w-4 text-white" />
                       </div>
                       <div>
-                        <div className="rounded-2xl rounded-tl-sm bg-white border px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap">
+                        <div className="rounded-2xl rounded-tl-sm bg-card border px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap">
                           {m.content}
                         </div>
                         {m.sources && <SourceList sources={m.sources} />}
@@ -184,7 +192,7 @@ export default function Chat() {
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shrink-0">
                     <Brain className="h-4 w-4 text-white" />
                   </div>
-                  <div className="bg-white border rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm">
+                  <div className="bg-card border rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm">
                     <div className="flex gap-1.5 items-center h-5">
                       <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-1" />
                       <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-2" />

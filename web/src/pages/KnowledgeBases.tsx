@@ -154,7 +154,7 @@ export default function KnowledgeBases() {
       ) : (
         <div className="space-y-3">
           {kbs.map(kb => (
-            <Card key={kb.id} className="overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5">
+            <Card key={kb.id} className="overflow-hidden transition-[transform,box-shadow] hover:shadow-md hover:-translate-y-0.5">
               <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between gap-2">
                   <button

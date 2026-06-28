@@ -147,10 +147,10 @@ export default function Settings() {
 
       <div className="flex items-center gap-3">
         <Button
-          variant="gradient"
+          variant={saved ? 'gradient-success' : 'gradient'}
           onClick={() => update.mutate()}
           disabled={update.isPending}
-          className={`gap-2 ${saved ? 'from-green-500 to-emerald-400' : ''}`}
+          className="gap-2"
         >
           {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
           {update.isPending ? '保存中…' : saved ? '已保存' : '保存设置'}
