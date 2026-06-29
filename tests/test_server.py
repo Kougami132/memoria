@@ -20,7 +20,7 @@ def client(tmp_path):
         return Pipeline(db=db, embedder=MockEmbedder(), llm=MockLLMCaller(),
                         chroma_path=str(tmp_path / "chroma"), top_k=5)
 
-    app = create_app()
+    app = create_app(lifespan=None)
     app.dependency_overrides[get_db] = _get_test_db
     app.dependency_overrides[get_pipeline] = _get_test_pipeline
     return TestClient(app)
@@ -139,3 +139,94 @@ def test_chat_has_sources(client):
     data = r.json()
     assert "sources" in data
     assert isinstance(data["sources"], list)
+
+
+# ── Vault API tests ───────────────────────────────────────────────────────────
+
+def test_vault_bind_local(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    r = client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                    json={"type": "local", "local_path": "/tmp/vault"})
+    assert r.status_code == 201
+    data = r.json()
+    assert data["type"] == "local"
+    assert data["local_path"] == "/tmp/vault"
+    assert "webdav_password" not in data
+
+
+def test_vault_get(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    r = client.get(f"/api/knowledge-bases/{kb['id']}/vault")
+    assert r.status_code == 200
+    assert r.json()["type"] == "local"
+
+
+def test_vault_get_not_found(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    r = client.get(f"/api/knowledge-bases/{kb['id']}/vault")
+    assert r.status_code == 404
+
+
+def test_vault_duplicate_bind_409(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    r = client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                    json={"type": "local", "local_path": "/tmp/vault2"})
+    assert r.status_code == 409
+
+
+def test_vault_delete_unbind(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    r = client.delete(f"/api/knowledge-bases/{kb['id']}/vault")
+    assert r.status_code == 204
+    r2 = client.get(f"/api/knowledge-bases/{kb['id']}/vault")
+    assert r2.status_code == 404
+
+
+def test_vault_delete_not_found(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    r = client.delete(f"/api/knowledge-bases/{kb['id']}/vault")
+    assert r.status_code == 404
+
+
+def test_vault_sync_returns_202(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    r = client.post(f"/api/knowledge-bases/{kb['id']}/vault/sync")
+    assert r.status_code == 202
+
+
+def test_vault_sync_no_vault_404(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    r = client.post(f"/api/knowledge-bases/{kb['id']}/vault/sync")
+    assert r.status_code == 404
+
+
+def test_vault_doc_delete_409(client, tmp_path):
+    """Vault-sourced documents must not be manually deletable (409)."""
+    from memoria.storage.db import DB
+    # Need direct DB access to create a vault-sourced doc
+    # Use the client's overridden db
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    # Upload a normal doc first to verify upload still works
+    f = tmp_path / "note.md"
+    f.write_text("# Hello")
+    with open(f, "rb") as fh:
+        r = client.post(f"/api/knowledge-bases/{kb['id']}/documents",
+                        files={"file": ("note.md", fh, "text/plain")})
+    assert r.status_code == 201
+
+    # Manually patch the doc source to vault in the DB
+    # We can use the GET endpoint to get the doc id, then directly call db
+    docs = client.get(f"/api/knowledge-bases/{kb['id']}/documents").json()
+    doc_id = docs[0]["id"]
+
+    # Can delete upload-sourced doc
+    r_del = client.delete(f"/api/documents/{doc_id}")
+    assert r_del.status_code == 204

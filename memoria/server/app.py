@@ -1,19 +1,46 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from memoria.server.routes import bots, chat, documents, knowledge_bases, settings, sessions
+from memoria.server.routes import bots, chat, documents, knowledge_bases, settings, sessions, vaults
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Memoria")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from memoria.server.deps import get_db, get_pipeline
+    from memoria.vault.syncer import VaultSyncer
+
+    scheduler = AsyncIOScheduler()
+
+    def _sync_all_vaults():
+        db = get_db()
+        syncer = VaultSyncer(db, get_pipeline())
+        for vault in db.list_vaults():
+            try:
+                syncer.sync(vault["id"])
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "vault poll failed: vault_id=%s", vault["id"]
+                )
+
+    scheduler.add_job(_sync_all_vaults, "interval", minutes=15, max_instances=1, id="vault_poll")
+    scheduler.start()
+    yield
+    scheduler.shutdown(wait=False)
+
+
+def create_app(lifespan=_lifespan) -> FastAPI:
+    app = FastAPI(title="Memoria", lifespan=lifespan)
     app.include_router(knowledge_bases.router, prefix="/api")
     app.include_router(bots.router, prefix="/api")
     app.include_router(documents.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
+    app.include_router(vaults.router, prefix="/api")
 
     @app.get("/api/health")
     def health():
