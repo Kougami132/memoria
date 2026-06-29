@@ -14,11 +14,11 @@ const mdComponents: Components = {
   p:      ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
   ul:     ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
   ol:     ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
-  code:   ({ className, children, ...props }) => {
+  code:   ({ className, children, node: _node, ...props }) => {
     const isInline = !className
     return isInline
       ? <code className="bg-muted rounded px-1 font-mono text-xs" {...props}>{children}</code>
-      : <code className={className} {...props}>{children}</code>
+      : <code className="block" {...props}>{children}</code>
   },
   pre:    ({ children }) => <pre className="bg-muted rounded-xl p-3 overflow-x-auto mb-2 text-xs font-mono">{children}</pre>,
   h1:     ({ children }) => <h1 className="font-semibold text-base mt-3 mb-1">{children}</h1>,
