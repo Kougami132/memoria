@@ -7,6 +7,26 @@ import { Badge } from '@/components/ui/badge'
 import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain } from 'lucide-react'
 import * as api from '@/api'
 import type { Source } from '@/api'
+import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
+
+const mdComponents: Components = {
+  p:      ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul:     ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+  ol:     ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+  code:   ({ className, children, ...props }) => {
+    const isInline = !className
+    return isInline
+      ? <code className="bg-muted rounded px-1 font-mono text-xs" {...props}>{children}</code>
+      : <code className={className} {...props}>{children}</code>
+  },
+  pre:    ({ children }) => <pre className="bg-muted rounded-xl p-3 overflow-x-auto mb-2 text-xs font-mono">{children}</pre>,
+  h1:     ({ children }) => <h1 className="font-semibold text-base mt-3 mb-1">{children}</h1>,
+  h2:     ({ children }) => <h2 className="font-semibold text-sm mt-3 mb-1">{children}</h2>,
+  h3:     ({ children }) => <h3 className="font-semibold text-sm mt-2 mb-1">{children}</h3>,
+  a:      ({ href, children }) => <a href={href} className="text-primary underline" target="_blank" rel="noreferrer">{children}</a>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+}
 
 interface DisplayMessage {
   role: 'user' | 'assistant'
@@ -172,8 +192,8 @@ export default function Chat() {
                         <Brain className="h-4 w-4 text-white" />
                       </div>
                       <div>
-                        <div className="rounded-2xl rounded-tl-sm bg-card border px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap">
-                          {m.content}
+                        <div className="rounded-2xl rounded-tl-sm bg-card border px-4 py-3 text-sm leading-relaxed shadow-sm">
+                          <ReactMarkdown components={mdComponents}>{m.content}</ReactMarkdown>
                         </div>
                         {m.sources && <SourceList sources={m.sources} />}
                       </div>
