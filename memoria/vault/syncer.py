@@ -89,14 +89,19 @@ class VaultSyncer:
                 return
 
         ext = os.path.splitext(rel_path)[1]
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=True) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
             tmp.write(content)
-            tmp.flush()
+            tmp_path = tmp.name
+        try:
+            result = self.pipeline.ingest(vault["kb_id"], tmp_path, source="vault")
+        except Exception:
+            logger.exception("vault_sync: ingest failed %s", rel_path)
+            return
+        finally:
             try:
-                result = self.pipeline.ingest(vault["kb_id"], tmp.name, source="vault")
-            except Exception:
-                logger.error("vault_sync: ingest failed %s", rel_path)
-                return
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
         doc_id = result["doc"]["id"]
         self.db.upsert_vault_file(vault["id"], rel_path, _sha256(content), doc_id)
