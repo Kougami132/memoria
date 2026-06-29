@@ -1,5 +1,8 @@
-## ADDED Requirements
+# vault-sync Specification
 
+## Purpose
+TBD - created by archiving change kb-vault-source. Update Purpose after archive.
+## Requirements
 ### Requirement: 本地 vault 同步
 系统 SHALL 遍历本地路径下所有支持格式文件（`.md`/`.txt`），与 `vault_files` 记录对比，执行增量同步。
 
@@ -59,3 +62,4 @@
 #### Scenario: 并发保护
 - **WHEN** 上一次同步仍在进行时触发下一次调度
 - **THEN** 跳过本次调度，不重复执行
+

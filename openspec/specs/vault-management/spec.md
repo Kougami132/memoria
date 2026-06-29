@@ -1,5 +1,8 @@
-## ADDED Requirements
+# vault-management Specification
 
+## Purpose
+TBD - created by archiving change kb-vault-source. Update Purpose after archive.
+## Requirements
 ### Requirement: Vault CRUD
 系统 SHALL 提供 REST API 管理 KB 绑定的 vault：创建（绑定）、查询、删除（解绑）。每个 KB 最多绑定一个 vault。
 
@@ -37,3 +40,4 @@
 #### Scenario: vault_files 表结构
 - **WHEN** 同步时发现新文件
 - **THEN** `vault_files` 表写入：`id`（UUID）、`vault_id`（FK）、`rel_path`（相对路径）、`file_hash`（SHA-256）、`doc_id`（FK to documents，nullable）、`synced_at`
+

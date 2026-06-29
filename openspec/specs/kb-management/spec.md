@@ -12,15 +12,15 @@ TBD - created by archiving change implement-phase1-rag-core. Update Purpose afte
 
 #### Scenario: 列出所有知识库
 - **WHEN** GET `/api/knowledge-bases`
-- **THEN** 返回 200，含所有 KB 的列表
+- **THEN** 返回 200，含所有 KB 的列表，每个 KB 包含 `vault`（绑定的 vault 摘要或 null）
 
 #### Scenario: 获取知识库详情
 - **WHEN** GET `/api/knowledge-bases/{kb_id}`
-- **THEN** 返回 200，含该 KB 信息及其文档列表
+- **THEN** 返回 200，含该 KB 信息、文档列表，以及绑定的 vault 信息（含 `type`、`last_synced_at`，密码屏蔽）
 
 #### Scenario: 删除知识库
 - **WHEN** DELETE `/api/knowledge-bases/{kb_id}`
-- **THEN** 返回 204，SQLite 中的 KB 记录和 Chroma collection 均被删除
+- **THEN** 返回 204，SQLite 中的 KB 记录、关联 vault、vault_files、documents 和 Chroma collection 均被删除
 
 #### Scenario: 删除不存在的知识库
 - **WHEN** DELETE `/api/knowledge-bases/nonexistent`
