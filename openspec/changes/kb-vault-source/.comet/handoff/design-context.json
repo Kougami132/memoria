@@ -1,0 +1,17 @@
+{
+  "change": "kb-vault-source",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "a2df7cb7e9ce628dd336aa82caec452feea16ede5fd75d47097967b9e8e6cb90",
+  "files": [
+    { "path": "openspec/changes/kb-vault-source/proposal.md", "sha256": "b7f748e56adcf93797e8f7b7af7d6cdec6aec8265c7eac8c9ff8ab442f9eb779" },
+    { "path": "openspec/changes/kb-vault-source/design.md", "sha256": "be808f84d663138e3add7e65892500b926066b2dd65a2adae3166ca408c3c614" },
+    { "path": "openspec/changes/kb-vault-source/tasks.md", "sha256": "519886ea875388f896e494316b67e7dda03345fde977fc965de0ed052f754e5d" },
+    { "path": "openspec/changes/kb-vault-source/specs/document-management/spec.md", "sha256": "4379e4ef54099a01ff67c1a64b89bbcd53021a0f6cb93bf82a3cb82a505a82a0" },
+    { "path": "openspec/changes/kb-vault-source/specs/kb-management/spec.md", "sha256": "265639303ee9857fb9478e6fafa707cf7529ed7b1fd60069f80016b87220aeb2" },
+    { "path": "openspec/changes/kb-vault-source/specs/vault-management/spec.md", "sha256": "aee912400149ea0469038574a730c78cc6250c9a5bab9b320b25a4b9cfee51c5" },
+    { "path": "openspec/changes/kb-vault-source/specs/vault-sync/spec.md", "sha256": "edfbc0d7f9fbbf9961db18a2fb4c122f6530f577735d6ac37311065616ad3e3d" }
+  ]
+}
