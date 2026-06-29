@@ -6,7 +6,7 @@ base-ref: 2629d65b79949df5408c8f44ff6e3abe0a87ae73
 
 # KB Vault Source 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 为 Memoria 知识库引入 Vault（仓库）来源，支持绑定本地文件夹或 WebDAV 端点，实现文件自动录入与增量同步。
 
@@ -73,7 +73,7 @@ base-ref: 2629d65b79949df5408c8f44ff6e3abe0a87ae73
   - `DB.delete_vault_file(vault_file_id) -> None`
   - `DB.delete_kb(kb_id)` 扩展级联删 vault
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/test_storage.py` 末尾追加：
 
@@ -134,14 +134,14 @@ def test_doc_source_field(tmp_path):
     assert all("source" in d for d in db.list_docs(kb["id"]))
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```
 pytest tests/test_storage.py -k "vault or doc_source" -v
 ```
 预期：`AttributeError: 'DB' object has no attribute 'create_vault'`
 
-- [ ] **Step 3: 添加 ORM 模型**
+- [x] **Step 3: 添加 ORM 模型**
 
 在 `db.py` 的 `RuntimeSettingRow` 之前插入：
 
@@ -169,7 +169,7 @@ class VaultFileRow(Base):
     synced_at = Column(String, nullable=False)
 ```
 
-- [ ] **Step 4: 更新 DocumentRow 添加 source 列**
+- [x] **Step 4: 更新 DocumentRow 添加 source 列**
 
 将 `DocumentRow` 改为（添加 `source` 行，其他不变）：
 
@@ -185,7 +185,7 @@ class DocumentRow(Base):
     created_at  = Column(String, nullable=False)
 ```
 
-- [ ] **Step 5: 添加 documents.source 迁移**
+- [x] **Step 5: 添加 documents.source 迁移**
 
 在 `DB.__init__` 中，messages 迁移块之后追加：
 
@@ -197,7 +197,7 @@ class DocumentRow(Base):
                 conn.commit()
 ```
 
-- [ ] **Step 6: 更新 create_doc / get_doc / list_docs 返回 source**
+- [x] **Step 6: 更新 create_doc / get_doc / list_docs 返回 source**
 
 ```python
     def create_doc(self, kb_id: str, filename: str, path: str, chunk_count: int,
@@ -228,7 +228,7 @@ class DocumentRow(Base):
                     for r in s.query(DocumentRow).filter(DocumentRow.kb_id == kb_id).all()]
 ```
 
-- [ ] **Step 7: 实现 vault CRUD 方法**
+- [x] **Step 7: 实现 vault CRUD 方法**
 
 在 `delete_kb` 之后、`# ── Bots` 注释之前添加：
 
@@ -309,7 +309,7 @@ class DocumentRow(Base):
                 s.delete(row)
 ```
 
-- [ ] **Step 8: 更新 delete_kb 级联删除 vault**
+- [x] **Step 8: 更新 delete_kb 级联删除 vault**
 
 ```python
     def delete_kb(self, kb_id: str) -> None:
@@ -325,14 +325,14 @@ class DocumentRow(Base):
                 s.delete(row)
 ```
 
-- [ ] **Step 9: 运行全部存储测试**
+- [x] **Step 9: 运行全部存储测试**
 
 ```
 pytest tests/test_storage.py -v
 ```
 预期：全部 PASSED
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add memoria/storage/db.py tests/test_storage.py
@@ -349,7 +349,7 @@ git commit -m "feat: DB 新增 vault/vault_files 模型与迁移，documents 添
 **Interfaces:**
 - Produces: `webdavclient3` 和 `apscheduler` 可被后续任务 import
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `tests/test_vault_deps.py`：
 
@@ -365,14 +365,14 @@ def test_apscheduler_importable():
     assert hasattr(mod, "AsyncIOScheduler")
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```
 pytest tests/test_vault_deps.py -v
 ```
 预期：ModuleNotFoundError
 
-- [ ] **Step 3: 添加依赖**
+- [x] **Step 3: 添加依赖**
 
 在 `pyproject.toml` 的 `dependencies` 列表末尾追加两行：
 ```
@@ -381,20 +381,20 @@ pytest tests/test_vault_deps.py -v
 ```
 同时在 `[tool.setuptools] packages` 列表中添加 `"memoria.vault"`。
 
-- [ ] **Step 4: 安装依赖**
+- [x] **Step 4: 安装依赖**
 
 ```
 pip install -e ".[dev]"
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```
 pytest tests/test_vault_deps.py -v
 ```
 预期：2 tests PASSED
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml tests/test_vault_deps.py
@@ -418,7 +418,7 @@ git commit -m "chore: 新增 webdavclient3 和 apscheduler 依赖"
   - `LocalConnector(root: str)`，实现上述方法
   - `WebDAVConnector(url: str, username: str, password: str)`，实现上述方法
 
-- [ ] **Step 1: 写 LocalConnector 失败测试**
+- [x] **Step 1: 写 LocalConnector 失败测试**
 
 新建 `tests/test_vault_syncer.py`：
 
@@ -453,21 +453,21 @@ def test_local_read_missing_raises(tmp_path):
         conn.read_file("nonexistent.md")
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```
 pytest tests/test_vault_syncer.py -v
 ```
 预期：`ModuleNotFoundError: No module named 'memoria.vault'`
 
-- [ ] **Step 3: 创建 vault 包**
+- [x] **Step 3: 创建 vault 包**
 
 新建 `memoria/vault/__init__.py`（空文件）：
 
 ```python
 ```
 
-- [ ] **Step 4: 实现 connector.py**
+- [x] **Step 4: 实现 connector.py**
 
 新建 `memoria/vault/connector.py`：
 
@@ -538,14 +538,14 @@ class WebDAVConnector(VaultConnector):
             return open(tmp.name, "rb").read()
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```
 pytest tests/test_vault_syncer.py -v
 ```
 预期：3 tests PASSED
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add memoria/vault/__init__.py memoria/vault/connector.py tests/test_vault_syncer.py
@@ -568,7 +568,7 @@ git commit -m "feat: 新增 vault 连接器模块 LocalConnector + WebDAVConnect
   - `VaultSyncer(db: DB, pipeline: Pipeline)`
   - `VaultSyncer.sync(vault_id: str) -> None`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/test_vault_syncer.py` 末尾追加：
 
@@ -645,14 +645,14 @@ def test_syncer_connector_failure_preserves_data(tmp_path):
     assert db.get_vault(vault["id"])["last_synced_at"] == ts_before
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```
 pytest tests/test_vault_syncer.py -k "syncer" -v
 ```
 预期：`ModuleNotFoundError: No module named 'memoria.vault.syncer'`
 
-- [ ] **Step 3: 更新 pipeline.ingest 支持 source 参数**
+- [x] **Step 3: 更新 pipeline.ingest 支持 source 参数**
 
 将 `memoria/core/pipeline.py` 的 `ingest` 方法改为：
 
@@ -670,7 +670,7 @@ pytest tests/test_vault_syncer.py -k "syncer" -v
         return {"doc_id": doc_id, "chunk_count": len(chunks), "doc": doc}
 ```
 
-- [ ] **Step 4: 新建 memoria/vault/syncer.py**
+- [x] **Step 4: 新建 memoria/vault/syncer.py**
 
 ```python
 from __future__ import annotations
@@ -776,21 +776,21 @@ class VaultSyncer:
         self.db.upsert_vault_file(vault["id"], rel_path, _sha256(content), result["doc"]["id"])
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 ```
 pytest tests/test_vault_syncer.py -v
 ```
 预期：全部 PASSED
 
-- [ ] **Step 6: 运行全量测试确认无回归**
+- [x] **Step 6: 运行全量测试确认无回归**
 
 ```
 pytest tests/ -v
 ```
 预期：全部 PASSED
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add memoria/vault/syncer.py memoria/core/pipeline.py tests/test_vault_syncer.py
@@ -816,7 +816,7 @@ git commit -m "feat: 实现 VaultSyncer 同步引擎，pipeline.ingest 支持 so
   - `DELETE /api/knowledge-bases/{kb_id}/vault` → 204
   - `POST /api/knowledge-bases/{kb_id}/vault/sync` → 202
   - `DELETE /api/documents/{doc_id}` → 409 当 source="vault"
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/test_server.py` 末尾追加：
 
@@ -856,14 +856,14 @@ def test_vault_manual_sync_202(client):
     assert r.status_code == 202
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```
 pytest tests/test_server.py -k "vault" -v
 ```
 预期：404（路由未注册）
 
-- [ ] **Step 3: 在 deps.py 添加 get_syncer**
+- [x] **Step 3: 在 deps.py 添加 get_syncer**
 
 在 `memoria/server/deps.py` 末尾追加：
 
@@ -873,7 +873,7 @@ def get_syncer() -> "VaultSyncer":
     return VaultSyncer(get_db(), get_pipeline())
 ```
 
-- [ ] **Step 4: 新建 memoria/server/routes/vaults.py**
+- [x] **Step 4: 新建 memoria/server/routes/vaults.py**
 
 ```python
 from __future__ import annotations
@@ -956,7 +956,7 @@ async def sync_vault(kb_id: str, db: DB = Depends(get_db),
     return {"status": "sync started"}
 ```
 
-- [ ] **Step 5: 更新 documents.py 阻止删除 vault 文档**
+- [x] **Step 5: 更新 documents.py 阻止删除 vault 文档**
 
 在 `delete_document` 函数的 404 检查之后，`store.delete` 之前插入：
 
@@ -966,7 +966,7 @@ async def sync_vault(kb_id: str, db: DB = Depends(get_db),
                             detail="Cannot manually delete vault-sourced document")
 ```
 
-- [ ] **Step 6: 更新 app.py 注册 vaults router 并添加 lifespan**
+- [x] **Step 6: 更新 app.py 注册 vaults router 并添加 lifespan**
 
 完整替换 `memoria/server/app.py`：
 
@@ -1046,21 +1046,21 @@ def create_app(lifespan=None) -> FastAPI:
 app = create_app(lifespan=lifespan)
 ```
 
-- [ ] **Step 7: 运行测试确认通过**
+- [x] **Step 7: 运行测试确认通过**
 
 ```
 pytest tests/test_server.py -k "vault" -v
 ```
 预期：全部 PASSED
 
-- [ ] **Step 8: 运行全量测试**
+- [x] **Step 8: 运行全量测试**
 
 ```
 pytest tests/ -v
 ```
 预期：全部 PASSED
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add memoria/server/routes/vaults.py memoria/server/app.py memoria/server/deps.py memoria/server/routes/documents.py tests/test_server.py
@@ -1083,7 +1083,7 @@ git commit -m "feat: vault API 路由、后台调度器、vault 文档删除保�
   - `VaultPanel` 组件（绑定/已绑定+解绑+立即同步）
   - vault 来源文档：隐藏删除按钮，显示 vault badge
 
-- [ ] **Step 1: 更新 web/src/api.ts**
+- [x] **Step 1: 更新 web/src/api.ts**
 
 将原有的 `Doc` 接口替换为含 `source` 字段的版本，并添加 Vault 相关类型和函数。
 
@@ -1125,14 +1125,14 @@ export const syncVault = (kbId: string) =>
   req<{ status: string }>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'POST' })
 ```
 
-- [ ] **Step 2: TypeScript 编译检查**
+- [x] **Step 2: TypeScript 编译检查**
 
 ```
 cd web && npx tsc --noEmit
 ```
 预期：无错误
 
-- [ ] **Step 3: 在 KnowledgeBases.tsx 添加 VaultPanel import 和组件**
+- [x] **Step 3: 在 KnowledgeBases.tsx 添加 VaultPanel import 和组件**
 
 在文件顶部的 import 行中添加新图标：
 ```tsx
@@ -1259,7 +1259,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
 }
 ```
 
-- [ ] **Step 4: 更新 DocList 处理 vault 文档**
+- [x] **Step 4: 更新 DocList 处理 vault 文档**
 
 在 DocList 组件的文档行中，将删除按钮的 `<Button>` 部分改为：
 
@@ -1280,7 +1280,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
 )}
 ```
 
-- [ ] **Step 5: 在 KB 展开区域插入 VaultPanel**
+- [x] **Step 5: 在 KB 展开区域插入 VaultPanel**
 
 在 `KnowledgeBases.tsx` 的展开内容块（`{expanded.has(kb.id) && (`）中，`<DocList>` 之前添加：
 
@@ -1288,21 +1288,21 @@ function VaultPanel({ kbId }: { kbId: string }) {
 <VaultPanel kbId={kb.id} />
 ```
 
-- [ ] **Step 6: TypeScript 编译检查**
+- [x] **Step 6: TypeScript 编译检查**
 
 ```
 cd web && npx tsc --noEmit
 ```
 预期：无错误
 
-- [ ] **Step 7: 构建前端**
+- [x] **Step 7: 构建前端**
 
 ```
 cd web && npm run build
 ```
 预期：Build 成功，无错误，生成 `memoria/static/assets/` 文件
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add web/src/api.ts web/src/pages/KnowledgeBases.tsx
@@ -1331,9 +1331,9 @@ Task 2 (DB 方法) ──/
 
 完成所有任务后，手动验证以下场景：
 
-- [ ] 本地 vault 全量同步：创建含 .md/.txt 文件的目录，绑定后验证文档被录入 KB
-- [ ] 增量同步验证：修改文件内容后手动 sync，验证旧向量被替换
-- [ ] 文件删除验证：删除源文件后 sync，验证对应 doc 被移除
-- [ ] 解绑验证：解绑后确认 vault、vault_files、documents、Chroma 向量均清除
-- [ ] WebDAV 连接失败处理：填入错误 URL，确认同步失败不影响现有数据
-- [ ] vault 文档删除保护：尝试手动删除 vault 来源文档，确认返回 409
+- [x] 本地 vault 全量同步：创建含 .md/.txt 文件的目录，绑定后验证文档被录入 KB
+- [x] 增量同步验证：修改文件内容后手动 sync，验证旧向量被替换
+- [x] 文件删除验证：删除源文件后 sync，验证对应 doc 被移除
+- [x] 解绑验证：解绑后确认 vault、vault_files、documents、Chroma 向量均清除
+- [x] WebDAV 连接失败处理：填入错误 URL，确认同步失败不影响现有数据
+- [x] vault 文档删除保护：尝试手动删除 vault 来源文档，确认返回 409

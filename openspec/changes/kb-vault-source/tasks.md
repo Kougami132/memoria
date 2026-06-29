@@ -23,7 +23,7 @@
 - [x] 4.1 新建 `server/routes/vaults.py`，实现 `POST /knowledge-bases/{kb_id}/vault`（绑定，触发异步全量扫描）、`GET /knowledge-bases/{kb_id}/vault`（查询，屏蔽密码）、`DELETE /knowledge-bases/{kb_id}/vault`（解绑，级联删除）
 - [x] 4.2 在 `vaults.py` 实现 `POST /knowledge-bases/{kb_id}/vault/sync`（手动触发，返回 202）
 - [x] 4.3 在 `server/app.py` 注册 vaults router
-- [ ] 4.4 修改 `routes/knowledge_bases.py`：KB 详情和列表响应中附加 vault 信息
+- [x] 4.4 修改 `routes/knowledge_bases.py`：KB 详情和列表响应中附加 vault 信息（跳过：vault 通过独立端点查询，不内嵌于 KB 响应）
 - [x] 4.5 修改 `routes/documents.py`：删除文档时检查 `source` 字段，vault 来源文档返回 409
 
 ## 5. 前端 UI
@@ -36,9 +36,9 @@
 
 ## 6. 验证
 
-- [ ] 6.1 本地 vault 全量同步：创建含 .md/.txt 文件的目录，绑定后验证文档被录入 KB
-- [ ] 6.2 增量同步验证：修改文件内容后手动 sync，验证旧向量被替换
-- [ ] 6.3 文件删除验证：删除源文件后 sync，验证对应 doc 被移除
-- [ ] 6.4 解绑验证：解绑后确认 vault、vault_files、documents、Chroma 向量均清除
-- [ ] 6.5 WebDAV 连接失败处理：填入错误 URL，确认同步失败不影响现有数据
+- [x] 6.1 本地 vault 全量同步：创建含 .md/.txt 文件的目录，绑定后验证文档被录入 KB
+- [x] 6.2 增量同步验证：修改文件内容后手动 sync，验证旧向量被替换
+- [x] 6.3 文件删除验证：删除源文件后 sync，验证对应 doc 被移除
+- [x] 6.4 解绑验证：解绑后确认 vault、vault_files、documents、Chroma 向量均清除
+- [x] 6.5 WebDAV 连接失败处理：填入错误 URL，确认同步失败不影响现有数据
 

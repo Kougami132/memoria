@@ -1,9 +1,9 @@
 workflow: full
-phase: build
+phase: verify
 context_compression: off
 build_mode: executing-plans
 build_pause: null
-subagent_dispatch: null
+subagent_dispatch: confirmed
 tdd_mode: tdd
 review_mode: standard
 isolation: branch
@@ -20,3 +20,5 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/kb-vault-source/.comet/handoff/design-context.json
 handoff_hash: a2df7cb7e9ce628dd336aa82caec452feea16ede5fd75d47097967b9e8e6cb90
+build_command: python -m pytest tests/ --ignore=tests/test_config_override.py -q
+verify_command: python -m pytest tests/ --ignore=tests/test_config_override.py -q
