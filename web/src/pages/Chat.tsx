@@ -89,7 +89,7 @@ export default function Chat() {
     setSessionId(sid)
     try {
       const msgs = await api.getMessages(sid)
-      setMessages(msgs.map(m => ({ role: m.role, content: m.content })))
+      setMessages(msgs.map(m => ({ role: m.role, content: m.content, sources: m.sources })))
     } catch {
       setMessages([])
     }

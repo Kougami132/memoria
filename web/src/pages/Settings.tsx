@@ -28,6 +28,7 @@ export default function Settings() {
         embedding_model: form.embedding_model,
         llm_model: form.llm_model,
         top_k: form.top_k ? Number(form.top_k) : undefined,
+        min_score: form.min_score ? Number(form.min_score) : undefined,
         chunk_size: form.chunk_size ? Number(form.chunk_size) : undefined,
         chunk_overlap: form.chunk_overlap ? Number(form.chunk_overlap) : undefined,
       }
@@ -161,7 +162,7 @@ export default function Settings() {
           <CardDescription>控制文档检索和分块的核心参数</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Top-K</Label>
               <Input
@@ -171,6 +172,19 @@ export default function Settings() {
                 onChange={set('top_k')}
               />
               <p className="text-xs text-muted-foreground">每次检索的块数量</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">最低相关度</Label>
+              <Input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                placeholder="0.5"
+                value={form.min_score ?? ''}
+                onChange={set('min_score')}
+              />
+              <p className="text-xs text-muted-foreground">低于此分数的块不注入提示词</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">块大小</Label>

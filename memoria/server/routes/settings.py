@@ -18,6 +18,7 @@ class SettingsUpdate(BaseModel):
     embedding_model: Optional[str] = None
     llm_model: Optional[str] = None
     top_k: Optional[int] = None
+    min_score: Optional[float] = None
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
 
@@ -35,6 +36,7 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
         "embedding_model": body.embedding_model,
         "llm_model": body.llm_model,
         "top_k": str(body.top_k) if body.top_k is not None else None,
+        "min_score": str(body.min_score) if body.min_score is not None else None,
         "chunk_size": str(body.chunk_size) if body.chunk_size is not None else None,
         "chunk_overlap": str(body.chunk_overlap) if body.chunk_overlap is not None else None,
     }

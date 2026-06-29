@@ -8,7 +8,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface KB { id: string; name: string; description: string; created_at: string }
-export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; created_at: string }
+export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; source: 'upload' | 'vault'; created_at: string }
 export interface UploadResult { doc_id: string; chunk_count: number; doc: Doc }
 export interface Bot {
   id: string; name: string; system_prompt: string;
@@ -18,7 +18,7 @@ export interface BotCreate { name: string; system_prompt?: string; kb_ids?: stri
 export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
 export interface Session { id: string; bot_id: string; created_at: string }
 export interface Message {
-  id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string
+  id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]
 }
 export interface Source { text: string; score: number; doc_id: string }
 export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
@@ -28,7 +28,7 @@ export interface Settings {
 }
 export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; embedding_model?: string;
-  llm_model?: string; top_k?: number; chunk_size?: number; chunk_overlap?: number
+  llm_model?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number
 }
 
 const json = (body: unknown) => ({
@@ -65,3 +65,22 @@ export const testEmbedding = () =>
   req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', { method: 'POST' })
 export const testChat = () =>
   req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', { method: 'POST' })
+
+export interface Vault {
+  id: string; kb_id: string; type: 'local' | 'webdav';
+  local_path?: string; webdav_url?: string; webdav_username?: string;
+  last_synced_at: string | null; created_at: string;
+}
+export interface VaultCreate {
+  type: 'local' | 'webdav';
+  local_path?: string;
+  webdav_url?: string; webdav_username?: string; webdav_password?: string;
+}
+
+export const getVault = (kbId: string) => req<Vault>(`/knowledge-bases/${kbId}/vault`)
+export const createVault = (kbId: string, data: VaultCreate) =>
+  req<Vault>(`/knowledge-bases/${kbId}/vault`, { method: 'POST', ...json(data) })
+export const deleteVault = (kbId: string) =>
+  req<void>(`/knowledge-bases/${kbId}/vault`, { method: 'DELETE' })
+export const syncVault = (kbId: string) =>
+  req<{ status: string }>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'POST' })
