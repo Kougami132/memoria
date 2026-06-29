@@ -89,3 +89,110 @@ def test_get_messages_all(db):
 def test_get_messages_all_session_not_exist(db):
     msgs = db.get_messages_all("nonexistent-id")
     assert msgs == []
+
+
+# ── Vault tests ─────────────────────────────────────────────────────────────
+
+def test_doc_has_source_field(db):
+    kb = db.create_kb("kb1", "")
+    doc = db.create_doc(kb["id"], "a.md", "/tmp/a.md", 3)
+    assert doc["source"] == "upload"
+    docs = db.list_docs(kb["id"])
+    assert docs[0]["source"] == "upload"
+
+
+def test_create_doc_with_vault_source(db):
+    kb = db.create_kb("kb1", "")
+    doc = db.create_doc(kb["id"], "a.md", "/tmp/a.md", 3, source="vault")
+    assert doc["source"] == "vault"
+
+
+def test_vault_crud_local(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/vault")
+    assert vault["type"] == "local"
+    assert vault["local_path"] == "/tmp/vault"
+    assert vault["kb_id"] == kb["id"]
+    assert vault["last_synced_at"] is None
+
+    fetched = db.get_vault_by_kb(kb["id"])
+    assert fetched["id"] == vault["id"]
+
+    fetched2 = db.get_vault(vault["id"])
+    assert fetched2["id"] == vault["id"]
+
+    vaults = db.list_vaults()
+    assert any(v["id"] == vault["id"] for v in vaults)
+
+
+def test_vault_crud_webdav(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(
+        kb["id"], "webdav",
+        webdav_url="https://dav.example.com",
+        webdav_username="user",
+        webdav_password="pass",
+    )
+    assert vault["type"] == "webdav"
+    assert vault["webdav_url"] == "https://dav.example.com"
+
+
+def test_vault_duplicate_kb_raises(db):
+    kb = db.create_kb("kb1", "")
+    db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    with pytest.raises(Exception):
+        db.create_vault(kb["id"], "local", local_path="/tmp/v2")
+
+
+def test_vault_last_synced_update(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    db.update_vault_last_synced(vault["id"], "2026-01-01T00:00:00+00:00")
+    fetched = db.get_vault(vault["id"])
+    assert fetched["last_synced_at"] == "2026-01-01T00:00:00+00:00"
+
+
+def test_vault_files_upsert_and_list(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    doc = db.create_doc(kb["id"], "note.md", "/tmp/v/note.md", 2)
+
+    vf = db.upsert_vault_file(vault["id"], "note.md", "deadbeef", doc["id"])
+    assert vf["rel_path"] == "note.md"
+    assert vf["file_hash"] == "deadbeef"
+
+    listing = db.list_vault_files(vault["id"])
+    assert len(listing) == 1
+    assert listing[0]["doc_id"] == doc["id"]
+
+    # upsert again with new hash
+    vf2 = db.upsert_vault_file(vault["id"], "note.md", "cafebabe", doc["id"])
+    assert vf2["file_hash"] == "cafebabe"
+    assert len(db.list_vault_files(vault["id"])) == 1
+
+
+def test_vault_file_delete(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    vf = db.upsert_vault_file(vault["id"], "a.md", "aaa", None)
+    db.delete_vault_file(vf["id"])
+    assert db.list_vault_files(vault["id"]) == []
+
+
+def test_delete_vault_cascades_vault_files(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    db.upsert_vault_file(vault["id"], "a.md", "aaa", None)
+    db.delete_vault(vault["id"])
+    assert db.get_vault_by_kb(kb["id"]) is None
+    assert db.list_vault_files(vault["id"]) == []
+
+
+def test_delete_kb_cascades_vault(db):
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    vault_id = vault["id"]
+    db.upsert_vault_file(vault_id, "a.md", "aaa", None)
+    db.delete_kb(kb["id"])
+    assert db.get_vault(vault_id) is None
+    assert db.list_vault_files(vault_id) == []

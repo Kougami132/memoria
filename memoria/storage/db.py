@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, Integer, String, create_engine, desc
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, desc, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -42,7 +43,32 @@ class DocumentRow(Base):
     filename = Column(String, nullable=False)
     path = Column(String, nullable=False)
     chunk_count = Column(Integer, default=0)
+    source = Column(String, nullable=False, default="upload")
     created_at = Column(String, nullable=False)
+
+
+class VaultRow(Base):
+    __tablename__ = "vaults"
+    __table_args__ = (UniqueConstraint("kb_id", name="uq_vaults_kb_id"),)
+    id = Column(String, primary_key=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False)
+    type = Column(String, nullable=False)
+    local_path = Column(String, nullable=True)
+    webdav_url = Column(String, nullable=True)
+    webdav_username = Column(String, nullable=True)
+    webdav_password = Column(String, nullable=True)
+    last_synced_at = Column(String, nullable=True)
+    created_at = Column(String, nullable=False)
+
+
+class VaultFileRow(Base):
+    __tablename__ = "vault_files"
+    id = Column(String, primary_key=True)
+    vault_id = Column(String, ForeignKey("vaults.id"), nullable=False)
+    rel_path = Column(String, nullable=False)
+    file_hash = Column(String, nullable=False)
+    doc_id = Column(String, nullable=True)
+    synced_at = Column(String, nullable=False)
 
 
 class SessionRow(Base):
@@ -58,6 +84,7 @@ class MessageRow(Base):
     session_id = Column(String, ForeignKey("sessions.id"), nullable=False)
     role = Column(String, nullable=False)
     content = Column(String, nullable=False)
+    sources = Column(Text, nullable=True)
     created_at = Column(String, nullable=False)
 
 
@@ -80,6 +107,15 @@ class DB:
     def __init__(self, db_path: str) -> None:
         engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         Base.metadata.create_all(engine)
+        with engine.connect() as conn:
+            msg_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(messages)"))]
+            if "sources" not in msg_cols:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN sources TEXT"))
+                conn.commit()
+            doc_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
+            if "source" not in doc_cols:
+                conn.execute(text("ALTER TABLE documents ADD COLUMN source TEXT DEFAULT 'upload'"))
+                conn.commit()
         self._Session = sessionmaker(bind=engine)
 
     @contextmanager
@@ -117,6 +153,13 @@ class DB:
 
     def delete_kb(self, kb_id: str) -> None:
         with self._s() as s:
+            s.query(BotKBLink).filter(BotKBLink.kb_id == kb_id).delete()
+            # cascade vault and vault_files
+            vault = s.query(VaultRow).filter(VaultRow.kb_id == kb_id).first()
+            if vault:
+                s.query(VaultFileRow).filter(VaultFileRow.vault_id == vault.id).delete()
+                s.delete(vault)
+            s.query(DocumentRow).filter(DocumentRow.kb_id == kb_id).delete()
             row = s.get(KnowledgeBaseRow, kb_id)
             if row:
                 s.delete(row)
@@ -174,6 +217,10 @@ class DB:
 
     def delete_bot(self, bot_id: str) -> None:
         with self._s() as s:
+            session_ids = [r.id for r in s.query(SessionRow).filter(SessionRow.bot_id == bot_id).all()]
+            if session_ids:
+                s.query(MessageRow).filter(MessageRow.session_id.in_(session_ids)).delete(synchronize_session=False)
+            s.query(SessionRow).filter(SessionRow.bot_id == bot_id).delete()
             s.query(BotKBLink).filter(BotKBLink.bot_id == bot_id).delete()
             row = s.get(BotRow, bot_id)
             if row:
@@ -181,14 +228,15 @@ class DB:
 
     # ── Documents ────────────────────────────────────────────────────────────
 
-    def create_doc(self, kb_id: str, filename: str, path: str, chunk_count: int) -> dict:
+    def create_doc(self, kb_id: str, filename: str, path: str, chunk_count: int, source: str = "upload") -> dict:
         with self._s() as s:
             row = DocumentRow(id=_uid(), kb_id=kb_id, filename=filename,
-                              path=path, chunk_count=chunk_count, created_at=_now())
+                              path=path, chunk_count=chunk_count, source=source, created_at=_now())
             s.add(row)
             s.flush()
             return {"id": row.id, "kb_id": row.kb_id, "filename": row.filename,
-                    "path": row.path, "chunk_count": row.chunk_count, "created_at": row.created_at}
+                    "path": row.path, "chunk_count": row.chunk_count,
+                    "source": row.source, "created_at": row.created_at}
 
     def get_doc(self, doc_id: str) -> dict | None:
         with self._s() as s:
@@ -196,12 +244,14 @@ class DB:
             if row is None:
                 return None
             return {"id": row.id, "kb_id": row.kb_id, "filename": row.filename,
-                    "path": row.path, "chunk_count": row.chunk_count, "created_at": row.created_at}
+                    "path": row.path, "chunk_count": row.chunk_count,
+                    "source": row.source, "created_at": row.created_at}
 
     def list_docs(self, kb_id: str) -> list[dict]:
         with self._s() as s:
             return [{"id": r.id, "kb_id": r.kb_id, "filename": r.filename,
-                     "path": r.path, "chunk_count": r.chunk_count, "created_at": r.created_at}
+                     "path": r.path, "chunk_count": r.chunk_count,
+                     "source": r.source, "created_at": r.created_at}
                     for r in s.query(DocumentRow).filter(DocumentRow.kb_id == kb_id).all()]
 
     def delete_doc(self, doc_id: str) -> None:
@@ -226,6 +276,13 @@ class DB:
                 return None
             return {"id": row.id, "bot_id": row.bot_id, "created_at": row.created_at}
 
+    def _msg_dict(self, r: MessageRow) -> dict:
+        return {
+            "id": r.id, "session_id": r.session_id, "role": r.role,
+            "content": r.content, "created_at": r.created_at,
+            "sources": json.loads(r.sources) if r.sources else [],
+        }
+
     def get_messages(self, session_id: str, limit: int = 10) -> list[dict]:
         with self._s() as s:
             rows = (s.query(MessageRow)
@@ -233,14 +290,14 @@ class DB:
                     .order_by(desc(MessageRow.created_at))
                     .limit(limit)
                     .all())
-            return [{"id": r.id, "session_id": r.session_id, "role": r.role,
-                     "content": r.content, "created_at": r.created_at}
-                    for r in reversed(rows)]
+            return [self._msg_dict(r) for r in reversed(rows)]
 
-    def add_message(self, session_id: str, role: str, content: str) -> None:
+    def add_message(self, session_id: str, role: str, content: str, sources: list | None = None) -> None:
         with self._s() as s:
             s.add(MessageRow(id=_uid(), session_id=session_id, role=role,
-                             content=content, created_at=_now()))
+                             content=content,
+                             sources=json.dumps(sources, ensure_ascii=False) if sources else None,
+                             created_at=_now()))
 
     # -- Runtime Settings ---------------------------------------------------
 
@@ -282,6 +339,90 @@ class DB:
                     .filter(MessageRow.session_id == session_id)
                     .order_by(MessageRow.created_at)
                     .all())
-            return [{"id": r.id, "session_id": r.session_id, "role": r.role,
-                     "content": r.content, "created_at": r.created_at}
-                    for r in rows]
+            return [self._msg_dict(r) for r in rows]
+
+    # ── Vaults ───────────────────────────────────────────────────────────────
+
+    def _vault_dict(self, row: VaultRow) -> dict:
+        return {
+            "id": row.id, "kb_id": row.kb_id, "type": row.type,
+            "local_path": row.local_path, "webdav_url": row.webdav_url,
+            "webdav_username": row.webdav_username, "webdav_password": row.webdav_password,
+            "last_synced_at": row.last_synced_at, "created_at": row.created_at,
+        }
+
+    def create_vault(self, kb_id: str, type: str, **kwargs) -> dict:
+        with self._s() as s:
+            row = VaultRow(
+                id=_uid(), kb_id=kb_id, type=type,
+                local_path=kwargs.get("local_path"),
+                webdav_url=kwargs.get("webdav_url"),
+                webdav_username=kwargs.get("webdav_username"),
+                webdav_password=kwargs.get("webdav_password"),
+                created_at=_now(),
+            )
+            s.add(row)
+            s.flush()
+            return self._vault_dict(row)
+
+    def get_vault_by_kb(self, kb_id: str) -> dict | None:
+        with self._s() as s:
+            row = s.query(VaultRow).filter(VaultRow.kb_id == kb_id).first()
+            return self._vault_dict(row) if row else None
+
+    def get_vault(self, vault_id: str) -> dict | None:
+        with self._s() as s:
+            row = s.get(VaultRow, vault_id)
+            return self._vault_dict(row) if row else None
+
+    def list_vaults(self) -> list[dict]:
+        with self._s() as s:
+            return [self._vault_dict(r) for r in s.query(VaultRow).all()]
+
+    def delete_vault(self, vault_id: str) -> None:
+        with self._s() as s:
+            s.query(VaultFileRow).filter(VaultFileRow.vault_id == vault_id).delete()
+            row = s.get(VaultRow, vault_id)
+            if row:
+                s.delete(row)
+
+    def update_vault_last_synced(self, vault_id: str, ts: str) -> None:
+        with self._s() as s:
+            row = s.get(VaultRow, vault_id)
+            if row:
+                row.last_synced_at = ts
+
+    # ── Vault Files ──────────────────────────────────────────────────────────
+
+    def _vf_dict(self, row: VaultFileRow) -> dict:
+        return {
+            "id": row.id, "vault_id": row.vault_id, "rel_path": row.rel_path,
+            "file_hash": row.file_hash, "doc_id": row.doc_id, "synced_at": row.synced_at,
+        }
+
+    def upsert_vault_file(self, vault_id: str, rel_path: str, file_hash: str, doc_id: str | None) -> dict:
+        with self._s() as s:
+            row = (s.query(VaultFileRow)
+                   .filter(VaultFileRow.vault_id == vault_id, VaultFileRow.rel_path == rel_path)
+                   .first())
+            if row:
+                row.file_hash = file_hash
+                row.doc_id = doc_id
+                row.synced_at = _now()
+            else:
+                row = VaultFileRow(id=_uid(), vault_id=vault_id, rel_path=rel_path,
+                                   file_hash=file_hash, doc_id=doc_id, synced_at=_now())
+                s.add(row)
+            s.flush()
+            return self._vf_dict(row)
+
+    def list_vault_files(self, vault_id: str) -> list[dict]:
+        with self._s() as s:
+            return [self._vf_dict(r)
+                    for r in s.query(VaultFileRow).filter(VaultFileRow.vault_id == vault_id).all()]
+
+    def delete_vault_file(self, vault_file_id: str) -> None:
+        with self._s() as s:
+            row = s.get(VaultFileRow, vault_file_id)
+            if row:
+                s.delete(row)
