@@ -82,25 +82,25 @@ export default function Chat() {
   }
 
   const sendMsg = useMutation({
-    mutationFn: () => api.chat(botId, input, sessionId ?? undefined),
-    onMutate: () => {
-      setMessages(prev => [...prev, { role: 'user', content: input }])
+    mutationFn: (message: string) => api.chat(botId, message, sessionId ?? undefined),
+    onMutate: (message: string) => {
+      setMessages(prev => [...prev, { role: 'user', content: message }])
       setInput('')
     },
     onSuccess: data => {
       if (!sessionId) { setSessionId(data.session_id); refetchSessions() }
       setMessages(prev => [...prev, { role: 'assistant', content: data.answer, sources: data.sources }])
     },
-    onError: () => {
+    onError: (_err, message) => {
       setMessages(prev => prev.slice(0, -1))
-      setInput(input)
+      setInput(message)
     },
   })
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && input.trim() && botId && !sendMsg.isPending) {
       e.preventDefault()
-      sendMsg.mutate()
+      sendMsg.mutate(input)
     }
   }
 
@@ -216,7 +216,7 @@ export default function Chat() {
                 />
                 <Button
                   variant="gradient"
-                  onClick={() => sendMsg.mutate()}
+                  onClick={() => sendMsg.mutate(input)}
                   disabled={!input.trim() || sendMsg.isPending}
                   className="rounded-2xl px-4 shrink-0"
                 >

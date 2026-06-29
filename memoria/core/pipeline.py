@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from memoria.core.chunker import Chunker
@@ -8,16 +9,19 @@ from memoria.llm.caller import LLMCaller, MockLLMCaller
 from memoria.storage.chroma_store import ChromaStore
 from memoria.storage.db import DB
 
+logger = logging.getLogger(__name__)
+
 
 class Pipeline:
     def __init__(self, db: DB, embedder: Embedder | MockEmbedder,
                  llm: LLMCaller | MockLLMCaller, chroma_path: str,
-                 top_k: int = 5) -> None:
+                 top_k: int = 5, min_score: float = 0.5) -> None:
         self.db = db
         self._embedder = embedder
         self._llm = llm
         self._chroma_path = chroma_path
         self._top_k = top_k
+        self._min_score = min_score
         self._stores: dict[str, ChromaStore] = {}
 
     def _get_store(self, kb_id: str) -> ChromaStore:
@@ -47,16 +51,35 @@ class Pipeline:
         return self._get_store(kb_id).query(embedding, k=k or self._top_k)
 
     def query(self, bot_id: str, query: str, session_id: str | None = None) -> dict:
+        if not query or not query.strip():
+            raise ValueError("Query must not be empty")
         bot = self.db.get_bot(bot_id)
         if bot is None:
             raise ValueError(f"Bot {bot_id} not found")
 
+        logger.debug("[RAG] bot=%s query=%r kb_ids=%s top_k=%d min_score=%.3f",
+                     bot_id, query, bot["kb_ids"], self._top_k, self._min_score)
+
         # Retrieve from all associated KBs and merge
         all_chunks: list[dict] = []
         for kb_id in bot["kb_ids"]:
-            all_chunks.extend(self.retrieve(kb_id, query))
+            kb_chunks = self.retrieve(kb_id, query)
+            logger.debug("[RAG] kb=%s retrieved %d chunks", kb_id, len(kb_chunks))
+            for i, c in enumerate(kb_chunks):
+                logger.debug("[RAG]   kb=%s rank=%d score=%.4f doc_id=%s text=%r",
+                             kb_id, i, c["score"], c["doc_id"], c["text"][:120])
+            all_chunks.extend(kb_chunks)
+
         all_chunks.sort(key=lambda x: x["score"], reverse=True)
-        context_chunks = all_chunks[:self._top_k]
+        context_chunks = [c for c in all_chunks[:self._top_k] if c["score"] >= self._min_score]
+
+        logger.debug("[RAG] after filter: %d/%d chunks passed min_score=%.3f",
+                     len(context_chunks), len(all_chunks), self._min_score)
+        for i, c in enumerate(context_chunks):
+            logger.debug("[RAG]   injected rank=%d score=%.4f doc_id=%s text=%r",
+                         i, c["score"], c["doc_id"], c["text"][:120])
+        if not context_chunks:
+            logger.debug("[RAG] no chunks injected — LLM will answer without context")
 
         # Session handling
         if session_id is not None:
@@ -68,6 +91,7 @@ class Pipeline:
             session_id = sess["id"]
 
         history = self.db.get_messages(session_id, limit=10)
+        logger.debug("[RAG] session=%s history_msgs=%d", session_id, len(history))
 
         # Build prompt
         context_text = "\n\n".join(c["text"] for c in context_chunks)
@@ -79,8 +103,10 @@ class Pipeline:
         messages.extend({"role": m["role"], "content": m["content"]} for m in history)
         messages.append({"role": "user", "content": query})
 
+        logger.debug("[RAG] sending %d messages to LLM", len(messages))
         result = self._llm.call(messages)
         answer = result["content"]
+        logger.debug("[RAG] answer=%r", answer[:200])
 
         self.db.add_message(session_id, "user", query)
         self.db.add_message(session_id, "assistant", answer)

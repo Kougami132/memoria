@@ -1,9 +1,28 @@
 from typing import Optional
 
 import click
+import logging
+import os
 import uvicorn
 
 from memoria.server.deps import get_db, get_pipeline
+
+
+def _setup_file_logging(log_path: str) -> None:
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(handler)
+    # Keep console at WARNING to avoid noise
+    for h in root.handlers:
+        if isinstance(h, logging.StreamHandler) and h is not handler:
+            h.setLevel(logging.WARNING)
 
 
 @click.group()
@@ -14,8 +33,11 @@ def cli() -> None:
 @cli.command()
 @click.option("--host", default="0.0.0.0", show_default=True)
 @click.option("--port", default=8000, show_default=True)
-def serve(host: str, port: int) -> None:
+@click.option("--log-file", default=None, help="Override log file path (default: from config)")
+def serve(host: str, port: int, log_file: str) -> None:
     """Start the Memoria API server."""
+    from memoria.config import settings
+    _setup_file_logging(log_file or settings.log_path)
     uvicorn.run("memoria.server.app:app", host=host, port=port, reload=False)
 
 

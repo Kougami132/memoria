@@ -10,9 +10,11 @@ class Settings(BaseSettings):
     chunk_size: int = 512
     chunk_overlap: int = 128
     top_k: int = 5
+    min_score: float = 0.2
     db_path: str = "./data/memoria.db"
     chroma_path: str = "./data/chroma"
     upload_dir: str = "./data/uploads"
+    log_path: str = "./data/memoria.log"
 
     class Config:
         env_file = ".env"
@@ -30,6 +32,7 @@ def get_effective_settings(db) -> dict:
         "embedding_model": str(settings.embedding_model),
         "llm_model": str(settings.llm_model),
         "top_k": str(settings.top_k),
+        "min_score": str(settings.min_score),
         "chunk_size": str(settings.chunk_size),
         "chunk_overlap": str(settings.chunk_overlap),
     }

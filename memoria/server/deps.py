@@ -36,7 +36,8 @@ def get_pipeline() -> Pipeline:
                         effective["openai_base_url"], effective["embedding_model"], effective["llm_model"])
         os.makedirs(settings.chroma_path, exist_ok=True)
         _pipeline = Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path,
-                             top_k=int(effective["top_k"]))
+                             top_k=int(effective["top_k"]),
+                             min_score=float(effective["min_score"]))
     return _pipeline
 
 
