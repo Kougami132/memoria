@@ -32,7 +32,7 @@ class Pipeline:
             )
         return self._stores[kb_id]
 
-    def ingest(self, kb_id: str, path: str) -> dict:
+    def ingest(self, kb_id: str, path: str, source: str = "upload") -> dict:
         chunks = [c for c in Chunker().split(path) if c.strip()]
         if not chunks:
             raise ValueError("File produced no embeddable content")
@@ -41,7 +41,7 @@ class Pipeline:
         ids = [f"{doc_id}__{i}" for i in range(len(chunks))]
         metadatas = [{"doc_id": doc_id} for _ in chunks]
         self._get_store(kb_id).add(ids, vectors, chunks, metadatas)
-        doc = self.db.create_doc(kb_id, os.path.basename(path), path, len(chunks))
+        doc = self.db.create_doc(kb_id, os.path.basename(path), path, len(chunks), source=source)
         return {"doc_id": doc_id, "chunk_count": len(chunks), "doc": doc}
 
     def retrieve(self, kb_id: str, query: str, k: int | None = None) -> list[dict]:
@@ -109,7 +109,10 @@ class Pipeline:
         logger.debug("[RAG] answer=%r", answer[:200])
 
         self.db.add_message(session_id, "user", query)
-        self.db.add_message(session_id, "assistant", answer)
+        self.db.add_message(session_id, "assistant", answer, sources=[
+            {"text": c["text"], "score": c["score"], "doc_id": c["doc_id"]}
+            for c in context_chunks
+        ])
 
         return {
             "answer": answer,

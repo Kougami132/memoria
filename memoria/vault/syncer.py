@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import tempfile
+from datetime import datetime, timezone
+
+from memoria.vault.connector import LocalConnector, VaultConnector, WebDAVConnector
+
+logger = logging.getLogger(__name__)
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class VaultSyncer:
+    def __init__(self, db, pipeline) -> None:
+        self.db = db
+        self.pipeline = pipeline
+
+    def _make_connector(self, vault: dict) -> VaultConnector:
+        if vault["type"] == "local":
+            return LocalConnector(vault["local_path"])
+        return WebDAVConnector(
+            vault["webdav_url"],
+            vault["webdav_username"],
+            vault["webdav_password"],
+        )
+
+    def sync(self, vault_id: str) -> None:
+        vault = self.db.get_vault(vault_id)
+        connector = self._make_connector(vault)
+
+        try:
+            current = set(connector.list_files())
+        except Exception:
+            logger.exception("vault_sync: list_files failed vault_id=%s", vault_id)
+            return
+
+        tracked = {f["rel_path"]: f for f in self.db.list_vault_files(vault_id)}
+
+        new_files = current - tracked.keys()
+        present_files = current & tracked.keys()
+        deleted_files = tracked.keys() - current
+
+        for rel_path in deleted_files:
+            row = tracked[rel_path]
+            if row["doc_id"]:
+                self._delete_doc(row["doc_id"], vault["kb_id"])
+            self.db.delete_vault_file(row["id"])
+
+        for rel_path in new_files:
+            self._ingest_file(connector, vault, rel_path)
+
+        for rel_path in present_files:
+            row = tracked[rel_path]
+            try:
+                content = connector.read_file(rel_path)
+            except Exception:
+                logger.warning("vault_sync: skip read error %s", rel_path)
+                continue
+            new_hash = _sha256(content)
+            if new_hash != row["file_hash"]:
+                if row["doc_id"]:
+                    self._delete_doc(row["doc_id"], vault["kb_id"])
+                self._ingest_file(connector, vault, rel_path, content=content)
+
+        self.db.update_vault_last_synced(vault_id, _now())
+
+    def _delete_doc(self, doc_id: str, kb_id: str) -> None:
+        try:
+            self.pipeline.delete_doc(doc_id, kb_id)
+        except Exception:
+            logger.warning("vault_sync: failed to delete doc %s", doc_id)
+
+    def _ingest_file(self, connector: VaultConnector, vault: dict, rel_path: str,
+                     content: bytes | None = None) -> None:
+        if content is None:
+            try:
+                content = connector.read_file(rel_path)
+            except Exception:
+                logger.warning("vault_sync: skip file read error %s", rel_path)
+                return
+
+        ext = os.path.splitext(rel_path)[1]
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=True) as tmp:
+            tmp.write(content)
+            tmp.flush()
+            try:
+                result = self.pipeline.ingest(vault["kb_id"], tmp.name, source="vault")
+            except Exception:
+                logger.error("vault_sync: ingest failed %s", rel_path)
+                return
+
+        doc_id = result["doc"]["id"]
+        self.db.upsert_vault_file(vault["id"], rel_path, _sha256(content), doc_id)
