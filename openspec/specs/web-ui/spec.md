@@ -41,7 +41,7 @@ Web UI SHALL 提供 Bot 的创建、编辑、删除功能，支持关联多个 K
 - **THEN** 调用 `PUT /api/bots/{bot_id}`，展示更新后内容
 
 ### Requirement: 对话页
-Web UI SHALL 提供选择 Bot、创建/切换会话、发送消息、查看回答及引用片段的能力。
+Web UI SHALL 提供选择 Bot、创建/切换会话、发送消息、查看回答及引用片段的能力。assistant 消息 SHALL 以 Markdown 格式渲染，user 消息以纯文本渲染。
 
 #### Scenario: 新建会话
 - **WHEN** 用户选择 Bot 并点击"新建会话"
@@ -54,6 +54,10 @@ Web UI SHALL 提供选择 Bot、创建/切换会话、发送消息、查看回�
 #### Scenario: 查看引用来源
 - **WHEN** 收到 Chat API 响应
 - **THEN** 在回答下方展示 `sources` 列表，每条显示 doc_id 和相关文本片段
+
+#### Scenario: assistant 消息 Markdown 渲染
+- **WHEN** 收到包含 Markdown 格式的 assistant 消息
+- **THEN** 消息气泡中正确渲染 Markdown（加粗、列表、代码块等），不显示字面符号
 
 ### Requirement: 设置页
 Web UI SHALL 提供运行时配置的查看和修改入口，字段包括 openai_base_url、api_key、embedding_model、llm_model、top_k、chunk_size、chunk_overlap。
