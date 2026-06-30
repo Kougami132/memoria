@@ -40,7 +40,12 @@ class ChromaStore(VectorStore):
                 # Chroma L2 returns squared L2 distance for normalized vectors
                 # cos_sim = 1 - squared_l2 / 2
                 score = 1.0 - dist / 2.0
-            results.append({"text": text, "score": score, "doc_id": meta.get("doc_id", "")})
+            results.append({
+                "text": text,
+                "score": score,
+                "doc_id": meta.get("doc_id", ""),
+                "db_doc_id": meta.get("db_doc_id", ""),
+            })
         return results
 
     def delete(self, where: dict) -> None:

@@ -29,3 +29,10 @@ def test_delete(store):
     store.delete(where={"doc_id": "doc1"})
     results = store.query(emb, k=5)
     assert len(results) == 0
+
+
+def test_chroma_store_returns_db_doc_id(store):
+    emb = [0.1] * 1536
+    store.add(["id1"], [emb], ["some chunk"], [{"doc_id": "doc1", "db_doc_id": "uuid-test"}])
+    results = store.query(emb, k=1)
+    assert results[0]["db_doc_id"] == "uuid-test"
