@@ -31,6 +31,7 @@ export default function Settings() {
         min_score: form.min_score ? Number(form.min_score) : undefined,
         chunk_size: form.chunk_size ? Number(form.chunk_size) : undefined,
         chunk_overlap: form.chunk_overlap ? Number(form.chunk_overlap) : undefined,
+        vault_sync_interval_minutes: form.vault_sync_interval_minutes ? Number(form.vault_sync_interval_minutes) : undefined,
       }
       if (form.openai_api_key !== settings?.openai_api_key) {
         payload.api_key = form.openai_api_key
@@ -206,6 +207,26 @@ export default function Settings() {
               />
               <p className="text-xs text-muted-foreground">相邻块重叠字符数</p>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold text-foreground">Vault 同步</CardTitle>
+          <CardDescription>配置 Vault 自动同步行为</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">自动同步间隔（分钟）</Label>
+            <Input
+              type="number"
+              min="1"
+              placeholder="15"
+              value={form.vault_sync_interval_minutes ?? ''}
+              onChange={set('vault_sync_interval_minutes')}
+            />
+            <p className="text-xs text-muted-foreground">Vault 自动同步的时间间隔，单位为分钟</p>
           </div>
         </CardContent>
       </Card>

@@ -36,7 +36,8 @@ export interface Settings {
 }
 export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; embedding_model?: string;
-  llm_model?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number
+  llm_model?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
+  vault_sync_interval_minutes?: number
 }
 
 const json = (body: unknown) => ({
