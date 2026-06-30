@@ -75,7 +75,6 @@ async def bind_vault(
     def _initial_sync():
         cancel_event = threading.Event()
         _cancel_events[vault["id"]] = cancel_event
-        db.set_vault_syncing(vault["id"], True)
         try:
             VaultSyncer(db, pipeline).sync(vault["id"], cancel_event=cancel_event)
         except Exception:
@@ -84,6 +83,7 @@ async def bind_vault(
             db.set_vault_syncing(vault["id"], False)
             _cancel_events.pop(vault["id"], None)
 
+    db.set_vault_syncing(vault["id"], True)
     background_tasks.add_task(_initial_sync)
     return _mask_vault(vault)
 
