@@ -230,3 +230,67 @@ def test_vault_doc_delete_409(client, tmp_path):
     # Can delete upload-sourced doc
     r_del = client.delete(f"/api/documents/{doc_id}")
     assert r_del.status_code == 204
+
+
+# ── vault-sync-control tests ──────────────────────────────────────────────────
+
+def test_vault_sync_409_when_syncing(client):
+    """POST /sync while syncing=True must return 409."""
+    from unittest.mock import patch
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    # Force syncing=True in DB via set_vault_syncing before the request
+    import memoria.server.routes.vaults as vaults_mod
+    from memoria.server.deps import get_db
+    db = client.app.dependency_overrides[get_db]()
+    vault = db.get_vault_by_kb(kb["id"])
+    db.set_vault_syncing(vault["id"], True)
+    r = client.post(f"/api/knowledge-bases/{kb['id']}/vault/sync")
+    assert r.status_code == 409
+
+
+def test_vault_cancel_sync_sets_event(client):
+    """DELETE /sync must set the cancel event for the running sync."""
+    import threading
+    import memoria.server.routes.vaults as vaults_mod
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    from memoria.server.deps import get_db
+    db = client.app.dependency_overrides[get_db]()
+    vault = db.get_vault_by_kb(kb["id"])
+    # Manually plant a cancel event as if sync were running
+    event = threading.Event()
+    vaults_mod._cancel_events[vault["id"]] = event
+    r = client.delete(f"/api/knowledge-bases/{kb['id']}/vault/sync")
+    assert r.status_code == 204
+    assert event.is_set()
+    # cleanup
+    vaults_mod._cancel_events.pop(vault["id"], None)
+
+
+def test_vault_cancel_sync_no_vault_404(client):
+    """DELETE /sync on kb with no vault returns 404."""
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
+    r = client.delete(f"/api/knowledge-bases/{kb['id']}/vault/sync")
+    assert r.status_code == 404
+
+
+def test_vault_patch_auto_sync(client):
+    """PATCH /vault {auto_sync: false} persists and is reflected in GET."""
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
+    client.post(f"/api/knowledge-bases/{kb['id']}/vault",
+                json={"type": "local", "local_path": "/tmp/vault"})
+    r = client.patch(f"/api/knowledge-bases/{kb['id']}/vault", json={"auto_sync": False})
+    assert r.status_code == 200
+    assert r.json()["auto_sync"] is False
+    r2 = client.get(f"/api/knowledge-bases/{kb['id']}/vault")
+    assert r2.json()["auto_sync"] is False
+
+
+def test_vault_patch_no_vault_404(client):
+    """PATCH /vault on kb with no vault returns 404."""
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
+    r = client.patch(f"/api/knowledge-bases/{kb['id']}/vault", json={"auto_sync": True})
+    assert r.status_code == 404

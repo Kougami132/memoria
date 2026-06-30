@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -15,6 +16,8 @@ from memoria.vault.syncer import VaultSyncer
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["vaults"])
+
+_cancel_events: dict[str, threading.Event] = {}
 
 
 class VaultCreate(BaseModel):
@@ -70,10 +73,13 @@ async def bind_vault(
         raise HTTPException(status_code=409, detail="Knowledge base already has a vault")
 
     def _initial_sync():
+        db.set_vault_syncing(vault["id"], True)
         try:
             VaultSyncer(db, pipeline).sync(vault["id"])
         except Exception:
             logger.exception("vault: initial sync failed vault_id=%s", vault["id"])
+        finally:
+            db.set_vault_syncing(vault["id"], False)
 
     background_tasks.add_task(_initial_sync)
     return _mask_vault(vault)
@@ -110,14 +116,46 @@ async def sync_vault(
     vault = db.get_vault_by_kb(kb_id)
     if vault is None:
         raise HTTPException(status_code=404, detail="No vault bound to this knowledge base")
+    if vault["syncing"]:
+        raise HTTPException(status_code=409, detail="Vault sync already in progress")
 
     def _run_sync():
+        cancel_event = threading.Event()
+        _cancel_events[vault["id"]] = cancel_event
+        db.set_vault_syncing(vault["id"], True)
         try:
-            VaultSyncer(db, pipeline).sync(vault["id"])
+            VaultSyncer(db, pipeline).sync(vault["id"], cancel_event=cancel_event)
         except Exception:
             logger.exception("vault: manual sync failed vault_id=%s", vault["id"])
+        finally:
+            db.set_vault_syncing(vault["id"], False)
+            _cancel_events.pop(vault["id"], None)
 
     background_tasks.add_task(_run_sync)
     return {"status": "sync started"}
+
+
+@router.delete("/knowledge-bases/{kb_id}/vault/sync", status_code=204)
+def cancel_vault_sync(kb_id: str, db: DB = Depends(get_db)):
+    vault = db.get_vault_by_kb(kb_id)
+    if vault is None:
+        raise HTTPException(status_code=404, detail="No vault bound to this knowledge base")
+    event = _cancel_events.get(vault["id"])
+    if event:
+        event.set()
+
+
+class VaultUpdate(BaseModel):
+    auto_sync: Optional[bool] = None
+
+
+@router.patch("/knowledge-bases/{kb_id}/vault")
+def update_vault(kb_id: str, body: VaultUpdate, db: DB = Depends(get_db)):
+    vault = db.get_vault_by_kb(kb_id)
+    if vault is None:
+        raise HTTPException(status_code=404, detail="No vault bound to this knowledge base")
+    if body.auto_sync is not None:
+        db.update_vault_auto_sync(vault["id"], body.auto_sync)
+    return _mask_vault(db.get_vault_by_kb(kb_id))
 
 
