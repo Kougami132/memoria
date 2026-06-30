@@ -366,3 +366,22 @@ def test_settings_vault_sync_interval_reschedule_safe_without_scheduler(client):
     """PUT /settings with vault_sync_interval_minutes must not fail when no scheduler on app.state."""
     r = client.put("/api/settings", json={"vault_sync_interval_minutes": 10})
     assert r.status_code == 200
+
+
+def test_delete_session(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+    chat = client.post(f"/api/chat/{bot['id']}", json={"message": "hello"}).json()
+    session_id = chat["session_id"]
+
+    r = client.delete(f"/api/sessions/{session_id}")
+    assert r.status_code == 204
+
+    # 再次删除应返回 404
+    r2 = client.delete(f"/api/sessions/{session_id}")
+    assert r2.status_code == 404
+
+
+def test_delete_session_not_found(client):
+    r = client.delete("/api/sessions/nonexistent")
+    assert r.status_code == 404
