@@ -130,6 +130,7 @@ export default function Chat() {
       if (sid === sessionId) newSession()
       refetchSessions()
     },
+    onError: () => refetchSessions(),
   })
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -180,8 +181,9 @@ export default function Chat() {
                 <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
               </button>
               <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-black/10"
+                className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
                 onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
+                disabled={deleteSessionMutation.isPending}
                 aria-label="删除会话"
               >
                 <Trash2 className="h-3.5 w-3.5" />

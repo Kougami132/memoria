@@ -375,7 +375,7 @@ class DB:
 
     def delete_session(self, session_id: str) -> None:
         with self._s() as s:
-            s.query(MessageRow).filter(MessageRow.session_id == session_id).delete()
+            s.query(MessageRow).filter(MessageRow.session_id == session_id).delete(synchronize_session=False)
             row = s.get(SessionRow, session_id)
             if row:
                 s.delete(row)
