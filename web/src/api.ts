@@ -20,7 +20,14 @@ export interface Session { id: string; bot_id: string; created_at: string }
 export interface Message {
   id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]
 }
-export interface Source { text: string; score: number; doc_id: string }
+export interface Source {
+  text: string
+  score: number
+  doc_id: string
+  filename?: string
+  path?: string
+  source?: string
+}
 export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
 export interface Settings {
   openai_base_url: string; openai_api_key: string; embedding_model: string;
