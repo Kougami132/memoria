@@ -373,6 +373,13 @@ class DB:
                     .all())
             return [self._msg_dict(r) for r in rows]
 
+    def delete_session(self, session_id: str) -> None:
+        with self._s() as s:
+            s.query(MessageRow).filter(MessageRow.session_id == session_id).delete()
+            row = s.get(SessionRow, session_id)
+            if row:
+                s.delete(row)
+
     # ── Vaults ───────────────────────────────────────────────────────────────
 
     def _vault_dict(self, row: VaultRow) -> dict:

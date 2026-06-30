@@ -220,3 +220,22 @@ def test_db_update_vault_auto_sync(db):
     db.update_vault_auto_sync(vault_id, True)
     fetched = db.get_vault(vault_id)
     assert fetched["auto_sync"] is True
+
+
+def test_delete_session_cascades_messages(tmp_path):
+    db = DB(str(tmp_path / "test.db"))
+    bot = db.create_bot("b")
+    session = db.create_session(bot["id"])
+    db.add_message(session["id"], "user", "hello")
+    db.add_message(session["id"], "assistant", "hi")
+
+    db.delete_session(session["id"])
+
+    assert db.get_session(session["id"]) is None
+    assert db.get_messages_all(session["id"]) == []
+
+
+def test_delete_session_nonexistent_is_noop(tmp_path):
+    db = DB(str(tmp_path / "test.db"))
+    # 不应抛出异常
+    db.delete_session("nonexistent-id")
