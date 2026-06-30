@@ -73,7 +73,7 @@ def test_ingest_chroma_metadata_contains_db_doc_id(pipeline, tmp_path):
     db_doc_id = result["doc"]["id"]
     store = pipeline._get_store(kb["id"])
     # Fetch all stored metadatas and verify db_doc_id is present
-    raw = store._col.get(include=["metadatas"])
+    raw = store._col().get(include=["metadatas"])
     assert all(m.get("db_doc_id") == db_doc_id for m in raw["metadatas"])
 
 
@@ -111,11 +111,11 @@ def test_query_source_degrades_gracefully_without_db_doc_id(pipeline, tmp_path):
     # Ingest normally then manually corrupt one chunk's metadata to remove db_doc_id
     pipeline.ingest(kb["id"], str(f))
     store = pipeline._get_store(kb["id"])
-    raw = store._col.get(include=["metadatas", "embeddings", "documents"])
+    raw = store._col().get(include=["metadatas", "embeddings", "documents"])
     # Overwrite first chunk without db_doc_id
     first_id = raw["ids"][0]
     bad_meta = {k: v for k, v in raw["metadatas"][0].items() if k != "db_doc_id"}
-    store._col.update(ids=[first_id], metadatas=[bad_meta])
+    store._col().update(ids=[first_id], metadatas=[bad_meta])
 
     bot = pipeline.db.create_bot("bot1", "helpful", [kb["id"]])
     # Should not raise even if some chunks lack db_doc_id
