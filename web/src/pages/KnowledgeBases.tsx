@@ -16,7 +16,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
   const [webdavUser, setWebdavUser] = useState('')
   const [webdavPass, setWebdavPass] = useState('')
 
-  const { data: vault, isLoading } = useQuery({
+  const { data: vault, isLoading, refetch: refetchVault } = useQuery({
     queryKey: ['vault', kbId],
     queryFn: () => api.getVault(kbId).catch(() => null),
     refetchInterval: (query) => (query.state.data?.syncing ? 2000 : false),
@@ -51,6 +51,16 @@ function VaultPanel({ kbId }: { kbId: string }) {
   const syncVault = useMutation({
     mutationFn: () => api.syncVault(kbId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['vault', kbId] }),
+  })
+
+  const cancelSync = useMutation({
+    mutationFn: () => api.cancelVaultSync(kbId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['vault', kbId] }),
+  })
+
+  const toggleAutoSync = useMutation({
+    mutationFn: (v: boolean) => api.updateVault(kbId, { auto_sync: v }),
+    onSuccess: () => refetchVault(),
   })
 
   if (isLoading) return null
@@ -120,18 +130,26 @@ function VaultPanel({ kbId }: { kbId: string }) {
                 上次同步: {new Date(vault.last_synced_at).toLocaleString()}
               </p>
             )}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              <span>自动同步</span>
+              <button
+                className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${vault.auto_sync ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                onClick={() => toggleAutoSync.mutate(!vault.auto_sync)}
+              >
+                <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${vault.auto_sync ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <Button
-            variant="outline"
+            variant={isSyncing ? 'destructive' : 'outline'}
             size="sm"
             className="h-7 gap-1 text-xs"
-            disabled={isSyncing}
-            onClick={() => syncVault.mutate()}
+            onClick={() => isSyncing ? cancelSync.mutate() : syncVault.mutate()}
           >
-            <RefreshCw className={`h-3 w-3 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? '同步中…' : '立即同步'}
+            <RefreshCw className={`h-3 w-3 ${isSyncing && !cancelSync.isPending ? 'animate-spin' : ''}`} />
+            {isSyncing ? '停止同步' : '立即同步'}
           </Button>
           <Button
             variant="ghost"
