@@ -31,7 +31,8 @@ export interface Source {
 export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
 export interface Settings {
   openai_base_url: string; openai_api_key: string; embedding_model: string;
-  llm_model: string; top_k: string; chunk_size: string; chunk_overlap: string
+  llm_model: string; top_k: string; chunk_size: string; chunk_overlap: string;
+  vault_sync_interval_minutes: string
 }
 export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; embedding_model?: string;
@@ -81,7 +82,7 @@ export const testChat = () =>
 export interface Vault {
   id: string; kb_id: string; type: 'local' | 'webdav';
   local_path?: string; webdav_url?: string; webdav_username?: string;
-  last_synced_at: string | null; syncing: boolean; created_at: string;
+  last_synced_at: string | null; syncing: boolean; auto_sync: boolean; created_at: string;
 }
 export interface VaultCreate {
   type: 'local' | 'webdav';
@@ -96,3 +97,7 @@ export const deleteVault = (kbId: string) =>
   req<void>(`/knowledge-bases/${kbId}/vault`, { method: 'DELETE' })
 export const syncVault = (kbId: string) =>
   req<{ status: string }>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'POST' })
+export const cancelVaultSync = (kbId: string): Promise<void> =>
+  req<void>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'DELETE' })
+export const updateVault = (kbId: string, body: { auto_sync: boolean }): Promise<Vault> =>
+  req<Vault>(`/knowledge-bases/${kbId}/vault`, { method: 'PATCH', ...json(body) })
