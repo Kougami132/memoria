@@ -73,6 +73,7 @@ async def bind_vault(
         raise HTTPException(status_code=409, detail="Knowledge base already has a vault")
 
     def _initial_sync():
+        logger.info("vault: _initial_sync CALLED vault_id=%s", vault["id"])
         cancel_event = threading.Event()
         _cancel_events[vault["id"]] = cancel_event
         try:

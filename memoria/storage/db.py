@@ -108,7 +108,12 @@ def _uid() -> str:
 
 class DB:
     def __init__(self, db_path: str) -> None:
-        engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+        from sqlalchemy.pool import NullPool
+        engine = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+            poolclass=NullPool,
+        )
         Base.metadata.create_all(engine)
         with engine.connect() as conn:
             kb_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(knowledge_bases)"))]
@@ -422,10 +427,19 @@ class DB:
                 row.last_synced_at = ts
 
     def set_vault_syncing(self, vault_id: str, syncing: bool) -> None:
+        import logging
         with self._s() as s:
             row = s.get(VaultRow, vault_id)
             if row:
                 row.syncing = int(syncing)
+                s.flush()
+        # 立即读回验证
+        with self._s() as s:
+            row = s.get(VaultRow, vault_id)
+            actual = bool(row.syncing) if row else None
+            logging.getLogger(__name__).info(
+                "set_vault_syncing vault_id=%s requested=%s actual=%s", vault_id, syncing, actual
+            )
 
     def update_vault_auto_sync(self, vault_id: str, auto_sync: bool) -> None:
         with self._s() as s:
