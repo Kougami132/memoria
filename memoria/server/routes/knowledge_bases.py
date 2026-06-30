@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 
 from memoria.core.pipeline import Pipeline
 from memoria.server.deps import get_db, get_pipeline
+from memoria.server.routes.vaults import _cancel_events
 from memoria.storage.db import DB
 from memoria.vault.syncer import VaultSyncer
 
@@ -58,12 +60,18 @@ def create_kb(body: KBCreate, background_tasks: BackgroundTasks,
         )
 
         def _initial_sync():
+            cancel_event = threading.Event()
+            _cancel_events[vault["id"]] = cancel_event
             try:
-                VaultSyncer(db, pipeline).sync(vault["id"])
+                VaultSyncer(db, pipeline).sync(vault["id"], cancel_event=cancel_event)
             except Exception:
                 logger.exception("vault: initial sync failed vault_id=%s", vault["id"])
+            finally:
+                db.set_vault_syncing(vault["id"], False)
+                _cancel_events.pop(vault["id"], None)
 
-        background_tasks.add_task(_initial_sync)
+        db.set_vault_syncing(vault["id"], True)
+        threading.Thread(target=_initial_sync, daemon=True).start()
 
     return kb
 
