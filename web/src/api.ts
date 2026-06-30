@@ -71,6 +71,7 @@ export const listSessions = (botId: string) => req<Session[]>(`/bots/${botId}/se
 export const chat = (botId: string, message: string, sessionId?: string) =>
   req<ChatResponse>(`/chat/${botId}`, { method: 'POST', ...json({ message, session_id: sessionId }) })
 export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${sessionId}/messages`)
+export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { method: 'DELETE' })
 
 export const getSettings = () => req<Settings>('/settings')
 export const updateSettings = (data: SettingsUpdate) =>
