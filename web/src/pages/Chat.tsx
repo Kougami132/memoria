@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain } from 'lucide-react'
+import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain, Trash2 } from 'lucide-react'
 import * as api from '@/api'
 import type { Source } from '@/api'
 import ReactMarkdown from 'react-markdown'
@@ -124,6 +124,14 @@ export default function Chat() {
     },
   })
 
+  const deleteSessionMutation = useMutation({
+    mutationFn: (sid: string) => api.deleteSession(sid),
+    onSuccess: (_data, sid) => {
+      if (sid === sessionId) newSession()
+      refetchSessions()
+    },
+  })
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && input.trim() && botId && !sendMsg.isPending) {
       e.preventDefault()
@@ -156,18 +164,29 @@ export default function Chat() {
             <p className="text-xs text-muted-foreground text-center py-6">暂无历史会话</p>
           )}
           {sessions.map((s, index) => (
-            <button
+            <div
               key={s.id}
-              className={`w-full text-left rounded-xl px-3 py-3 text-xs transition-colors ${
+              className={`group relative w-full rounded-xl text-xs transition-colors ${
                 s.id === sessionId
                   ? 'bg-gradient-to-r from-purple-600/90 to-blue-500/90 text-white shadow-sm'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
-              onClick={() => loadSession(s.id)}
             >
-              <p className="font-medium truncate">会话 {index + 1}</p>
-              <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
-            </button>
+              <button
+                className="w-full text-left px-3 py-3"
+                onClick={() => loadSession(s.id)}
+              >
+                <p className="font-medium truncate pr-5">会话 {index + 1}</p>
+                <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
+              </button>
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-black/10"
+                onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
+                aria-label="删除会话"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       </div>
