@@ -5,29 +5,43 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from memoria.server.routes import bots, chat, documents, knowledge_bases, settings, sessions, vaults
+from memoria.server.deps import get_db, get_pipeline
+from memoria.vault.syncer import VaultSyncer
+
+
+def _sync_all_vaults():
+    db = get_db()
+    pipeline = get_pipeline()
+    syncer = VaultSyncer(db, pipeline)
+    for vault in db.list_vaults():
+        if not vault.get("auto_sync", True):
+            continue
+        if vault.get("syncing"):
+            continue
+        db.set_vault_syncing(vault["id"], True)
+        try:
+            syncer.sync(vault["id"])
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "vault poll failed: vault_id=%s", vault["id"]
+            )
+        finally:
+            db.set_vault_syncing(vault["id"], False)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from memoria.server.deps import get_db, get_pipeline
-    from memoria.vault.syncer import VaultSyncer
+    from memoria.config import get_effective_settings
 
     scheduler = AsyncIOScheduler()
 
-    def _sync_all_vaults():
-        db = get_db()
-        syncer = VaultSyncer(db, get_pipeline())
-        for vault in db.list_vaults():
-            try:
-                syncer.sync(vault["id"])
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "vault poll failed: vault_id=%s", vault["id"]
-                )
+    _settings = get_effective_settings(get_db())
+    interval_minutes = int(_settings.get("vault_sync_interval_minutes") or 15)
 
-    scheduler.add_job(_sync_all_vaults, "interval", minutes=15, max_instances=1, id="vault_poll")
+    scheduler.add_job(_sync_all_vaults, "interval", minutes=interval_minutes, max_instances=1, id="vault_poll")
     scheduler.start()
+    app.state.scheduler = scheduler
     yield
     scheduler.shutdown(wait=False)
 

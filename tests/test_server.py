@@ -294,3 +294,53 @@ def test_vault_patch_no_vault_404(client):
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     r = client.patch(f"/api/knowledge-bases/{kb['id']}/vault", json={"auto_sync": True})
     assert r.status_code == 404
+
+
+# ── Task 4: _sync_all_vaults unit tests ──────────────────────────────────────
+
+def test_sync_all_vaults_skips_auto_sync_false():
+    """_sync_all_vaults must skip vaults where auto_sync=False."""
+    from unittest.mock import MagicMock, patch
+    from memoria.server.app import _lifespan  # noqa: import triggers nothing
+
+    # Import the module to access the inner function indirectly via patching
+    import memoria.server.app as app_mod
+
+    mock_db = MagicMock()
+    mock_db.list_vaults.return_value = [
+        {"id": "v1", "auto_sync": False, "syncing": False},
+        {"id": "v2", "auto_sync": True,  "syncing": False},
+    ]
+    mock_syncer = MagicMock()
+
+    with patch("memoria.server.app.get_db", return_value=mock_db), \
+         patch("memoria.server.app.get_pipeline", return_value=MagicMock()), \
+         patch("memoria.server.app.VaultSyncer", return_value=mock_syncer):
+        app_mod._sync_all_vaults()
+
+    # Only v2 should be synced
+    called_ids = [call.args[0] for call in mock_syncer.sync.call_args_list]
+    assert "v1" not in called_ids
+    assert "v2" in called_ids
+
+
+def test_sync_all_vaults_skips_already_syncing():
+    """_sync_all_vaults must skip vaults where syncing=True."""
+    from unittest.mock import MagicMock, patch
+    import memoria.server.app as app_mod
+
+    mock_db = MagicMock()
+    mock_db.list_vaults.return_value = [
+        {"id": "v1", "auto_sync": True, "syncing": True},
+        {"id": "v2", "auto_sync": True, "syncing": False},
+    ]
+    mock_syncer = MagicMock()
+
+    with patch("memoria.server.app.get_db", return_value=mock_db), \
+         patch("memoria.server.app.get_pipeline", return_value=MagicMock()), \
+         patch("memoria.server.app.VaultSyncer", return_value=mock_syncer):
+        app_mod._sync_all_vaults()
+
+    called_ids = [call.args[0] for call in mock_syncer.sync.call_args_list]
+    assert "v1" not in called_ids
+    assert "v2" in called_ids
