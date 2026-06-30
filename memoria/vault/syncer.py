@@ -36,45 +36,42 @@ class VaultSyncer:
     def sync(self, vault_id: str) -> None:
         vault = self.db.get_vault(vault_id)
         connector = self._make_connector(vault)
-        self.db.set_vault_syncing(vault_id, True)
+
         try:
+            current = set(connector.list_files())
+        except Exception:
+            logger.exception("vault_sync: list_files failed vault_id=%s", vault_id)
+            return
+
+        tracked = {f["rel_path"]: f for f in self.db.list_vault_files(vault_id)}
+
+        new_files = current - tracked.keys()
+        present_files = current & tracked.keys()
+        deleted_files = tracked.keys() - current
+
+        for rel_path in deleted_files:
+            row = tracked[rel_path]
+            if row["doc_id"]:
+                self._delete_doc(row["doc_id"], vault["kb_id"])
+            self.db.delete_vault_file(row["id"])
+
+        for rel_path in new_files:
+            self._ingest_file(connector, vault, rel_path)
+
+        for rel_path in present_files:
+            row = tracked[rel_path]
             try:
-                current = set(connector.list_files())
+                content = connector.read_file(rel_path)
             except Exception:
-                logger.exception("vault_sync: list_files failed vault_id=%s", vault_id)
-                return
-
-            tracked = {f["rel_path"]: f for f in self.db.list_vault_files(vault_id)}
-
-            new_files = current - tracked.keys()
-            present_files = current & tracked.keys()
-            deleted_files = tracked.keys() - current
-
-            for rel_path in deleted_files:
-                row = tracked[rel_path]
+                logger.warning("vault_sync: skip read error %s", rel_path)
+                continue
+            new_hash = _sha256(content)
+            if new_hash != row["file_hash"]:
                 if row["doc_id"]:
                     self._delete_doc(row["doc_id"], vault["kb_id"])
-                self.db.delete_vault_file(row["id"])
+                self._ingest_file(connector, vault, rel_path, content=content)
 
-            for rel_path in new_files:
-                self._ingest_file(connector, vault, rel_path)
-
-            for rel_path in present_files:
-                row = tracked[rel_path]
-                try:
-                    content = connector.read_file(rel_path)
-                except Exception:
-                    logger.warning("vault_sync: skip read error %s", rel_path)
-                    continue
-                new_hash = _sha256(content)
-                if new_hash != row["file_hash"]:
-                    if row["doc_id"]:
-                        self._delete_doc(row["doc_id"], vault["kb_id"])
-                    self._ingest_file(connector, vault, rel_path, content=content)
-
-            self.db.update_vault_last_synced(vault_id, _now())
-        finally:
-            self.db.set_vault_syncing(vault_id, False)
+        self.db.update_vault_last_synced(vault_id, _now())
 
     def _delete_doc(self, doc_id: str, kb_id: str) -> None:
         try:
