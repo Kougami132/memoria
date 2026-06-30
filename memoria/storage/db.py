@@ -60,6 +60,7 @@ class VaultRow(Base):
     webdav_password = Column(String, nullable=True)
     last_synced_at = Column(String, nullable=True)
     syncing = Column(Integer, default=0)
+    auto_sync = Column(Integer, default=1)
     created_at = Column(String, nullable=False)
 
 
@@ -126,6 +127,9 @@ class DB:
             vault_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(vaults)"))]
             if "syncing" not in vault_cols:
                 conn.execute(text("ALTER TABLE vaults ADD COLUMN syncing INTEGER DEFAULT 0"))
+                conn.commit()
+            if "auto_sync" not in vault_cols:
+                conn.execute(text("ALTER TABLE vaults ADD COLUMN auto_sync INTEGER DEFAULT 1"))
                 conn.commit()
         self._Session = sessionmaker(bind=engine)
 
@@ -372,6 +376,7 @@ class DB:
             "local_path": row.local_path, "webdav_url": row.webdav_url,
             "webdav_username": row.webdav_username, "webdav_password": row.webdav_password,
             "last_synced_at": row.last_synced_at, "syncing": bool(row.syncing),
+            "auto_sync": bool(row.auto_sync),
             "created_at": row.created_at,
         }
 
@@ -421,6 +426,12 @@ class DB:
             row = s.get(VaultRow, vault_id)
             if row:
                 row.syncing = int(syncing)
+
+    def update_vault_auto_sync(self, vault_id: str, auto_sync: bool) -> None:
+        with self._s() as s:
+            row = s.get(VaultRow, vault_id)
+            if row:
+                row.auto_sync = int(auto_sync)
 
     # ── Vault Files ──────────────────────────────────────────────────────────
 

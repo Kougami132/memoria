@@ -25,6 +25,10 @@ class VaultCreate(BaseModel):
     webdav_password: Optional[str] = None
 
 
+class VaultAutoSyncUpdate(BaseModel):
+    auto_sync: bool
+
+
 def _mask_vault(vault: dict) -> dict:
     v = dict(vault)
     v.pop("webdav_password", None)
@@ -119,3 +123,17 @@ async def sync_vault(
 
     background_tasks.add_task(_run_sync)
     return {"status": "sync started"}
+
+
+@router.put("/vaults/{vault_id}/auto-sync")
+def update_vault_auto_sync(
+    vault_id: str,
+    body: VaultAutoSyncUpdate,
+    db: DB = Depends(get_db),
+):
+    vault = db.get_vault(vault_id)
+    if vault is None:
+        raise HTTPException(status_code=404, detail="Vault not found")
+    db.update_vault_auto_sync(vault_id, body.auto_sync)
+    vault = db.get_vault(vault_id)
+    return _mask_vault(vault)
