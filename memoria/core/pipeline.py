@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 from memoria.core.chunker import Chunker
 from memoria.core.embedder import Embedder, MockEmbedder
@@ -22,15 +23,17 @@ class Pipeline:
         self._chroma_path = chroma_path
         self._top_k = top_k
         self._min_score = min_score
-        self._stores: dict[str, ChromaStore] = {}
+        self._local = threading.local()  # 每个线程独立的 ChromaStore 缓存
 
     def _get_store(self, kb_id: str) -> ChromaStore:
-        if kb_id not in self._stores:
-            self._stores[kb_id] = ChromaStore(
+        if not hasattr(self._local, 'stores'):
+            self._local.stores = {}
+        if kb_id not in self._local.stores:
+            self._local.stores[kb_id] = ChromaStore(
                 path=self._chroma_path,
                 collection_name=f"kb_{kb_id}",
             )
-        return self._stores[kb_id]
+        return self._local.stores[kb_id]
 
     def ingest(self, kb_id: str, path: str, source: str = "upload",
                filename: str | None = None, tmp_path: str | None = None) -> dict:
