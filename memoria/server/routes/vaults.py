@@ -85,7 +85,7 @@ async def bind_vault(
 
     db.set_vault_syncing(vault["id"], True)
     background_tasks.add_task(_initial_sync)
-    return _mask_vault(vault)
+    return _mask_vault(db.get_vault_by_kb(kb_id))
 
 
 @router.get("/knowledge-bases/{kb_id}/vault")
