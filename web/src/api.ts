@@ -7,7 +7,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json()
 }
 
-export interface KB { id: string; name: string; description: string; created_at: string }
+export interface KB { id: string; name: string; description: string; type: 'upload' | 'vault'; created_at: string }
 export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; source: 'upload' | 'vault'; created_at: string }
 export interface UploadResult { doc_id: string; chunk_count: number; doc: Doc }
 export interface Bot {
@@ -37,8 +37,13 @@ const json = (body: unknown) => ({
 })
 
 export const listKBs = () => req<KB[]>('/knowledge-bases')
-export const createKB = (name: string, description: string) =>
-  req<KB>('/knowledge-bases', { method: 'POST', ...json({ name, description }) })
+export const createKB = (data: {
+  name: string; description?: string; type: 'upload' | 'vault';
+  vault_type?: 'local' | 'webdav';
+  local_path?: string; webdav_url?: string; webdav_username?: string; webdav_password?: string;
+}) => req<KB>('/knowledge-bases', { method: 'POST', ...json(data) })
+export const updateKB = (id: string, data: { name?: string; description?: string }) =>
+  req<KB>(`/knowledge-bases/${id}`, { method: 'PATCH', ...json(data) })
 export const deleteKB = (id: string) => req<void>(`/knowledge-bases/${id}`, { method: 'DELETE' })
 export const listDocs = (kbId: string) => req<Doc[]>(`/knowledge-bases/${kbId}/documents`)
 export const uploadDocument = (kbId: string, file: File) => {
@@ -69,7 +74,7 @@ export const testChat = () =>
 export interface Vault {
   id: string; kb_id: string; type: 'local' | 'webdav';
   local_path?: string; webdav_url?: string; webdav_username?: string;
-  last_synced_at: string | null; created_at: string;
+  last_synced_at: string | null; syncing: boolean; created_at: string;
 }
 export interface VaultCreate {
   type: 'local' | 'webdav';

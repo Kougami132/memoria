@@ -18,6 +18,7 @@ class KnowledgeBaseRow(Base):
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
     description = Column(String, default="")
+    type = Column(String, nullable=False, default="upload")
     created_at = Column(String, nullable=False)
 
 
@@ -58,6 +59,7 @@ class VaultRow(Base):
     webdav_username = Column(String, nullable=True)
     webdav_password = Column(String, nullable=True)
     last_synced_at = Column(String, nullable=True)
+    syncing = Column(Integer, default=0)
     created_at = Column(String, nullable=False)
 
 
@@ -108,6 +110,11 @@ class DB:
         engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         Base.metadata.create_all(engine)
         with engine.connect() as conn:
+            kb_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(knowledge_bases)"))]
+            if "type" not in kb_cols:
+                conn.execute(text("ALTER TABLE knowledge_bases ADD COLUMN type TEXT DEFAULT 'upload'"))
+                conn.execute(text("UPDATE knowledge_bases SET type='vault' WHERE id IN (SELECT kb_id FROM vaults)"))
+                conn.commit()
             msg_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(messages)"))]
             if "sources" not in msg_cols:
                 conn.execute(text("ALTER TABLE messages ADD COLUMN sources TEXT"))
@@ -115,6 +122,10 @@ class DB:
             doc_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
             if "source" not in doc_cols:
                 conn.execute(text("ALTER TABLE documents ADD COLUMN source TEXT DEFAULT 'upload'"))
+                conn.commit()
+            vault_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(vaults)"))]
+            if "syncing" not in vault_cols:
+                conn.execute(text("ALTER TABLE vaults ADD COLUMN syncing INTEGER DEFAULT 0"))
                 conn.commit()
         self._Session = sessionmaker(bind=engine)
 
@@ -132,24 +143,36 @@ class DB:
 
     # ── Knowledge Bases ──────────────────────────────────────────────────────
 
-    def create_kb(self, name: str, description: str = "") -> dict:
+    def create_kb(self, name: str, description: str = "", type: str = "upload") -> dict:
         with self._s() as s:
-            row = KnowledgeBaseRow(id=_uid(), name=name, description=description, created_at=_now())
+            row = KnowledgeBaseRow(id=_uid(), name=name, description=description, type=type, created_at=_now())
             s.add(row)
             s.flush()
-            return {"id": row.id, "name": row.name, "description": row.description, "created_at": row.created_at}
+            return {"id": row.id, "name": row.name, "description": row.description, "type": row.type, "created_at": row.created_at}
 
     def get_kb(self, kb_id: str) -> dict | None:
         with self._s() as s:
             row = s.get(KnowledgeBaseRow, kb_id)
             if row is None:
                 return None
-            return {"id": row.id, "name": row.name, "description": row.description, "created_at": row.created_at}
+            return {"id": row.id, "name": row.name, "description": row.description, "type": row.type, "created_at": row.created_at}
 
     def list_kbs(self) -> list[dict]:
         with self._s() as s:
-            return [{"id": r.id, "name": r.name, "description": r.description, "created_at": r.created_at}
+            return [{"id": r.id, "name": r.name, "description": r.description, "type": r.type, "created_at": r.created_at}
                     for r in s.query(KnowledgeBaseRow).all()]
+
+    def update_kb(self, kb_id: str, name: str | None = None, description: str | None = None) -> dict | None:
+        with self._s() as s:
+            row = s.get(KnowledgeBaseRow, kb_id)
+            if row is None:
+                return None
+            if name is not None:
+                row.name = name
+            if description is not None:
+                row.description = description
+            s.flush()
+            return {"id": row.id, "name": row.name, "description": row.description, "type": row.type, "created_at": row.created_at}
 
     def delete_kb(self, kb_id: str) -> None:
         with self._s() as s:
@@ -348,7 +371,8 @@ class DB:
             "id": row.id, "kb_id": row.kb_id, "type": row.type,
             "local_path": row.local_path, "webdav_url": row.webdav_url,
             "webdav_username": row.webdav_username, "webdav_password": row.webdav_password,
-            "last_synced_at": row.last_synced_at, "created_at": row.created_at,
+            "last_synced_at": row.last_synced_at, "syncing": bool(row.syncing),
+            "created_at": row.created_at,
         }
 
     def create_vault(self, kb_id: str, type: str, **kwargs) -> dict:
@@ -391,6 +415,12 @@ class DB:
             row = s.get(VaultRow, vault_id)
             if row:
                 row.last_synced_at = ts
+
+    def set_vault_syncing(self, vault_id: str, syncing: bool) -> None:
+        with self._s() as s:
+            row = s.get(VaultRow, vault_id)
+            if row:
+                row.syncing = int(syncing)
 
     # ── Vault Files ──────────────────────────────────────────────────────────
 

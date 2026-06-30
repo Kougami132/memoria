@@ -52,6 +52,9 @@ async def bind_vault(
 ):
     if db.get_kb(kb_id) is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
+    kb = db.get_kb(kb_id)
+    if kb["type"] != "vault":
+        raise HTTPException(status_code=409, detail="Upload-type knowledge bases cannot bind a vault")
     if db.get_vault_by_kb(kb_id) is not None:
         raise HTTPException(status_code=409, detail="Knowledge base already has a vault")
 

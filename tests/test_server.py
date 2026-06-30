@@ -144,7 +144,7 @@ def test_chat_has_sources(client):
 # ── Vault API tests ───────────────────────────────────────────────────────────
 
 def test_vault_bind_local(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     r = client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                     json={"type": "local", "local_path": "/tmp/vault"})
     assert r.status_code == 201
@@ -155,7 +155,7 @@ def test_vault_bind_local(client):
 
 
 def test_vault_get(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
     r = client.get(f"/api/knowledge-bases/{kb['id']}/vault")
@@ -164,13 +164,13 @@ def test_vault_get(client):
 
 
 def test_vault_get_not_found(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     r = client.get(f"/api/knowledge-bases/{kb['id']}/vault")
     assert r.status_code == 404
 
 
 def test_vault_duplicate_bind_409(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
     r = client.post(f"/api/knowledge-bases/{kb['id']}/vault",
@@ -179,7 +179,7 @@ def test_vault_duplicate_bind_409(client):
 
 
 def test_vault_delete_unbind(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
     r = client.delete(f"/api/knowledge-bases/{kb['id']}/vault")
@@ -189,13 +189,13 @@ def test_vault_delete_unbind(client):
 
 
 def test_vault_delete_not_found(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     r = client.delete(f"/api/knowledge-bases/{kb['id']}/vault")
     assert r.status_code == 404
 
 
 def test_vault_sync_returns_202(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
     r = client.post(f"/api/knowledge-bases/{kb['id']}/vault/sync")
@@ -203,7 +203,7 @@ def test_vault_sync_returns_202(client):
 
 
 def test_vault_sync_no_vault_404(client):
-    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     r = client.post(f"/api/knowledge-bases/{kb['id']}/vault/sync")
     assert r.status_code == 404
 

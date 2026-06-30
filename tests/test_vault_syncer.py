@@ -139,3 +139,38 @@ def test_pipeline_ingest_source_param(db, tmp_path):
 
     doc = db.get_doc(result["doc"]["id"])
     assert doc["source"] == "vault"
+
+
+def test_ingest_file_stores_rel_path_as_doc_path(db, tmp_path):
+    """After sync, vault-sourced doc.path should be rel_path (not temp file path)."""
+    from memoria.core.pipeline import Pipeline
+    from unittest.mock import MagicMock
+
+    # Create real pipeline with mocked embedder
+    embedder = MagicMock()
+    embedder.embed.return_value = [[0.1, 0.2]]
+    llm = MagicMock()
+
+    pipeline = Pipeline(db=db, embedder=embedder, llm=llm,
+                       chroma_path=str(tmp_path / "chroma"), top_k=5)
+
+    # Setup vault
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path=str(tmp_path / "vault"))
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir()
+    (vault_dir / "note.md").write_text("hello world")
+
+    # Run sync with real pipeline
+    syncer = VaultSyncer(db, pipeline)
+    syncer.sync(vault["id"])
+
+    # Verify the doc was created with rel_path as path, not temp file path
+    files = db.list_vault_files(vault["id"])
+    assert len(files) == 1
+    doc_id = files[0]["doc_id"]
+
+    doc = db.get_doc(doc_id)
+    assert doc is not None
+    assert doc["path"] == "note.md"  # Should be rel_path, not /tmp/xyz/...
+    assert not doc["path"].startswith(str(tmp_path))  # Should NOT be temp file path

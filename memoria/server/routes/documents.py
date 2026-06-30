@@ -19,6 +19,9 @@ async def upload_document(kb_id: str, file: UploadFile,
                           db: DB = Depends(get_db), pipeline: Pipeline = Depends(get_pipeline)):
     if db.get_kb(kb_id) is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
+    kb = db.get_kb(kb_id)
+    if kb["type"] != "upload":
+        raise HTTPException(status_code=409, detail="Vault-type knowledge bases do not accept manual uploads")
 
     suffix = os.path.splitext(file.filename or "")[1].lower()
     if suffix not in ALLOWED_SUFFIXES:
