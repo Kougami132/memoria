@@ -19,7 +19,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
   const { data: vault, isLoading, refetch: refetchVault } = useQuery({
     queryKey: ['vault', kbId],
     queryFn: () => api.getVault(kbId).catch(() => null),
-    refetchInterval: (query) => (query.state.data?.syncing ? 2000 : false),
+    refetchInterval: (query) => (query.state.data?.syncing ? 2000 : 5000),
   })
 
   const { data: docs = [] } = useQuery({

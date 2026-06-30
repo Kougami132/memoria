@@ -76,14 +76,18 @@ async def bind_vault(
         cancel_event = threading.Event()
         _cancel_events[vault["id"]] = cancel_event
         try:
+            logger.info("vault: initial sync started vault_id=%s", vault["id"])
             VaultSyncer(db, pipeline).sync(vault["id"], cancel_event=cancel_event)
+            logger.info("vault: initial sync finished vault_id=%s", vault["id"])
         except Exception:
             logger.exception("vault: initial sync failed vault_id=%s", vault["id"])
         finally:
+            logger.info("vault: setting syncing=False vault_id=%s", vault["id"])
             db.set_vault_syncing(vault["id"], False)
             _cancel_events.pop(vault["id"], None)
 
     db.set_vault_syncing(vault["id"], True)
+    logger.info("vault: set syncing=True vault_id=%s syncing_now=%s", vault["id"], db.get_vault_by_kb(kb_id)["syncing"])
     background_tasks.add_task(_initial_sync)
     return _mask_vault(db.get_vault_by_kb(kb_id))
 
