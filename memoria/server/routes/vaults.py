@@ -72,26 +72,18 @@ async def bind_vault(
         raise HTTPException(status_code=409, detail="Knowledge base already has a vault")
 
     def _initial_sync():
-        print(f"[DEBUG] vault: _initial_sync CALLED vault_id={vault['id']}", flush=True)
-        logger.warning("vault: _initial_sync CALLED vault_id=%s", vault["id"])
         cancel_event = threading.Event()
         _cancel_events[vault["id"]] = cancel_event
         try:
-            logger.warning("vault: initial sync started vault_id=%s", vault["id"])
             VaultSyncer(db, pipeline).sync(vault["id"], cancel_event=cancel_event)
-            logger.warning("vault: initial sync finished vault_id=%s", vault["id"])
         except Exception:
             logger.exception("vault: initial sync failed vault_id=%s", vault["id"])
         finally:
-            print(f"[DEBUG] vault: setting syncing=False vault_id={vault['id']}", flush=True)
-            logger.warning("vault: setting syncing=False vault_id=%s", vault["id"])
             db.set_vault_syncing(vault["id"], False)
             _cancel_events.pop(vault["id"], None)
 
     db.set_vault_syncing(vault["id"], True)
-    print(f"[DEBUG] vault: set syncing=True vault_id={vault['id']}", flush=True)
     threading.Thread(target=_initial_sync, daemon=True).start()
-    print(f"[DEBUG] vault: thread started vault_id={vault['id']}", flush=True)
     return _mask_vault(db.get_vault_by_kb(kb_id))
 
 

@@ -18,10 +18,7 @@ def _sync_all_vaults():
             continue
         if vault.get("syncing"):
             continue
-        logging.getLogger(__name__).info("vault poll: starting sync vault_id=%s", vault["id"])
         db.set_vault_syncing(vault["id"], True)
-        check = db.get_vault(vault["id"])
-        logging.getLogger(__name__).info("vault poll: syncing after set=%s vault_id=%s", check["syncing"], vault["id"])
         try:
             syncer.sync(vault["id"])
         except Exception:
@@ -29,7 +26,6 @@ def _sync_all_vaults():
                 "vault poll failed: vault_id=%s", vault["id"]
             )
         finally:
-            logging.getLogger(__name__).info("vault poll: done vault_id=%s", vault["id"])
             db.set_vault_syncing(vault["id"], False)
 
 
