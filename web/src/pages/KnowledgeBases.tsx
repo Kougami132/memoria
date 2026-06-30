@@ -55,11 +55,13 @@ function VaultPanel({ kbId }: { kbId: string }) {
 
   const cancelSync = useMutation({
     mutationFn: () => api.cancelVaultSync(kbId),
+    onError: () => console.error('Failed to cancel sync'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['vault', kbId] }),
   })
 
   const toggleAutoSync = useMutation({
     mutationFn: (v: boolean) => api.updateVault(kbId, { auto_sync: v }),
+    onError: () => console.error('Failed to update auto sync'),
     onSuccess: () => refetchVault(),
   })
 
@@ -146,6 +148,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
             variant={isSyncing ? 'destructive' : 'outline'}
             size="sm"
             className="h-7 gap-1 text-xs"
+            disabled={cancelSync.isPending || syncVault.isPending}
             onClick={() => isSyncing ? cancelSync.mutate() : syncVault.mutate()}
           >
             <RefreshCw className={`h-3 w-3 ${isSyncing && !cancelSync.isPending ? 'animate-spin' : ''}`} />

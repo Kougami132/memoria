@@ -34,6 +34,8 @@ def get_settings(db: DB = Depends(get_db)):
 
 @router.put("")
 def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get_db)):
+    if body.vault_sync_interval_minutes is not None and body.vault_sync_interval_minutes < 1:
+        raise HTTPException(status_code=422, detail="vault_sync_interval_minutes must be >= 1")
     mapping = {
         "openai_base_url": body.openai_base_url,
         "openai_api_key": body.api_key,

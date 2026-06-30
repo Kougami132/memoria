@@ -56,27 +56,33 @@ class VaultSyncer:
                 self._delete_doc(row["doc_id"], vault["kb_id"])
             self.db.delete_vault_file(row["id"])
 
+        cancelled = False
+
         for rel_path in new_files:
             self._ingest_file(connector, vault, rel_path)
             if cancel_event and cancel_event.is_set():
+                cancelled = True
                 break
 
-        for rel_path in present_files:
-            row = tracked[rel_path]
-            try:
-                content = connector.read_file(rel_path)
-            except Exception:
-                logger.warning("vault_sync: skip read error %s", rel_path)
-                continue
-            new_hash = _sha256(content)
-            if new_hash != row["file_hash"]:
-                if row["doc_id"]:
-                    self._delete_doc(row["doc_id"], vault["kb_id"])
-                self._ingest_file(connector, vault, rel_path, content=content)
-            if cancel_event and cancel_event.is_set():
-                break
+        if not cancelled:
+            for rel_path in present_files:
+                row = tracked[rel_path]
+                try:
+                    content = connector.read_file(rel_path)
+                except Exception:
+                    logger.warning("vault_sync: skip read error %s", rel_path)
+                    continue
+                new_hash = _sha256(content)
+                if new_hash != row["file_hash"]:
+                    if row["doc_id"]:
+                        self._delete_doc(row["doc_id"], vault["kb_id"])
+                    self._ingest_file(connector, vault, rel_path, content=content)
+                if cancel_event and cancel_event.is_set():
+                    cancelled = True
+                    break
 
-        self.db.update_vault_last_synced(vault_id, _now())
+        if not cancelled:
+            self.db.update_vault_last_synced(vault_id, _now())
 
     def _delete_doc(self, doc_id: str, kb_id: str) -> None:
         try:

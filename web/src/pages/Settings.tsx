@@ -43,6 +43,7 @@ export default function Settings() {
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     },
+    onError: () => alert('保存失败，请重试'),
   })
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
