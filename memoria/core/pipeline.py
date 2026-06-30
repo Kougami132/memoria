@@ -32,17 +32,19 @@ class Pipeline:
             )
         return self._stores[kb_id]
 
-    def ingest(self, kb_id: str, path: str, source: str = "upload", filename: str | None = None) -> dict:
-        chunks = [c for c in Chunker().split(path) if c.strip()]
+    def ingest(self, kb_id: str, path: str, source: str = "upload",
+               filename: str | None = None, tmp_path: str | None = None) -> dict:
+        chunker_path = tmp_path or path
+        chunks = [c for c in Chunker().split(chunker_path) if c.strip()]
         if not chunks:
             raise ValueError("File produced no embeddable content")
         display_name = filename or os.path.basename(path)
         doc_id = display_name.replace(".", "_") + "_" + kb_id[:8]
         vectors = self._embedder.embed(chunks)
         ids = [f"{doc_id}__{i}" for i in range(len(chunks))]
-        metadatas = [{"doc_id": doc_id} for _ in chunks]
-        self._get_store(kb_id).add(ids, vectors, chunks, metadatas)
         doc = self.db.create_doc(kb_id, display_name, path, len(chunks), source=source)
+        metadatas = [{"doc_id": doc_id, "db_doc_id": doc["id"]} for _ in chunks]
+        self._get_store(kb_id).add(ids, vectors, chunks, metadatas)
         return {"doc_id": doc_id, "chunk_count": len(chunks), "doc": doc}
 
     def retrieve(self, kb_id: str, query: str, k: int | None = None) -> list[dict]:
@@ -109,17 +111,24 @@ class Pipeline:
         answer = result["content"]
         logger.debug("[RAG] answer=%r", answer[:200])
 
+        sources = []
+        for c in context_chunks:
+            db_doc_id = c.get("db_doc_id", "")
+            doc_info = self.db.get_doc(db_doc_id) if db_doc_id else None
+            sources.append({
+                "text": c["text"],
+                "score": c["score"],
+                "doc_id": c["doc_id"],
+                "filename": doc_info["filename"] if doc_info else None,
+                "path": doc_info["path"] if doc_info else None,
+                "source": doc_info["source"] if doc_info else None,
+            })
+
         self.db.add_message(session_id, "user", query)
-        self.db.add_message(session_id, "assistant", answer, sources=[
-            {"text": c["text"], "score": c["score"], "doc_id": c["doc_id"]}
-            for c in context_chunks
-        ])
+        self.db.add_message(session_id, "assistant", answer, sources=sources)
 
         return {
             "answer": answer,
             "session_id": session_id,
-            "sources": [
-                {"text": c["text"], "score": c["score"], "doc_id": c["doc_id"]}
-                for c in context_chunks
-            ],
+            "sources": sources,
         }
