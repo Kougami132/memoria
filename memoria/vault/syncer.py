@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import threading
 from datetime import datetime, timezone
 
 from memoria.vault.connector import LocalConnector, VaultConnector, WebDAVConnector
@@ -33,7 +34,7 @@ class VaultSyncer:
             vault["webdav_password"],
         )
 
-    def sync(self, vault_id: str) -> None:
+    def sync(self, vault_id: str, cancel_event: threading.Event | None = None) -> None:
         vault = self.db.get_vault(vault_id)
         connector = self._make_connector(vault)
 
@@ -57,6 +58,8 @@ class VaultSyncer:
 
         for rel_path in new_files:
             self._ingest_file(connector, vault, rel_path)
+            if cancel_event and cancel_event.is_set():
+                break
 
         for rel_path in present_files:
             row = tracked[rel_path]
@@ -70,6 +73,8 @@ class VaultSyncer:
                 if row["doc_id"]:
                     self._delete_doc(row["doc_id"], vault["kb_id"])
                 self._ingest_file(connector, vault, rel_path, content=content)
+            if cancel_event and cancel_event.is_set():
+                break
 
         self.db.update_vault_last_synced(vault_id, _now())
 

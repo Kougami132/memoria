@@ -1,5 +1,6 @@
 """Tests for VaultSyncer diff logic."""
 import pytest
+import threading
 from unittest.mock import MagicMock, patch
 from memoria.vault.syncer import VaultSyncer
 
@@ -174,3 +175,38 @@ def test_ingest_file_stores_rel_path_as_doc_path(db, tmp_path):
     assert doc is not None
     assert doc["path"] == "note.md"  # Should be rel_path, not /tmp/xyz/...
     assert not doc["path"].startswith(str(tmp_path))  # Should NOT be temp file path
+
+
+def test_sync_cancel_event_stops_new_files(db, pipeline, vault_with_local):
+    """cancel_event set() should stop processing new_files after first file."""
+    kb, vault, vault_dir = vault_with_local
+    (vault_dir / "file1.md").write_text("content 1")
+    (vault_dir / "file2.md").write_text("content 2")
+    (vault_dir / "file3.md").write_text("content 3")
+
+    cancel_event = threading.Event()
+    cancel_event.set()  # Pre-set to stop immediately
+
+    syncer = VaultSyncer(db, pipeline)
+    syncer.sync(vault["id"], cancel_event=cancel_event)
+
+    # Only first file should be processed before cancellation
+    files = db.list_vault_files(vault["id"])
+    assert len(files) == 1
+    assert pipeline.ingest.call_count == 1
+
+
+def test_sync_without_cancel_event(db, pipeline, vault_with_local):
+    """Without cancel_event, sync() should work normally (backward compatibility)."""
+    kb, vault, vault_dir = vault_with_local
+    (vault_dir / "file1.md").write_text("content 1")
+    (vault_dir / "file2.md").write_text("content 2")
+    (vault_dir / "file3.md").write_text("content 3")
+
+    syncer = VaultSyncer(db, pipeline)
+    syncer.sync(vault["id"])  # No cancel_event
+
+    # All files should be processed
+    files = db.list_vault_files(vault["id"])
+    assert len(files) == 3
+    assert pipeline.ingest.call_count == 3
