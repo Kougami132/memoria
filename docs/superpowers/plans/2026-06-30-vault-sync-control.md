@@ -2,6 +2,7 @@
 change: vault-sync-control
 design-doc: docs/superpowers/specs/2026-06-30-vault-sync-control-design.md
 base-ref: 57463276a3685f84d5f63c4b2b944d4fc4a8ad51
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 # 实施计划：vault-sync-control
@@ -36,6 +37,7 @@ base-ref: 57463276a3685f84d5f63c4b2b944d4fc4a8ad51
 
 **测试**：新建 vault 默认 auto_sync=True；update_vault_auto_sync 后读回 False；迁移逻辑（已有 DB 加列）。
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 2：`vault/syncer.py` — cancel_event 参数
@@ -55,6 +57,7 @@ base-ref: 57463276a3685f84d5f63c4b2b944d4fc4a8ad51
 
 **测试**：预设 cancel_event 并提前 set，确认循环在第一个文件后停止；不传 cancel_event 时行为不变。
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 3：`vaults.py` — syncing 修复 + 取消端点 + PATCH
@@ -125,6 +128,7 @@ def update_vault(kb_id: str, body: VaultUpdate, db: DB = Depends(get_db)):
 
 **测试**：syncing=True 时 POST sync 返回 409；DELETE sync 后 cancel_event.is_set()=True；PATCH auto_sync=False 后 vault.auto_sync=False。
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 4：`app.py` — syncing 修复 + auto_sync 过滤 + 动态间隔
@@ -168,6 +172,7 @@ app.state.scheduler = scheduler
 
 **测试**：auto_sync=False 的 vault 被跳过；syncing=True 的 vault 被跳过（避免并发）。
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 5：`settings.py` — 间隔更新时动态重调度
@@ -186,6 +191,7 @@ if "vault_sync_interval_minutes" in changed_keys:
 
 **测试**：更新间隔后 scheduler.get_job("vault_poll") 的下次触发时间变化。
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 6：`api.ts` — 接口和方法扩展
@@ -196,6 +202,7 @@ if "vault_sync_interval_minutes" in changed_keys:
 - 新增 `updateVault(kbId: string, body: { auto_sync: boolean })`
 - `Settings` 加 `vault_sync_interval_minutes: string`
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 7：`KnowledgeBases.tsx` — 停止按钮 + auto_sync 开关
@@ -223,12 +230,14 @@ const toggleAutoSync = useMutation({
 })
 ```
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 8：`Settings.tsx` — 间隔配置项
 
 **目标**：在 Settings 页加 `vault_sync_interval_minutes` 输入项（数字，分钟）。
 
+archived-with: 2026-06-30-vault-sync-control
 ---
 
 ## 任务 9：运行测试确认通过

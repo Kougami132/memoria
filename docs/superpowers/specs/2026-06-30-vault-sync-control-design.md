@@ -2,6 +2,8 @@
 comet_change: vault-sync-control
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-06-30-vault-sync-control
+status: final
 ---
 
 # vault-sync-control Design Doc
