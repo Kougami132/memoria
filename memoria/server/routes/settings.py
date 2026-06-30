@@ -1,6 +1,7 @@
+import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from memoria.config import get_effective_settings
@@ -8,6 +9,8 @@ from memoria.core.embedder import Embedder
 from memoria.llm.caller import LLMCaller
 from memoria.server.deps import get_db, reset_pipeline
 from memoria.storage.db import DB
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -21,6 +24,7 @@ class SettingsUpdate(BaseModel):
     min_score: Optional[float] = None
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
+    vault_sync_interval_minutes: Optional[int] = None
 
 
 @router.get("")
@@ -29,7 +33,7 @@ def get_settings(db: DB = Depends(get_db)):
 
 
 @router.put("")
-def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
+def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get_db)):
     mapping = {
         "openai_base_url": body.openai_base_url,
         "openai_api_key": body.api_key,
@@ -39,6 +43,7 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
         "min_score": str(body.min_score) if body.min_score is not None else None,
         "chunk_size": str(body.chunk_size) if body.chunk_size is not None else None,
         "chunk_overlap": str(body.chunk_overlap) if body.chunk_overlap is not None else None,
+        "vault_sync_interval_minutes": str(body.vault_sync_interval_minutes) if body.vault_sync_interval_minutes is not None else None,
     }
     changed = False
     for key, value in mapping.items():
@@ -51,6 +56,14 @@ def update_settings(body: SettingsUpdate, db: DB = Depends(get_db)):
         changed = True
     if changed:
         reset_pipeline()
+    if changed and body.vault_sync_interval_minutes is not None:
+        scheduler = getattr(request.app.state, "scheduler", None)
+        if scheduler and scheduler.running:
+            try:
+                minutes = int(db.get_setting("vault_sync_interval_minutes") or 15)
+                scheduler.reschedule_job("vault_poll", trigger="interval", minutes=minutes)
+            except Exception as exc:
+                logger.warning("settings: failed to reschedule vault_poll: %s", exc)
     return get_effective_settings(db)
 
 

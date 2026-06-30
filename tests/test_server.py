@@ -344,3 +344,20 @@ def test_sync_all_vaults_skips_already_syncing():
     called_ids = [call.args[0] for call in mock_syncer.sync.call_args_list]
     assert "v1" not in called_ids
     assert "v2" in called_ids
+
+
+# ── Task 5: vault_sync_interval_minutes settings tests ───────────────────────
+
+def test_settings_vault_sync_interval_persisted(client):
+    """PUT /settings {vault_sync_interval_minutes: 5} persists; GET returns it as '5'."""
+    r = client.put("/api/settings", json={"vault_sync_interval_minutes": 5})
+    assert r.status_code == 200
+    assert r.json()["vault_sync_interval_minutes"] == "5"
+    r2 = client.get("/api/settings")
+    assert r2.json()["vault_sync_interval_minutes"] == "5"
+
+
+def test_settings_vault_sync_interval_reschedule_safe_without_scheduler(client):
+    """PUT /settings with vault_sync_interval_minutes must not fail when no scheduler on app.state."""
+    r = client.put("/api/settings", json={"vault_sync_interval_minutes": 10})
+    assert r.status_code == 200

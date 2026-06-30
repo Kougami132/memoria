@@ -35,6 +35,7 @@ def get_effective_settings(db) -> dict:
         "min_score": str(settings.min_score),
         "chunk_size": str(settings.chunk_size),
         "chunk_overlap": str(settings.chunk_overlap),
+        "vault_sync_interval_minutes": "15",
     }
     fields.update({k: v for k, v in overrides.items() if k in fields})
     url = fields["openai_base_url"].rstrip("/")
