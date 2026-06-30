@@ -55,13 +55,13 @@ function VaultPanel({ kbId }: { kbId: string }) {
 
   const cancelSync = useMutation({
     mutationFn: () => api.cancelVaultSync(kbId),
-    onError: () => console.error('Failed to cancel sync'),
+    onError: () => alert('停止同步失败，请重试'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['vault', kbId] }),
   })
 
   const toggleAutoSync = useMutation({
     mutationFn: (v: boolean) => api.updateVault(kbId, { auto_sync: v }),
-    onError: () => console.error('Failed to update auto sync'),
+    onError: () => alert('更新自动同步设置失败，请重试'),
     onSuccess: () => refetchVault(),
   })
 
