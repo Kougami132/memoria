@@ -53,6 +53,9 @@ function SourceList({ sources }: { sources: Source[] }) {
             <div key={i} className="rounded-xl border bg-card px-3 py-2.5 text-xs space-y-1.5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-muted-foreground truncate">{s.doc_id}</span>
+                {s.source === 'vault' && s.path && (
+                  <span className="text-xs text-muted-foreground/70 font-mono truncate">{s.path}</span>
+                )}
                 <Badge variant="outline" className="text-xs shrink-0 font-normal">
                   相关度 {(s.score * 100).toFixed(0)}%
                 </Badge>
