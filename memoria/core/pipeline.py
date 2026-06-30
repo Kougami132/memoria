@@ -32,16 +32,17 @@ class Pipeline:
             )
         return self._stores[kb_id]
 
-    def ingest(self, kb_id: str, path: str, source: str = "upload") -> dict:
+    def ingest(self, kb_id: str, path: str, source: str = "upload", filename: str | None = None) -> dict:
         chunks = [c for c in Chunker().split(path) if c.strip()]
         if not chunks:
             raise ValueError("File produced no embeddable content")
-        doc_id = os.path.basename(path).replace(".", "_") + "_" + kb_id[:8]
+        display_name = filename or os.path.basename(path)
+        doc_id = display_name.replace(".", "_") + "_" + kb_id[:8]
         vectors = self._embedder.embed(chunks)
         ids = [f"{doc_id}__{i}" for i in range(len(chunks))]
         metadatas = [{"doc_id": doc_id} for _ in chunks]
         self._get_store(kb_id).add(ids, vectors, chunks, metadatas)
-        doc = self.db.create_doc(kb_id, os.path.basename(path), path, len(chunks), source=source)
+        doc = self.db.create_doc(kb_id, display_name, path, len(chunks), source=source)
         return {"doc_id": doc_id, "chunk_count": len(chunks), "doc": doc}
 
     def retrieve(self, kb_id: str, query: str, k: int | None = None) -> list[dict]:
