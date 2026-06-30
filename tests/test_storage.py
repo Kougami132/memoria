@@ -196,3 +196,27 @@ def test_delete_kb_cascades_vault(db):
     db.delete_kb(kb["id"])
     assert db.get_vault(vault_id) is None
     assert db.list_vault_files(vault_id) == []
+
+
+def test_db_vault_auto_sync_default(db):
+    """New vault should have auto_sync=True by default."""
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    assert vault["auto_sync"] is True
+
+
+def test_db_update_vault_auto_sync(db):
+    """update_vault_auto_sync should persist False and True values."""
+    kb = db.create_kb("kb1", "")
+    vault = db.create_vault(kb["id"], "local", local_path="/tmp/v")
+    vault_id = vault["id"]
+
+    # Update to False
+    db.update_vault_auto_sync(vault_id, False)
+    fetched = db.get_vault(vault_id)
+    assert fetched["auto_sync"] is False
+
+    # Update to True
+    db.update_vault_auto_sync(vault_id, True)
+    fetched = db.get_vault(vault_id)
+    assert fetched["auto_sync"] is True
