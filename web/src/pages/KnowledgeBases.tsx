@@ -196,7 +196,12 @@ function DocList({ kb }: { kb: api.KB }) {
             <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 transition-colors hover:bg-muted/60">
               <div className="flex items-center gap-2 min-w-0">
                 <FileText className="h-4 w-4 text-purple-500 shrink-0" />
-                <span className="text-sm truncate">{doc.filename}</span>
+                <div className="min-w-0">
+                  <span className="text-sm truncate block">{doc.filename}</span>
+                  {doc.source === 'vault' && doc.path && (
+                    <div className="text-xs text-muted-foreground/70 font-mono truncate">{doc.path}</div>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0 ml-2">
                 <Badge variant="secondary" className="text-xs font-normal">{doc.chunk_count} 块</Badge>

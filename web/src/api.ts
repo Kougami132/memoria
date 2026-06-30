@@ -8,7 +8,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface KB { id: string; name: string; description: string; type: 'upload' | 'vault'; created_at: string }
-export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; source: 'upload' | 'vault'; created_at: string }
+export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; source: 'upload' | 'vault'; path?: string; created_at: string }
 export interface UploadResult { doc_id: string; chunk_count: number; doc: Doc }
 export interface Bot {
   id: string; name: string; system_prompt: string;
