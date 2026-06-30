@@ -5,7 +5,7 @@ import logging
 import threading
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from memoria.core.pipeline import Pipeline
@@ -49,7 +49,6 @@ def _delete_vault_docs(db: DB, pipeline: Pipeline, vault_id: str, kb_id: str) ->
 async def bind_vault(
     kb_id: str,
     body: VaultCreate,
-    background_tasks: BackgroundTasks,
     db: DB = Depends(get_db),
     pipeline: Pipeline = Depends(get_pipeline),
 ):
@@ -89,7 +88,7 @@ async def bind_vault(
 
     db.set_vault_syncing(vault["id"], True)
     logger.warning("vault: set syncing=True vault_id=%s syncing_now=%s", vault["id"], db.get_vault_by_kb(kb_id)["syncing"])
-    background_tasks.add_task(_initial_sync)
+    threading.Thread(target=_initial_sync, daemon=True).start()
     return _mask_vault(db.get_vault_by_kb(kb_id))
 
 
@@ -117,7 +116,6 @@ def delete_vault(
 @router.post("/knowledge-bases/{kb_id}/vault/sync", status_code=202)
 async def sync_vault(
     kb_id: str,
-    background_tasks: BackgroundTasks,
     db: DB = Depends(get_db),
     pipeline: Pipeline = Depends(get_pipeline),
 ):
@@ -140,7 +138,7 @@ async def sync_vault(
             db.set_vault_syncing(vault["id"], False)
             _cancel_events.pop(vault["id"], None)
 
-    background_tasks.add_task(_run_sync)
+    threading.Thread(target=_run_sync, daemon=True).start()
     return {"status": "sync started"}
 
 

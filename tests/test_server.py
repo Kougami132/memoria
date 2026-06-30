@@ -195,9 +195,11 @@ def test_vault_delete_not_found(client):
 
 
 def test_vault_sync_returns_202(client):
+    import time
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
+    time.sleep(0.5)  # wait for _initial_sync thread to finish
     r = client.post(f"/api/knowledge-bases/{kb['id']}/vault/sync")
     assert r.status_code == 202
 
@@ -236,12 +238,13 @@ def test_vault_doc_delete_409(client, tmp_path):
 
 def test_vault_sync_409_when_syncing(client):
     """POST /sync while syncing=True must return 409."""
-    from unittest.mock import patch
+    import time
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
+    # Wait for _initial_sync background thread to finish (it will fail fast since /tmp/vault may not exist)
+    time.sleep(0.5)
     # Force syncing=True in DB via set_vault_syncing before the request
-    import memoria.server.routes.vaults as vaults_mod
     from memoria.server.deps import get_db
     db = client.app.dependency_overrides[get_db]()
     vault = db.get_vault_by_kb(kb["id"])
@@ -252,11 +255,13 @@ def test_vault_sync_409_when_syncing(client):
 
 def test_vault_cancel_sync_sets_event(client):
     """DELETE /sync must set the cancel event for the running sync."""
-    import threading
+    import threading, time
     import memoria.server.routes.vaults as vaults_mod
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
                 json={"type": "local", "local_path": "/tmp/vault"})
+    # Wait for _initial_sync background thread to finish
+    time.sleep(0.5)
     from memoria.server.deps import get_db
     db = client.app.dependency_overrides[get_db]()
     vault = db.get_vault_by_kb(kb["id"])
