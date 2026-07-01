@@ -1,19 +1,19 @@
 # Memoria — 技术设计文档
 
-> Bot 管理平台 + Agentic RAG 引擎
+> Bot 管理平台 + RAG 引擎
 > 作者：kougami
-> 状态：草稿 / 待实现
+> 状态：Phase 1 已完成
 
 ---
 
 ## 零、设计原则
 
-1. **长时运行的服务是主模式** — `memoria serve` 启动，对外暴露 REST API。其他交互方式（QQ Bot、Web UI、CLI）统一通过 API 调用引擎
+1. **长时运行的服务是主模式** — `memoria serve` 启动，对外暴露 REST API。其他交互方式（Web UI、CLI）统一通过 API 调用引擎
 2. **CLI 仅为调试工具** — 开发阶段方便手动测试，不承载核心交互
-3. **可集成第一** — 现有系统只需调 HTTP 接口即可接入 Bot 能力，符合企业实际场景
-4. **引擎与交互层完全解耦** — RAG 引擎是独立的 Python 库，服务 / CLI / 其他适配器都导入它
+3. **可集成第一** — 现有系统只需调 HTTP 接口即可接入 Bot 能力
+4. **引擎与交互层完全解耦** — RAG 引擎是独立的 Python 库，服务 / CLI 都导入它
 5. **Bot 是核心抽象** — 每个 Bot 是一个独立 AI 助手，可关联多个知识库，对外暴露统一对话入口
-6. **渐进式演进** — Phase 1 手写简单 RAG Loop 跑通全流程，Phase 2 引入 Agent SDK 升级为 Agentic RAG。不在一开始引入框架复杂度
+6. **渐进式演进** — Phase 1 手写简单 RAG Loop 跑通全流程，Phase 2 引入 Agent SDK 升级为 Agentic RAG
 
 ---
 
@@ -21,14 +21,13 @@
 
 | 术语 | 定义 |
 |------|------|
-| **Document** | 原始文件（.md / .txt / .pdf / .docx），用户导入的源材料 |
+| **Document** | 原始文件（.md / .txt），用户上传或通过 Vault 同步的源材料 |
 | **Chunk** | 文档切分后的文本片段，是向量化和检索的基本单元 |
 | **Embedding** | Chunk 经模型转换后的浮点数向量 |
-| **Knowledge Base** | 一个 Chroma collection，包含一批文档的向量索引。独立管理，独立检索 |
-| **Bot** | 对外暴露的 AI 助手。关联 N 个 Knowledge Base，拥有独立的 System Prompt 和模型配置 |
-| **Query** | 用户输入的提问文本 |
-| **Context** | Retrieve 阶段召回的相关 Chunks，拼入 Prompt |
-| **Session** | 单轮或多轮对话上下文（涉及后续 Agentic 扩展） |
+| **Knowledge Base** | 一个 Chroma collection，包含一批文档的向量索引。独立管理，独立检索。分 `upload`（手动上传）和 `vault`（自动同步）两种类型 |
+| **Bot** | 对外暴露的 AI 助手。关联 N 个 Knowledge Base，拥有独立的 System Prompt |
+| **Session** | 对话会话，关联一个 Bot，持久化多轮消息历史 |
+| **Vault** | 绑定到 `vault` 类型 KB 的文件源（本地目录或 WebDAV），支持自动周期同步 |
 
 ### 实体关系
 
@@ -36,51 +35,47 @@
 Document (N) ──belongs to──> (1) Knowledge Base
 Bot (N) <──associates──> (M) Knowledge Base  (多对多)
 Bot (1) ──has──> (N) Session
+Session (1) ──has──> (N) Message
+Knowledge Base (1) ──may bind──> (0..1) Vault
 ```
-
-每个 Bot 对外暴露唯一的 `/api/chat/{bot_id}` 端点。
 
 ---
 
 ## 二、系统架构概览
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│                        调用方                                 │
-│  (管理后台 Web / QQ Bot / 现有系统 / curl / 任何 HTTP 客户端)   │
-└──────────────────────┬────────────────────────────────────────┘
-                       │ HTTP (REST API)
+┌────────────────────────────────────────────────────────────────────┐
+│                         调用方                                      │
+│              Web UI (内嵌) / curl / 任何 HTTP 客户端                │
+└──────────────────────┬─────────────────────────────────────────────┘
+                       │ HTTP (REST API / SPA)
                        ▼
-┌───────────────────────────────────────────────────────────────┐
-│                    Memoria Service (FastAPI)                   │
-│                                                                │
-│  ┌─ 管理 API ───────────────────────┐  ┌─ 对话 API ────────┐  │
-│  │  POST   /api/knowledge-bases     │  │                   │  │
-│  │  GET    /api/knowledge-bases     │  │  POST             │  │
-│  │  GET    /api/knowledge-bases/:id │  │  /api/chat/{bot}  │  │
-│  │  DELETE /api/knowledge-bases/:id │  │                   │  │
-│  │                                  │  │                   │  │
-│  │  POST   /api/bots                │  │                   │  │
-│  │  GET    /api/bots                │  │                   │  │
-│  │  GET    /api/bots/:id            │  │                   │  │
-│  │  PUT    /api/bots/:id            │  │                   │  │
-│  │  DELETE /api/bots/:id            │  │                   │  │
-│  │                                  │  │                   │  │
-│  │  POST   /api/knowledge-bases/:id │  │                   │  │
-│  │         /documents               │  │                   │  │
-│  │  GET    /api/documents           │  │                   │  │
-│  │  DELETE /api/documents/:id       │  │                   │  │
-│  └──────────────────────────────────┘  └───────────────────┘  │
-│                                                                │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │               memoria 核心库 (Python Package)           │    │
-│  │  core/pipeline.py  ← ingest / retrieve / query 编排    │    │
-│  │  core/chunker.py   ← 文本切分                          │    │
-│  │  core/embedder.py  ← embedding 调用                    │    │
-│  │  storage/          ← Chroma collection 操作            │    │
-│  │  llm/caller.py     ← LLM 调用                          │    │
-│  └────────────────────────────────────────────────────────┘    │
-└──────────────────────┬────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                   Memoria Service (FastAPI)                         │
+│                                                                     │
+│  ┌─ 管理 API ──────────────────┐  ┌─ 对话 API ──────────────────┐  │
+│  │  /api/knowledge-bases       │  │  POST /api/chat/{bot_id}    │  │
+│  │  /api/bots                  │  │  GET  /api/sessions/{bot}   │  │
+│  │  /api/documents             │  │  GET  /api/sessions/{id}/   │  │
+│  │  /api/sessions/{id}         │  │       messages              │  │
+│  │  /api/settings              │  │  DELETE /api/sessions/{id}  │  │
+│  │  /api/knowledge-bases/{id}/ │  └─────────────────────────────┘  │
+│  │    vault (+ /sync)          │                                    │
+│  └─────────────────────────────┘                                   │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │               memoria 核心库 (Python Package)                 │  │
+│  │  core/pipeline.py  ← ingest / retrieve / query 编排          │  │
+│  │  core/chunker.py   ← 文本切分 (RecursiveCharacterTextSplitter)│  │
+│  │  core/embedder.py  ← embedding 调用                          │  │
+│  │  storage/          ← Chroma collection 操作                  │  │
+│  │  llm/caller.py     ← LLM 调用 (OpenAI 兼容)                  │  │
+│  │  vault/syncer.py   ← Vault 同步编排                           │  │
+│  │  vault/connector.py← Local / WebDAV 文件源适配器              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  APScheduler — 每 N 分钟轮询触发 auto_sync Vault                    │
+└──────────────────────┬──────────────────────────────────────────────┘
                        │
           ┌────────────┴────────────┐
           ▼                         ▼
@@ -88,102 +83,117 @@ Bot (1) ──has──> (N) Session
 │  SQLite (元数据)  │     │  Chroma (向量)        │
 │                  │     │                      │
 │  bots            │     │  kb_<id>             │
-│  knowledge_bases │     │  kb_<id>             │
-│  bot_kb_links    │     │  kb_<id> (独立col.)  │
-│  documents_meta  │     │                      │
-│  sessions        │     │                      │
-└──────────────────┘     └──────────────────────┘
+│  knowledge_bases │     │  (每个 KB 一个        │
+│  bot_kb_links    │     │   collection)        │
+│  documents       │     │                      │
+│  sessions        │     └──────────────────────┘
+│  messages        │
+│  vaults          │
+│  vault_files     │
+│  settings        │
+└──────────────────┘
 ```
 
-### 双存储说明
+### Web UI
 
-| 存储 | 存什么 | 原因 |
-|------|--------|------|
-| **SQLite** | Bot 配置、知识库元数据、文档元数据、对话历史 | Python 自带，零依赖，量小（几千条记录） |
-| **Chroma** | 文档 chunk 的向量索引 | 专门做 ANN 检索，每个 KB 一个 collection |
+内嵌于服务，构建产物放入 `memoria/static/`，服务启动后通过 `http://localhost:8000` 访问。
+
+- **Chat** — 左侧会话列表（新建 / 切换 / 删除）+ 右侧对话区（Markdown 渲染 / 消息来源展示）
+- **Knowledge Bases** — 知识库列表 / 文档上传删除 / Vault 绑定同步
+- **Bots** — Bot 创建 / 关联 KB / System Prompt 编辑
+- **Settings** — API 地址 / Key / RAG 参数 / Vault 同步间隔（含连接测试）
 
 ---
 
 ## 三、接口契约
 
-### 3.1 RAG 引擎（Python API）— 供测试和内部调用
-
-> 这是最底层接口，**测试围绕它写**。服务层和 CLI 都调它。
-
-```python
-def ingest(kb_id: str, path: str | list[str]) -> IngestResult
-    """加载文件 → chunk → embedding → 写入指定的 knowledge base。"""
-
-def retrieve(kb_id: str, query: str, k: int = 5) -> list[ChunkResult]
-    """在指定 knowledge base 中检索，返回 top-k 文本片段及相似度分数。"""
-
-def query(bot_id: str, query: str, stream: bool = False) -> QueryResult
-    """按 Bot 关联的所有 KB 检索 → 合并结果 → 拼 Prompt → LLM 回答。"""
-
-def list_docs(kb_id: str) -> list[DocInfo]
-    """列出指定知识库中的文档。"""
-
-def delete_doc(kb_id: str, doc_id: str) -> bool
-    """删除指定知识库中的文档及其所有 chunk。"""
-```
-
-### 3.2 REST API（服务层）
+### 3.1 REST API
 
 #### 知识库管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/knowledge-bases` | 创建知识库：`{"name": "简历", "description": "..."}` |
-| `GET` | `/api/knowledge-bases` | 列出所有知识库 |
-| `GET` | `/api/knowledge-bases/{kb_id}` | 知识库详情（含文档列表） |
-| `DELETE` | `/api/knowledge-bases/{kb_id}` | 删除知识库及其所有向量 |
+| `POST` | `/api/knowledge-bases` | 创建 KB，`type` 字段为 `upload`（默认）或 `vault` |
+| `GET` | `/api/knowledge-bases` | 列出所有 KB |
+| `GET` | `/api/knowledge-bases/{kb_id}` | KB 详情 |
+| `DELETE` | `/api/knowledge-bases/{kb_id}` | 删除 KB 及其向量 |
+
+#### Vault 管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/knowledge-bases/{kb_id}/vault` | 绑定 Vault（local / webdav），触发初始同步 |
+| `GET` | `/api/knowledge-bases/{kb_id}/vault` | 查看 Vault 状态 |
+| `PATCH` | `/api/knowledge-bases/{kb_id}/vault` | 更新 auto_sync 配置 |
+| `DELETE` | `/api/knowledge-bases/{kb_id}/vault` | 解绑 Vault，清除同步文档 |
+| `POST` | `/api/knowledge-bases/{kb_id}/vault/sync` | 手动触发同步 |
+| `DELETE` | `/api/knowledge-bases/{kb_id}/vault/sync` | 取消正在进行的同步 |
 
 #### Bot 管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/bots` | 创建 Bot：`{"name": "面试助手", "system_prompt": "...", "kb_ids": ["kb_1", "kb_2"]}` |
+| `POST` | `/api/bots` | 创建 Bot |
 | `GET` | `/api/bots` | 列出所有 Bot |
-| `GET` | `/api/bots/{bot_id}` | Bot 详情（含关联的知识库） |
-| `PUT` | `/api/bots/{bot_id}` | 更新 Bot 配置（prompt、关联 KB 等） |
-| `DELETE` | `/api/bots/{bot_id}` | 删除 Bot |
+| `GET` | `/api/bots/{bot_id}` | Bot 详情 |
+| `PUT` | `/api/bots/{bot_id}` | 更新 Bot 配置 |
+| `DELETE` | `/api/bots/{bot_id}` | 删除 Bot 及其会话 |
 
 #### 文档管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/knowledge-bases/{kb_id}/documents` | 上传文档入库（multipart） |
-| `GET` | `/api/documents` | 文档列表（可加 `?kb_id=` 过滤） |
+| `POST` | `/api/knowledge-bases/{kb_id}/documents` | 上传文档（multipart）|
+| `GET` | `/api/documents?kb_id=` | 文档列表，可按 KB 过滤 |
 | `DELETE` | `/api/documents/{doc_id}` | 删除文档及其向量 |
 
-#### 对话
+#### 对话与会话
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/chat/{bot_id}` | 对话入口：`{"message": "你好"}`（可传 `session_id` 续聊） |
-| `GET` | `/api/health` | 健康检查 |
+| `POST` | `/api/chat/{bot_id}` | 对话，可传 `session_id` 续聊 |
+| `GET` | `/api/sessions/{bot_id}` | 列出 Bot 的所有会话 |
+| `GET` | `/api/sessions/{session_id}/messages` | 拉取会话全量消息 |
+| `DELETE` | `/api/sessions/{session_id}` | 删除会话及其消息 |
 
-### 3.3 CLI（调试工具）— 开发阶段手动测试用
+#### 设置
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/settings` | 获取当前生效设置 |
+| `PATCH` | `/api/settings` | 更新设置（DB 覆盖层，优先于 .env）|
+| `POST` | `/api/settings/test-embed` | 测试 embedding 连通性 |
+| `POST` | `/api/settings/test-chat` | 测试 LLM 连通性 |
+
+#### 健康检查
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/health` | 返回 `{"status": "ok"}` |
+
+### 3.2 CLI（调试工具）
 
 ```
-memoria serve              ← 启动长时服务（主模式）
-memoria kb create <name>   ← 创建知识库
-memoria kb list            ← 列出知识库
-memoria bot create <name>  ← 创建 Bot
-memoria bot list           ← 列出 Bot
-memoria ingest <kb_id> <path>  ← 入库文档
-memoria query <bot_id> "<问题>" ← 对话
-memoria list               ← 文档列表
-memoria config show        ← 查看配置
-memoria config set k=v     ← 修改配置
+memoria serve [--host] [--port] [--log-file]  # 启动服务
+memoria kb create <name>                       # 创建知识库
+memoria kb list                                # 列出知识库
+memoria kb delete <kb_id>                      # 删除知识库
+memoria bot create <name> [--system-prompt]    # 创建 Bot
+memoria bot list                               # 列出 Bot
+memoria bot delete <bot_id>                    # 删除 Bot
+memoria ingest <kb_id> <path>                  # 单文件/目录入库
+memoria query <bot_id> "<问题>" [--session-id] # 对话
 ```
 
-### 3.4 QQ Bot / Web UI — 通过 HTTP 调用服务
+### 3.3 RAG 引擎（Python API）
 
-都是 Memoria Service 的 HTTP 客户端。
+核心库直接可导入，CLI 和测试不走 HTTP：
 
-- **QQ Bot**：监听消息 → `POST /api/chat/{bot_id}` → 回复
-- **Web UI**：「管理后台」调管理 API，「对话界面」调 `/api/chat/`
+```python
+pipeline.ingest(kb_id, path)                    # 入库
+pipeline.retrieve(kb_id, query, k)              # 检索
+pipeline.query(bot_id, question, session_id)    # 完整 RAG 问答
+```
 
 ---
 
@@ -192,189 +202,100 @@ memoria config set k=v     ← 修改配置
 ### 对话流程
 
 ```
-POST /api/chat/{bot_id} {"message": "什么是RAG"}
+POST /api/chat/{bot_id} {"message": "...", "session_id": "..."}
       │
- ├─────┴────────────────────────────────────┐
- │  ① 查 SQLite → 获取 Bot 配置             │
- │    - system_prompt                       │
- │    - 关联的 kb_ids: ["kb_1", "kb_2"]     │
- │    - 模型配置（可选覆盖全局）              │
- ├─────────────────────────────────────────┤
- │  ② 并行检索所有关联 KB                    │
- │    retrieve("kb_1", query, top_k)        │
- │    retrieve("kb_2", query, top_k)        │
- │    各取 top-k，合并后 rerank 取最终 top-k   │
- ├─────────────────────────────────────────┤
- │  ③ 拼 Prompt                             │
- │    System Prompt + 检索结果 + 用户消息     │
- ├─────────────────────────────────────────┤
- │  ④ 调 LLM → 返回回答 + 来源              │
- └─────────────────────────────────────────┘
+      ├─ ① 查 SQLite → Bot 配置 (system_prompt, kb_ids)
+      ├─ ② 加载 Session 历史（最近 10 条）
+      ├─ ③ 对所有关联 KB 检索，取 top-k chunks（score ≥ min_score）
+      ├─ ④ 拼 Prompt = system_prompt + context + 历史 + 用户消息
+      ├─ ⑤ 调 LLM → answer
+      ├─ ⑥ 写入 messages 表（user + assistant 各一条）
+      └─ ⑦ 返回 {answer, session_id, sources}
 ```
 
-### 入库流程
+### 文档入库流程
 
 ```
-POST /api/knowledge-bases/{kb_id}/documents (上传文件)
+POST /api/knowledge-bases/{kb_id}/documents (multipart)
       │
- ├────┴────────────────────────────────────┐
- │  ① 存原始文件到 data/uploads/           │
- │  ② 记录文档元数据到 SQLite              │
- │  ③ Chunk（RecursiveCharacterTextSplitter）│
- │  ④ Embed（text-embedding-3-large）       │
- │  ⑤ 写入 Chroma collection "kb_{kb_id}" │
- ├─────────────────────────────────────────┤
- │  ⑥ 返回入库结果                          │
- └─────────────────────────────────────────┘
+      ├─ ① 存原始文件到 data/uploads/
+      ├─ ② 记录 documents 表元数据
+      ├─ ③ RecursiveCharacterTextSplitter 切分
+      ├─ ④ Embedding API 向量化
+      └─ ⑤ 写入 Chroma collection "kb_{kb_id}"
 ```
 
-### CLI 调试流程
+### Vault 同步流程
 
 ```
-memoria query "xxx"
+触发方式：绑定时初始同步 / 手动触发 / APScheduler 周期轮询
       │
- 调 memoria RAG 引擎 Python API（直连，不走 HTTP）
-      │
- 结果打印到终端
-```
-
----
-
-### Phase 2 Agentic RAG 流程（未来扩展）
-
-```
-POST /api/chat/{bot_id} {"message": "帮我比较一下RAG和微调"}
-      │
- ├─────┴──────────────────────────────────────────────┐
- │  ① 查 SQLite → 获取 Bot 配置 + 关联 KB          │
- ├───────────────────────────────────────────────────┤
- │  ② Agent 开始 ReAct Loop                          │
- │                                                    │
- │  ┌─── ReAct 循环 ────────────────────────────┐    │
- │  │  LLM: "用户要比较RAG和微调，我先搜知识库"   │    │
- │  │  Tool: search_kb("RAG vs 微调对比")        │    │
- │  │  结果: 找到了一些基础概念, 不够全面         │    │
- │  │  LLM: "再换个角度搜一下微调的具体场景"      │    │
- │  │  Tool: search_kb("微调适用场景")           │    │
- │  │  结果: 找到了微调的具体案例                │    │
- │  │  LLM: "信息够了，整理成对比回答"            │    │
- │  │  回答: 结构化的对比结果                     │    │
- │  └────────────────────────────────────────┘    │
- ├───────────────────────────────────────────────────┤
- │  ③ 返回回答 + 引用来源                            │
- └───────────────────────────────────────────────────┘
-```
-
-> Phase 2 的核心变化：LLM 不再一次性回答，而是通过 ReAct 循环反复"思考→检索→再思考"，直到信息足够再回答。
-
-```python
-# Phase 2 引入 OpenAI Agents SDK 后的代码结构示意
-from agents import Agent, Runner, function_tool
-
-@function_tool
-def search_kb(kb_id: str, query: str) -> str:
-    """在指定知识库中检索相关信息"""
-    results = chroma_store.search(kb_id, query, k=5)
-    return format_results(results)
-
-agent = Agent(
-    name="面试助手",
-    instructions="你是一个…",
-    tools=[search_kb],  # 你的现有检索逻辑包装成 Tool
-)
-
-result = Runner.run_sync(agent, "帮我比较RAG和微调")
+      ├─ ① Connector.list_files() → 远端文件列表
+      ├─ ② 对比 vault_files 表 → 计算新增 / 已删除文件
+      ├─ ③ 新增文件 → 入库（同上传流程）
+      ├─ ④ 已删除文件 → 删除 Chroma 向量 + documents 记录
+      └─ ⑤ 更新 vault_files 表记录
 ```
 
 ---
 
 ## 五、关键技术决策（ADRs）
 
-### ADR-001：Embedding 模型选型
+### ADR-001：Embedding 模型
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | Phase 1 使用 **text-embedding-3-large**（通过 NewAPI） |
-| 选项 | bge-base-zh-v1.5（本地）、all-MiniLM-L6-v2（本地） |
-| 理由 | 已有 API 无需部署，1536 维足以覆盖起步需求。后续可切换为本地模型降低延迟/节省 API 费用 |
-| 代价 | 每次查询都需 API 调用，离线环境不可用 |
-| 可逆性 | ✅ 高度可逆——切换模型只需重跑 ingest，代码改一行配置 |
+**决策**：`text-embedding-3-large`（OpenAI 兼容 API，通过 `openai_base_url` 配置）
+- 可逆：切换模型只需改配置并重跑 ingest
 
-### ADR-002：向量数据库选型
+### ADR-002：向量数据库
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | Phase 1 使用 **Chroma** |
-| 选项 | FAISS（纯内存）、Milvus（需服务）、Qdrant（需服务） |
-| 理由 | pip install 即用，零配置，支持持久化到本地磁盘，API 简洁 |
-| 代价 | 大规模（百万级）性能不如专用向量库，本项目不会到这个量级 |
-| 可逆性 | ✅ 存储层已抽象，替换只需实现新的 store adapter |
+**决策**：ChromaDB（本地持久化）
+- 零配置，pip 安装即用；存储层已抽象，可替换
 
 ### ADR-003：Chunking 策略
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | Phase 1 使用 **RecursiveCharacterTextSplitter** |
-| 参数 | chunk_size=512, chunk_overlap=128（初始值，后续调整） |
-| 理由 | 成熟稳定，支持按分隔符层级递归切分，语义完整性较好 |
-| 代价 | 纯基于字符长度，不理解语义边界 |
-| 可逆性 | ✅ chunk 逻辑封装在 pipeline 中，切换策略只需替换 splitter |
+**决策**：`RecursiveCharacterTextSplitter`，默认 chunk_size=512 / overlap=128
+- 参数可通过 Settings API 或 .env 调整
 
 ### ADR-004：Reranker
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | **Phase 1 不加入**，Phase 2 评估是否需要 |
-| 理由 | MVP 阶段先验证基础召回质量，Reranker 会增加额外延迟和依赖 |
-| 可逆性 | ✅ 后续可加入，不影响已有架构 |
+**决策**：Phase 1 不引入；各 KB 分别取 top-k 合并后按分数过滤
 
-### ADR-005：元数据存储选型
+### ADR-005：元数据存储
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | Phase 1 使用 **SQLite** 存储 Bot / KB / Document 元数据 |
-| 选项 | PostgreSQL（需服务）、JSON 文件（难查询）、SQLAlchemy + 任意 DB |
-| 理由 | Python 内置 sqlite3，零依赖零部署。元数据规模极小（Bot < 50, KB < 50, Docs < 5000），SQLite 完全胜任 |
-| 代价 | 未来多用户或分布式场景需迁移至 PostgreSQL |
-| 可逆性 | ✅ 存储层用 SQLAlchemy 抽象，迁移只需改连接字符串 |
+**决策**：SQLite + SQLAlchemy；零部署，量小，可后续迁移至 PostgreSQL
 
 ### ADR-006：双存储架构
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | **SQLite 管元数据，Chroma 管向量**，两者通过 `kb_id` 关联 |
-| 理由 | 各司其职——SQLite 适合结构化查询和关系管理（Bot-KB 多对多），Chroma 负责向量相似度搜索。Chroma 不是关系数据库，不适合存元数据 |
-| 代价 | 事务一致性需应用层保证（删除 KB 时要同时删 Chroma collection 和 SQLite 记录） |
-| 可逆性 | ✅ 不可逆——这是架构层决策。但单 KB 场景下可将 SQLite 视为对 Chroma metadata 的补充 |
+**决策**：SQLite 管元数据，Chroma 管向量，通过 `kb_id` 关联
+- 应用层保证一致性（删除时先删 Chroma 后删 SQLite）
 
-### ADR-007：Agent 框架选型
+### ADR-007：Vault 级联删除
 
-| 项目 | 内容 |
-|------|------|
-| 决策 | **Phase 1 手写简单 RAG Loop；Phase 2 引入 OpenAI Agents SDK** |
-| 选项 | Claude Agent SDK（Python）、LangChain / LangGraph、CrewAI、自研 Agent Loop |
-| 理由 | Phase 1 的 RAG 逻辑简单（检索→拼Prompt→回答），不需要框架。Phase 2 需要多步推理、工具调用、Session 管理时，OpenAI Agents SDK 提供完整能力（Agent 定义 / Tool calling / Handoff / Guardrails / Tracing），且 Provider 无关（可继续用 DeepSeek / NewAPI） |
-| 代价 | 从手写 Loop 迁移到 SDK 需要重构对话路由；Claude Agent SDK 不适合因为本质是 CLI 包装且绑定 Claude |
-| 可逆性 | ✅ 可逆——核心 RAG 库（Chunker / Embedder / Chroma Store）与 Agent 层解耦，Agent SDK 只负责上层编排 |
+**决策**：应用层删除（与 `delete_bot`、`delete_kb` 保持一致），不用 DB 外键 CASCADE
+- `synchronize_session=False` 避免事件传播开销
+
+### ADR-008：Settings 覆盖层
+
+**决策**：`.env` 设静态默认值，DB `settings` 表存运行时覆盖，`get_effective_settings()` 合并两层
+- Web UI 保存的设置立即生效，无需重启
+
+### ADR-009：Vault 同步调度
+
+**决策**：APScheduler AsyncIOScheduler，间隔默认 15 分钟，可通过 Settings 调整
+- `auto_sync=False` 的 Vault 跳过周期轮询，只响应手动触发
 
 ---
 
-## 六、配置与数据存储
+## 六、配置
 
-### 6.1 三类资源的分工
+### 6.1 .env 配置项
 
-| 类别 | 内容 | 管理方式 |
-|------|------|----------|
-| **代码** | `.py` 文件、pyproject.toml | Git 跟踪 |
-| **配置** | API Key、模型名、chunk 参数 | `.env` 文件（Git 忽略）+ 环境变量 |
-| **数据** | Chroma 向量库 + SQLite 元数据 + 上传的文档 | `data/` 目录（Git 忽略） |
+```ini
+# API 连接（必填）
+OPENAI_BASE_URL=https://your-api.example.com
+OPENAI_API_KEY=sk-xxxxx
 
-### 6.2 配置项
-
-```
-# .env（不进 Git）
-NEWAPI_BASE_URL=https://api.kougami.de/v1
-NEWAPI_API_KEY=sk-xxxxx
+# 模型
 EMBEDDING_MODEL=text-embedding-3-large
 LLM_MODEL=deepseek-v4-flash
 
@@ -382,159 +303,117 @@ LLM_MODEL=deepseek-v4-flash
 CHUNK_SIZE=512
 CHUNK_OVERLAP=128
 TOP_K=5
+MIN_SCORE=0.5
 
 # 存储路径
-DB_PATH=./data/memoria.db       # SQLite 元数据
-CHROMA_PATH=./data/chroma       # Chroma 持久化目录
-UPLOAD_DIR=./data/uploads       # 原始文档存储
+DB_PATH=./data/memoria.db
+CHROMA_PATH=./data/chroma
+UPLOAD_DIR=./data/uploads
+LOG_PATH=./data/memoria.log
+
+# 开发调试
+USE_MOCK=false   # true 时跳过真实 API 调用，返回固定占位响应
 ```
 
-提供 `.env.example`（进 Git）作为模板，不含真实密钥。
+提供 `.env.example` 作为模板（进 Git）。以上所有参数也可在 Web UI 的「系统设置」页面运行时覆盖，优先级高于 .env。
 
-### 6.3 边界与假设
+### 6.2 文件格式支持
 
-| 格式 | Phase 1 支持 |
-|------|-------------|
+| 格式 | 支持 |
+|------|------|
 | `.md` | ✅ |
 | `.txt` | ✅ |
-| `.pdf` | ⚠️ 需 PyMuPDF，待评估 |
-| `.docx` | ⚠️ 需 python-docx，待评估 |
-
-假设：
-1. **中文为主**：chunk separators 包含中文标点
-2. **单文档 ≤ 10MB**
-3. **总入库量 ≤ 10 万 chunks**（Chroma 在此规模下性能良好）
-4. **查询意图**：问答型为主，未覆盖总结型/对比型
-5. **MVP 不涉及多轮对话记忆**，每次 query 独立检索
+| `.pdf` | ❌ |
+| `.docx` | ❌ |
 
 ---
 
-## 七、项目结构（初版）
+## 七、项目结构
 
 ```
 memoria/
-├── memoria/                          # 核心 Python 包
-│   ├── __init__.py
-│   ├── core/                         # RAG 引擎
-│   │   ├── __init__.py
-│   │   ├── pipeline.py               # ingest / retrieve / query 编排
-│   │   ├── chunker.py                # 文本切分
-│   │   └── embedder.py               # embedding 调用抽象
-│   ├── storage/                      # 存储层
-│   │   ├── __init__.py
-│   │   ├── base.py                   # Chroma 操作抽象
-│   │   ├── chroma_store.py           # Chroma 实现（多 collection)
-│   │   └── db.py                     # SQLite 元数据存储（Bot/KB/Doc CRUD）
-│   ├── models/                       # 数据模型
-│   │   ├── __init__.py
-│   │   ├── bot.py                    # Bot 模型
-│   │   ├── knowledge_base.py         # KB 模型
-│   │   └── document.py               # Document 模型
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   └── caller.py                 # LLM 调用包装（NewAPI / OpenAI 兼容）
-│   ├── server/                       # FastAPI 服务
-│   │   ├── __init__.py
-│   │   ├── app.py                    # FastAPI 应用 + 生命周期
-│   │   ├── routes/                   # REST 路由模块
-│   │   │   ├── __init__.py
-│   │   │   ├── knowledge_bases.py    # KB 管理路由
-│   │   │   ├── bots.py              # Bot 管理路由
-│   │   │   ├── documents.py         # 文档管理路由
-│   │   │   └── chat.py              # 对话路由
-│   │   └── deps.py                  # 依赖注入（DB session 等）
-│   ├── cli/
-│   │   ├── __init__.py
-│   │   └── main.py                   # CLI 入口（调核心库，不走 HTTP）
-│   └── config.py                     # 全局配置（从 .env 读取）
-├── tests/
-│   ├── test_chunker.py               # 单元测试：切分逻辑
-│   ├── test_pipeline.py              # 单元测试：引擎编排
-│   ├── test_retrieve.py              # 单元测试：检索
-│   ├── test_api.py                   # 集成测试：REST API
-│   └── test_models.py               # 单元测试：数据模型
-├── data/                             # Git ignored，运行时数据
-│   ├── memoria.db                    # SQLite 元数据
-│   ├── chroma/                       # Chroma 持久化目录
-│   └── uploads/                      # 用户上传的原始文档
-├── web/                              # Phase 2 前端（通过 API 调服务）
-│   └── (待定)
-├── .env                              # Git ignored，敏感配置
-├── .env.example                      # Git tracked，配置模板
-├── .gitignore
-├── DESIGN.md                         # ← 本文档
+├── memoria/                        # 核心 Python 包
+│   ├── core/                       # RAG 引擎
+│   │   ├── pipeline.py             # ingest / retrieve / query 编排
+│   │   ├── chunker.py              # 文本切分
+│   │   └── embedder.py             # embedding 调用
+│   ├── storage/
+│   │   ├── base.py                 # VectorStore 抽象基类
+│   │   ├── chroma_store.py         # Chroma 实现
+│   │   └── db.py                   # SQLite 元数据 CRUD
+│   ├── models/                     # Pydantic 数据模型
+│   ├── llm/caller.py               # LLM 调用（OpenAI 兼容）
+│   ├── vault/
+│   │   ├── connector.py            # LocalConnector / WebDAVConnector
+│   │   └── syncer.py               # Vault 同步编排
+│   ├── server/
+│   │   ├── app.py                  # FastAPI 应用 + APScheduler 生命周期
+│   │   ├── deps.py                 # 依赖注入
+│   │   └── routes/                 # 各功能路由模块
+│   │       ├── bots.py
+│   │       ├── chat.py
+│   │       ├── documents.py
+│   │       ├── knowledge_bases.py
+│   │       ├── sessions.py
+│   │       ├── settings.py
+│   │       └── vaults.py
+│   ├── cli/main.py                 # Click CLI 入口
+│   ├── static/                     # Web UI 构建产物（git 忽略，构建生成）
+│   └── config.py                   # pydantic-settings + get_effective_settings()
+├── web/                            # React + Vite 前端源码
+│   └── src/
+│       ├── pages/                  # Chat / KnowledgeBases / Bots / Settings
+│       ├── components/             # Layout + shadcn/ui 组件
+│       └── api.ts                  # 前端 API 客户端
+├── tests/                          # pytest 集成测试
+├── data/                           # Git 忽略，运行时数据
+│   ├── memoria.db
+│   ├── chroma/
+│   └── uploads/
+├── openspec/                       # OpenSpec 规格与变更记录
+├── docs/                           # Superpowers 设计文档和验证报告
+├── .env.example
 ├── pyproject.toml
+├── DESIGN.md
 └── README.md
 ```
 
 ---
 
-## 八、Phase 规划与演进路线
+## 八、Phase 规划
 
-### Phase 1 — 简单 RAG Loop（当前目标）
+### Phase 1 — 简单 RAG Loop ✅ 已完成
 
-| 组件 | 实现方式 |
-|------|---------|
-| 对话逻辑 | 手写：检索 → 拼 Prompt → LLM 回答（单次，无 Agent Loop） |
-| 多 KB 合并 | 各自取 top-k 后合并，取综合得分最高的 N 条 |
-| Session | 可选，存对话历史到 SQLite |
-| Reranker | 不使用 |
+| 组件 | 状态 |
+|------|------|
+| RAG 核心（ingest / retrieve / query）| ✅ |
+| SQLite 元数据存储 | ✅ |
+| ChromaDB 向量存储 | ✅ |
+| REST API（KB / Bot / Doc / Chat）| ✅ |
+| 多轮对话 Session | ✅ |
+| Web UI（Chat / KB / Bot / Settings）| ✅ |
+| Vault（Local + WebDAV + 自动同步）| ✅ |
+| 运行时设置覆盖 | ✅ |
+| 会话删除 | ✅ |
 
-数据流：
-```
-用户消息 → 搜所有关联 KB → 拼context → LLM回答 → 返回
-                          ↑ 一次性，无循环
-```
+### Phase 2 — Agentic RAG（待规划）
 
-### Phase 2 — Agentic RAG（未来扩展）
+| 组件 | 说明 |
+|------|------|
+| OpenAI Agents SDK | Agent 通过 ReAct Loop 决定搜什么、搜几次 |
+| Tool 层 | `search_kb`、`list_kbs` 包装成 Agent Tool |
+| 多 KB 策略 | Agent 按需决定搜哪些 KB |
+| Reranker | 根据召回质量评估 |
+| Guardrails | 输入/输出过滤 |
 
-| 组件 | 实现方式 |
-|------|---------|
-| 对话逻辑 | **OpenAI Agents SDK**：Agent 通过 ReAct Loop 决定搜什么、搜几次 |
-| 多 KB 合并 | Agent 按需决定搜哪个/哪些 KB，不再是固定全部搜 |
-| Tool 层 | 把 `search_kb`、`list_kbs`、`format_results` 等包装成 Agent Tool |
-| Session | SDK 内置管理 |
-| Reranker | 根据召回质量评估是否加入 |
-| Guardrails | 输入/输出过滤（敏感词检测等） |
+迁移路径：`core/`、`storage/`、`vault/` 不变，SDK 只替换 `server/routes/chat.py` 中的编排层。
 
-数据流：
-```
-用户消息 → Agent 开始 ReAct Loop → 按需搜 KB → 不够再搜 → LLM回答 → 返回
-                                    ↑ 可循环多次
-```
+---
 
-### 迁移路径
+## 九、未定项
 
-```
-Phase 1 代码结构                       Phase 2 代码结构
-══════════════════                    ══════════════════
-server/routes/chat.py                 server/routes/chat.py
-  └─ 直接调 pipeline.query()            └─ 调 Agent Runner
-                                          │
-pipeline.query()                       agents/agent.py
-  ├─ retrieve()                         ├─ Runner.run_sync()
-  ├─ 拼 prompt                          ├─ Agent(tools=[...])
-  └─ llm.caller()                       └─ tools.py (包装现有函数)
-                                            ├─ search_kb()
-                                            ├─ list_kbs()
-                                            └─ ... 后续扩展
-                                        
-core/ (不变)                           core/ (不变)
-storage/ (不变)                        storage/ (不变)
-```
-
-> 核心 RAG 库（chunker / embedder / chroma_store）在 Phase 1 和 Phase 2 之间**不变**，SDK 只加在编排层。这是"底层接口不变，上层换编排"的策略。
-
-## 九、未定项 / 待讨论
-
-- [ ] **Phase 2 Agent Tool 设计**：`search_kb` 的参数设计（单 KB vs 多 KB）、是否加 `list_kbs`、`summarize_results` 等
-- [ ] **SQLite schema 设计**：Bot、KB、Document、Bot-KB 关联表的具体字段定义
-- [ ] **服务部署方式**：直接运行 vs Docker 容器化（推荐 Docker，方便与现有 NAS 服务一致）
-- [ ] **QQ Bot 接入方式**：作为 HTTP 客户端调用 `POST /api/chat/{bot_id}`，需确定 bot_id 怎么映射到 QQ 群/好友
-- [ ] **Web UI 技术栈**：管理后台 + 对话面板，选型（Streamlit / Next.js / 纯 HTML+JS）
-- [ ] **多 KB 合并检索策略**：各自取 top-k 合并后，需不需要 rerank？合并策略（取交集？并集重排？按 KB 权重？）
-- [ ] **Session / 多轮对话**：是否需要在 SQLite 中存对话历史？消息量级评估
-- [ ] **是否加入 embedding 缓存**：避免重复向量化同一段文本
-- [ ] **服务治理**：日志、健康检查、优雅关闭
-- [ ] **测试策略**：单元测试 vs 集成测试的比重
-- [ ] **删除 KB 的一致性保障**：同时删 Chroma collection + SQLite 记录，失败怎么回滚
+- [ ] **Phase 2 Agent 工具设计**：`search_kb` 参数形式、是否需要 `list_kbs`、`summarize_results`
+- [ ] **部署方式**：Docker 容器化（与 NAS 现有服务保持一致）
+- [ ] **PDF / DOCX 支持**：PyMuPDF / python-docx，需评估依赖体积
+- [ ] **Embedding 缓存**：避免重复向量化同一文本
+- [ ] **多用户 / 权限隔离**：当前无认证，单用户本地使用场景
