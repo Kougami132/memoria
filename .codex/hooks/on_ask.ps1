@@ -14,5 +14,5 @@ $null = [Console]::In.ReadToEnd()
 $escB = $Body -replace "'", "''"
 
 try {
-    Start-Process pwsh -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"Import-Module BurntToast -ErrorAction Stop; New-BurntToastNotification -Text '需确认', '$escB'; Start-Sleep -Milliseconds 1500`"" -WindowStyle Normal
+    Start-Process pwsh -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"Import-Module BurntToast -ErrorAction Stop; New-BurntToastNotification -Text '需确认', '$escB'; Start-Sleep -Milliseconds 1500`"" -WindowStyle Hidden
 } catch {}

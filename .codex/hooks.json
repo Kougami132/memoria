@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/on_stop.ps1"
+            "command": "pwsh -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .codex/hooks/on_stop.ps1"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/on_ask.ps1"
+            "command": "pwsh -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File .codex/hooks/on_ask.ps1"
           }
         ]
       }
