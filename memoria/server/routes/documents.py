@@ -66,7 +66,4 @@ def delete_document(doc_id: str, db: DB = Depends(get_db), pipeline: Pipeline = 
         raise HTTPException(status_code=404, detail="Document not found")
     if doc.get("source") == "vault":
         raise HTTPException(status_code=409, detail="Vault-sourced documents cannot be manually deleted. Unbind the vault to remove them.")
-    # Delete vectors from Chroma using doc_id metadata filter
-    store = pipeline._get_store(doc["kb_id"])
-    store.delete(where={"doc_id": doc_id})
-    db.delete_doc(doc_id)
+    pipeline.delete_doc(doc_id, doc["kb_id"])

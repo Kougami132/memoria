@@ -50,7 +50,10 @@ function VaultPanel({ kbId }: { kbId: string }) {
 
   const syncVault = useMutation({
     mutationFn: () => api.syncVault(kbId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['vault', kbId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vault', kbId] })
+      qc.invalidateQueries({ queryKey: ['docs', kbId] })
+    },
   })
 
   const cancelSync = useMutation({

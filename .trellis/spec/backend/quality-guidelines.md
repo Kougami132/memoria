@@ -94,3 +94,30 @@ def test_query_with_mock(tmp_path):
 - [ ] Background threads reset state in `finally` blocks
 - [ ] New DB columns have a migration block in `DB.__init__` with a `DEFAULT` value
 - [ ] New tables have an ORM row class and are covered by `create_all`
+
+### Vault Document Deletion Contract
+
+Vault synchronization and manual document deletion span SQLite and Chroma. The
+SQLite document primary key is stored in Chroma metadata as `db_doc_id`; the
+metadata field `doc_id` is only the synthesized business/display identifier.
+`Pipeline.delete_doc(doc_id, kb_id)` must delete vectors with
+`where={"db_doc_id": doc_id}` before deleting the SQLite row. Vault sync must
+delete the old document before ingesting a changed file, and must retain the
+`vault_files` tracking row when deletion or replacement fails so a later sync
+can retry cleanup. Failures must be logged with a traceback rather than
+silently ignored.
+
+Required assertions:
+
+- A changed vault file leaves exactly one SQLite document and removes the old
+  document.
+- A deleted vault file removes both its SQLite document and tracking row.
+- Pipeline deletion calls the vector store with the `db_doc_id` metadata key.
+
+### One-off Vault Repair Contract
+
+The historical cleanup command is `memoria repair-vault-docs`. It defaults to
+dry-run and requires `--apply` to mutate data; `--kb-id` may restrict the
+operation to one Vault knowledge base. Apply mode runs normal Vault sync first,
+then deletes only `source="vault"` documents that are not referenced by any
+selected `vault_files.doc_id`. Upload documents are never selected by filename.

@@ -74,6 +74,49 @@ def test_sync_changed_file_reingested(db, pipeline, vault_with_local):
     assert files[0]["doc_id"] == "doc-2"
 
 
+def test_sync_changed_file_removes_old_document(db, vault_with_local, tmp_path):
+    from memoria.core.pipeline import Pipeline
+
+    kb, vault, vault_dir = vault_with_local
+    note = vault_dir / "note.md"
+    note.write_text("version 1")
+    embedder = MagicMock()
+    embedder.embed.return_value = [[0.1, 0.2]]
+    pipeline = Pipeline(db=db, embedder=embedder, llm=MagicMock(),
+                        chroma_path=str(tmp_path / "chroma"))
+    with patch.object(pipeline, "_get_store", return_value=MagicMock()):
+        syncer = VaultSyncer(db, pipeline)
+        syncer.sync(vault["id"])
+        old_doc_id = db.list_docs(kb["id"])[0]["id"]
+        note.write_text("version 2")
+        syncer.sync(vault["id"])
+
+    docs = db.list_docs(kb["id"])
+    assert len(docs) == 1
+    assert docs[0]["id"] != old_doc_id
+    assert db.get_doc(old_doc_id) is None
+
+
+def test_sync_deleted_file_removes_persisted_document(db, vault_with_local, tmp_path):
+    from memoria.core.pipeline import Pipeline
+
+    kb, vault, vault_dir = vault_with_local
+    note = vault_dir / "note.md"
+    note.write_text("some content")
+    embedder = MagicMock()
+    embedder.embed.return_value = [[0.1, 0.2]]
+    pipeline = Pipeline(db=db, embedder=embedder, llm=MagicMock(),
+                        chroma_path=str(tmp_path / "chroma"))
+    with patch.object(pipeline, "_get_store", return_value=MagicMock()):
+        syncer = VaultSyncer(db, pipeline)
+        syncer.sync(vault["id"])
+        doc_id = db.list_docs(kb["id"])[0]["id"]
+        note.unlink()
+        syncer.sync(vault["id"])
+
+    assert db.list_docs(kb["id"]) == []
+    assert db.get_doc(doc_id) is None
+
 def test_sync_deleted_file_removes_doc(db, pipeline, vault_with_local):
     kb, vault, vault_dir = vault_with_local
     note = vault_dir / "note.md"

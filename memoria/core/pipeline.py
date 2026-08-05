@@ -50,6 +50,11 @@ class Pipeline:
         self._get_store(kb_id).add(ids, vectors, chunks, metadatas)
         return {"doc_id": doc_id, "chunk_count": len(chunks), "doc": doc}
 
+    def delete_doc(self, doc_id: str, kb_id: str) -> None:
+        """Delete a document and all vector chunks associated with it."""
+        self._get_store(kb_id).delete(where={"db_doc_id": doc_id})
+        self.db.delete_doc(doc_id)
+
     def retrieve(self, kb_id: str, query: str, k: int | None = None) -> list[dict]:
         if not query or not query.strip():
             return []

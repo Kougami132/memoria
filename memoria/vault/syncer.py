@@ -34,7 +34,7 @@ class VaultSyncer:
             vault["webdav_password"],
         )
 
-    def sync(self, vault_id: str, cancel_event: threading.Event | None = None) -> None:
+    def sync(self, vault_id: str, cancel_event: threading.Event | None = None) -> bool:
         vault = self.db.get_vault(vault_id)
         connector = self._make_connector(vault)
 
@@ -42,7 +42,7 @@ class VaultSyncer:
             current = set(connector.list_files())
         except Exception:
             logger.exception("vault_sync: list_files failed vault_id=%s", vault_id)
-            return
+            return False
 
         tracked = {f["rel_path"]: f for f in self.db.list_vault_files(vault_id)}
 
@@ -52,9 +52,12 @@ class VaultSyncer:
 
         for rel_path in deleted_files:
             row = tracked[rel_path]
-            if row["doc_id"]:
-                self._delete_doc(row["doc_id"], vault["kb_id"])
-            self.db.delete_vault_file(row["id"])
+            try:
+                if row["doc_id"]:
+                    self._delete_doc(row["doc_id"], vault["kb_id"])
+                self.db.delete_vault_file(row["id"])
+            except Exception:
+                logger.exception("vault_sync: failed to remove deleted file %s", rel_path)
 
         cancelled = False
 
@@ -74,21 +77,22 @@ class VaultSyncer:
                     continue
                 new_hash = _sha256(content)
                 if new_hash != row["file_hash"]:
-                    if row["doc_id"]:
-                        self._delete_doc(row["doc_id"], vault["kb_id"])
-                    self._ingest_file(connector, vault, rel_path, content=content)
+                    try:
+                        if row["doc_id"]:
+                            self._delete_doc(row["doc_id"], vault["kb_id"])
+                        self._ingest_file(connector, vault, rel_path, content=content)
+                    except Exception:
+                        logger.exception("vault_sync: failed to replace changed file %s", rel_path)
                 if cancel_event and cancel_event.is_set():
                     cancelled = True
                     break
 
         if not cancelled:
             self.db.update_vault_last_synced(vault_id, _now())
+        return not cancelled
 
     def _delete_doc(self, doc_id: str, kb_id: str) -> None:
-        try:
-            self.pipeline.delete_doc(doc_id, kb_id)
-        except Exception:
-            logger.warning("vault_sync: failed to delete doc %s", doc_id)
+        self.pipeline.delete_doc(doc_id, kb_id)
 
     def _ingest_file(self, connector: VaultConnector, vault: dict, rel_path: str,
                      content: bytes | None = None) -> None:
