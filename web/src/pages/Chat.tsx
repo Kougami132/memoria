@@ -29,9 +29,12 @@ const mdComponents: Components = {
 }
 
 interface DisplayMessage {
+  id: string
   role: 'user' | 'assistant'
   content: string
   sources?: Source[]
+  streaming?: boolean
+  status?: string
 }
 
 function SourceList({ sources }: { sources: Source[] }) {
@@ -44,7 +47,7 @@ function SourceList({ sources }: { sources: Source[] }) {
         onClick={() => setOpen(v => !v)}
       >
         <BookOpen className="h-3 w-3" />
-        <span>参考来源 ({sources.length})</span>
+        <span>检索依据 ({sources.length})</span>
         {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
       </button>
       {open && (
@@ -73,6 +76,9 @@ function SourceList({ sources }: { sources: Source[] }) {
   )
 }
 
+type SendMessageVars = { message: string; placeholderId: string }
+type SendContext = { previousSessionId: string | null }
+
 export default function Chat() {
   const { data: bots = [] } = useQuery({ queryKey: ['bots'], queryFn: api.listBots })
   const [botId, setBotId] = useState<string>('')
@@ -96,7 +102,12 @@ export default function Chat() {
     setSessionId(sid)
     try {
       const msgs = await api.getMessages(sid)
-      setMessages(msgs.map(m => ({ role: m.role, content: m.content, sources: m.sources })))
+      setMessages(msgs.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        sources: m.sources,
+      })))
     } catch {
       setMessages([])
     }
@@ -108,19 +119,62 @@ export default function Chat() {
     inputRef.current?.focus()
   }
 
-  const sendMsg = useMutation({
-    mutationFn: (message: string) => api.chat(botId, message, sessionId ?? undefined),
-    onMutate: (message: string) => {
-      setMessages(prev => [...prev, { role: 'user', content: message }])
+  const sendMsg = useMutation<api.ChatStreamFinalEvent, Error, SendMessageVars, SendContext>({
+    mutationFn: async ({ message, placeholderId }) => {
+      let final: api.ChatStreamFinalEvent | null = null
+      await api.chatStream(botId, message, sessionId ?? undefined, event => {
+        if (event.type === 'meta') {
+          setSessionId(event.session_id)
+          setMessages(prev => prev.map(m =>
+            m.id === placeholderId ? { ...m, sources: event.sources, streaming: true } : m,
+          ))
+          return
+        }
+        if (event.type === 'status') {
+          setMessages(prev => prev.map(m =>
+            m.id === placeholderId ? { ...m, status: event.message, streaming: true } : m,
+          ))
+          return
+        }
+        if (event.type === 'delta') {
+          setMessages(prev => prev.map(m =>
+            m.id === placeholderId
+              ? { ...m, content: m.content + event.delta, status: undefined, streaming: true }
+              : m,
+          ))
+          return
+        }
+        if (event.type === 'final') {
+          final = event
+          setMessages(prev => prev.map(m =>
+            m.id === placeholderId
+              ? { ...m, content: event.answer, sources: event.sources, status: undefined, streaming: false }
+              : m,
+          ))
+        }
+      })
+      if (!final) throw new Error('stream ended before final response')
+      return final
+    },
+    onMutate: ({ message, placeholderId }) => {
+      const previousSessionId = sessionId
+      const userId = `user-${placeholderId}`
+      setMessages(prev => [
+        ...prev,
+        { id: userId, role: 'user', content: message },
+        { id: placeholderId, role: 'assistant', content: '', streaming: true },
+      ])
       setInput('')
+      return { previousSessionId }
     },
-    onSuccess: data => {
-      if (!sessionId) { setSessionId(data.session_id); refetchSessions() }
-      setMessages(prev => [...prev, { role: 'assistant', content: data.answer, sources: data.sources }])
+    onSuccess: (final, _vars, ctx) => {
+      setSessionId(final.session_id)
+      if (!ctx?.previousSessionId) refetchSessions()
     },
-    onError: (_err, message) => {
-      setMessages(prev => prev.slice(0, -1))
-      setInput(message)
+    onError: (_err, vars, ctx) => {
+      setMessages(prev => prev.slice(0, -2))
+      setInput(vars.message)
+      setSessionId(ctx?.previousSessionId ?? null)
     },
   })
 
@@ -133,10 +187,16 @@ export default function Chat() {
     onError: () => refetchSessions(),
   })
 
+  const handleSend = () => {
+    const message = input.trim()
+    if (!message || !botId || sendMsg.isPending) return
+    sendMsg.mutate({ message, placeholderId: crypto.randomUUID() })
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && input.trim() && botId && !sendMsg.isPending) {
       e.preventDefault()
-      sendMsg.mutate(input)
+      handleSend()
     }
   }
 
@@ -145,7 +205,11 @@ export default function Chat() {
       {/* 左侧会话栏 */}
       <div className="w-52 border-r flex flex-col bg-muted/20 shrink-0">
         <div className="p-3 border-b space-y-2">
-          <Select value={botId} onValueChange={id => { setBotId(id); setSessionId(null); setMessages([]) }}>
+          <Select
+            value={botId}
+            onValueChange={id => { setBotId(id); setSessionId(null); setMessages([]) }}
+            disabled={sendMsg.isPending}
+          >
             <SelectTrigger className="bg-background text-sm h-9">
               <SelectValue placeholder="选择机器人" />
             </SelectTrigger>
@@ -154,7 +218,7 @@ export default function Chat() {
             </SelectContent>
           </Select>
           {botId && (
-            <Button variant="outline" size="sm" className="w-full gap-1.5 h-8 text-xs" onClick={newSession}>
+            <Button variant="outline" size="sm" className="w-full gap-1.5 h-8 text-xs" onClick={newSession} disabled={sendMsg.isPending}>
               <Plus className="h-3.5 w-3.5" />
               新建对话
             </Button>
@@ -174,8 +238,9 @@ export default function Chat() {
               }`}
             >
               <button
-                className="w-full text-left px-3 py-3"
+                className="w-full text-left px-3 py-3 disabled:cursor-not-allowed"
                 onClick={() => loadSession(s.id)}
+                disabled={sendMsg.isPending}
               >
                 <p className="font-medium truncate pr-5">会话 {index + 1}</p>
                 <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
@@ -183,7 +248,7 @@ export default function Chat() {
               <button
                 className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
                 onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
-                disabled={deleteSessionMutation.isPending}
+                disabled={deleteSessionMutation.isPending || sendMsg.isPending}
                 aria-label="删除会话"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -213,7 +278,7 @@ export default function Chat() {
                 </div>
               )}
               {messages.map((m, i) => (
-                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div key={m.id || i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   {m.role === 'assistant' ? (
                     <div className="flex items-start gap-3 max-w-[75%]">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shrink-0 shadow-sm">
@@ -221,7 +286,14 @@ export default function Chat() {
                       </div>
                       <div>
                         <div className="rounded-2xl rounded-tl-sm bg-card border px-4 py-3 text-sm leading-relaxed shadow-sm">
-                          <ReactMarkdown components={mdComponents}>{m.content}</ReactMarkdown>
+                          {m.content ? (
+                            <ReactMarkdown components={mdComponents}>{m.content}</ReactMarkdown>
+                          ) : m.streaming ? (
+                            <span className="text-muted-foreground text-sm">{m.status || '正在生成思路与答案…'}</span>
+                          ) : null}
+                          {m.streaming && (
+                            <span className="ml-1 inline-block animate-pulse align-baseline text-muted-foreground">▋</span>
+                          )}
                         </div>
                         {m.sources && <SourceList sources={m.sources} />}
                       </div>
@@ -235,20 +307,6 @@ export default function Chat() {
                   )}
                 </div>
               ))}
-              {sendMsg.isPending && (
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shrink-0">
-                    <Brain className="h-4 w-4 text-white" />
-                  </div>
-                  <div className="bg-card border rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm">
-                    <div className="flex gap-1.5 items-center h-5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-1" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-2" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 dot-3" />
-                    </div>
-                  </div>
-                </div>
-              )}
               <div ref={bottomRef} />
             </div>
             <div className="border-t bg-background/80 backdrop-blur-sm px-4 py-4 shrink-0">
@@ -264,7 +322,7 @@ export default function Chat() {
                 />
                 <Button
                   variant="gradient"
-                  onClick={() => sendMsg.mutate(input)}
+                  onClick={handleSend}
                   disabled={!input.trim() || sendMsg.isPending}
                   className="rounded-2xl px-4 shrink-0"
                 >

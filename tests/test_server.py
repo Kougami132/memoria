@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -139,6 +141,39 @@ def test_chat_has_sources(client):
     data = r.json()
     assert "sources" in data
     assert isinstance(data["sources"], list)
+
+
+def test_chat_stream(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+
+    with client.stream("POST", f"/api/chat/{bot['id']}/stream", json={"message": "hello"}) as r:
+        assert r.status_code == 200
+        events = [json.loads(line) for line in r.iter_lines() if line]
+
+    assert events[0]["type"] == "status"
+    assert "检索知识库" in events[0]["message"]
+
+    meta = next(event for event in events if event["type"] == "meta")
+    assert "session_id" in meta
+    assert isinstance(meta["sources"], list)
+
+    statuses = [event["message"] for event in events if event["type"] == "status"]
+    assert any("流式生成" in message for message in statuses)
+
+    deltas = [event["delta"] for event in events if event["type"] == "delta"]
+    assert len(deltas) > 1
+    assert "".join(deltas) == "[mock response]"
+
+    final = events[-1]
+    assert final["type"] == "final"
+    assert final["answer"] == "[mock response]"
+    assert final["session_id"] == meta["session_id"]
+    assert isinstance(final["sources"], list)
+
+    messages = client.get(f"/api/sessions/{final['session_id']}/messages").json()
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    assert messages[1]["content"] == "[mock response]"
 
 
 # ── Vault API tests ───────────────────────────────────────────────────────────

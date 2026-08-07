@@ -29,6 +29,12 @@ export interface Source {
   source?: string
 }
 export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
+export interface ChatStreamMetaEvent { type: 'meta'; session_id: string; sources: Source[] }
+export interface ChatStreamDeltaEvent { type: 'delta'; delta: string }
+export interface ChatStreamStatusEvent { type: 'status'; message: string }
+export interface ChatStreamFinalEvent { type: 'final'; answer: string; session_id: string; sources: Source[] }
+export interface ChatStreamErrorEvent { type: 'error'; detail: string }
+export type ChatStreamEvent = ChatStreamMetaEvent | ChatStreamDeltaEvent | ChatStreamStatusEvent | ChatStreamFinalEvent | ChatStreamErrorEvent
 export interface Settings {
   openai_base_url: string; openai_api_key: string; embedding_model: string;
   llm_model: string; top_k: string; chunk_size: string; chunk_overlap: string;
@@ -70,6 +76,52 @@ export const listSessions = (botId: string) => req<Session[]>(`/bots/${botId}/se
 
 export const chat = (botId: string, message: string, sessionId?: string) =>
   req<ChatResponse>(`/chat/${botId}`, { method: 'POST', ...json({ message, session_id: sessionId }) })
+
+export async function chatStream(
+  botId: string,
+  message: string,
+  sessionId: string | undefined,
+  onEvent?: (event: ChatStreamEvent) => void,
+): Promise<ChatStreamFinalEvent> {
+  const r = await fetch(`${BASE}/chat/${botId}/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId }),
+  })
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  if (!r.body) throw new Error('Streaming is not supported by this browser')
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let final: ChatStreamFinalEvent | null = null
+
+  const handleLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    const event = JSON.parse(trimmed) as ChatStreamEvent
+    onEvent?.(event)
+    if (event.type === 'error') throw new Error(event.detail || 'Stream failed')
+    if (event.type === 'final') final = event
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (value) buffer += decoder.decode(value, { stream: !done })
+    let newlineIndex = buffer.indexOf('\n')
+    while (newlineIndex >= 0) {
+      handleLine(buffer.slice(0, newlineIndex))
+      buffer = buffer.slice(newlineIndex + 1)
+      newlineIndex = buffer.indexOf('\n')
+    }
+    if (done) break
+  }
+
+  if (buffer.trim()) handleLine(buffer)
+  if (!final) throw new Error('Stream ended before final response')
+  return final
+}
+
 export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${sessionId}/messages`)
 export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { method: 'DELETE' })
 
