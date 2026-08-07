@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain, Trash2 } from 'lucide-react'
+import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain, Trash2, Pencil } from 'lucide-react'
 import * as api from '@/api'
 import type { Source } from '@/api'
 import ReactMarkdown from 'react-markdown'
@@ -85,8 +85,11 @@ export default function Chat() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [input, setInput] = useState('')
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const skipRenameSaveRef = useRef(false)
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
     queryKey: ['sessions', botId],
@@ -116,7 +119,50 @@ export default function Chat() {
   const newSession = () => {
     setSessionId(null)
     setMessages([])
+    setEditingSessionId(null)
+    setEditingTitle('')
     inputRef.current?.focus()
+  }
+
+  const sessionTitle = (session: api.Session) => session.title?.trim() || '新对话'
+
+  const startRename = (session: api.Session) => {
+    setEditingSessionId(session.id)
+    setEditingTitle(sessionTitle(session))
+  }
+
+  const clearRename = () => {
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }
+
+  const cancelRename = () => {
+    skipRenameSaveRef.current = true
+    clearRename()
+    window.setTimeout(() => {
+      skipRenameSaveRef.current = false
+    }, 0)
+  }
+
+
+  const renameSessionMutation = useMutation({
+    mutationFn: ({ sid, title }: { sid: string; title: string }) => api.updateSession(sid, { title }),
+    onSuccess: () => refetchSessions(),
+    onError: () => refetchSessions(),
+  })
+
+  const finishRename = () => {
+    if (skipRenameSaveRef.current) {
+      skipRenameSaveRef.current = false
+      return
+    }
+    if (!editingSessionId) return
+    const sid = editingSessionId
+    const title = editingTitle.trim()
+    const previous = sessions.find(s => s.id === sid)
+    clearRename()
+    if (!title || (previous && sessionTitle(previous) === title)) return
+    renameSessionMutation.mutate({ sid, title })
   }
 
   const sendMsg = useMutation<api.ChatStreamFinalEvent, Error, SendMessageVars, SendContext>({
@@ -207,7 +253,7 @@ export default function Chat() {
         <div className="p-3 border-b space-y-2">
           <Select
             value={botId}
-            onValueChange={id => { setBotId(id); setSessionId(null); setMessages([]) }}
+            onValueChange={id => { setBotId(id); setSessionId(null); setMessages([]); clearRename() }}
             disabled={sendMsg.isPending}
           >
             <SelectTrigger className="bg-background text-sm h-9">
@@ -228,7 +274,7 @@ export default function Chat() {
           {botId && sessions.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-6">暂无历史会话</p>
           )}
-          {sessions.map((s, index) => (
+          {sessions.map(s => (
             <div
               key={s.id}
               className={`group relative w-full rounded-xl text-xs transition-colors ${
@@ -237,22 +283,57 @@ export default function Chat() {
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
-              <button
-                className="w-full text-left px-3 py-3 disabled:cursor-not-allowed"
-                onClick={() => loadSession(s.id)}
-                disabled={sendMsg.isPending}
-              >
-                <p className="font-medium truncate pr-5">会话 {index + 1}</p>
-                <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
-              </button>
-              <button
-                className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
-                onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
-                disabled={deleteSessionMutation.isPending || sendMsg.isPending}
-                aria-label="删除会话"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {editingSessionId === s.id ? (
+                <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                  <Input
+                    autoFocus
+                    value={editingTitle}
+                    onChange={e => setEditingTitle(e.target.value)}
+                    onFocus={e => e.currentTarget.select()}
+                    onBlur={finishRename}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        e.currentTarget.blur()
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        cancelRename()
+                      }
+                    }}
+                    disabled={renameSessionMutation.isPending}
+                    className="h-6 rounded-lg bg-background px-2 py-0 text-xs text-foreground"
+                  />
+                  <p className="opacity-60 mt-1">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
+                </div>
+              ) : (
+                <>
+                  <button
+                    className="w-full text-left px-3 py-3 disabled:cursor-not-allowed"
+                    onClick={() => loadSession(s.id)}
+                    disabled={sendMsg.isPending}
+                  >
+                    <p className="font-medium truncate pr-12">{sessionTitle(s)}</p>
+                    <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
+                  </button>
+                  <button
+                    className={`absolute right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
+                    onClick={e => { e.stopPropagation(); startRename(s) }}
+                    disabled={renameSessionMutation.isPending || sendMsg.isPending}
+                    aria-label="重命名会话"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
+                    onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
+                    disabled={deleteSessionMutation.isPending || sendMsg.isPending}
+                    aria-label="删除会话"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
             </div>
           ))}
         </div>

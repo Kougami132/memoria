@@ -108,7 +108,27 @@ def test_bot_sessions(client):
     assert r.status_code == 200
     r2 = client.get(f"/api/bots/{bot['id']}/sessions")
     assert r2.status_code == 200
-    assert len(r2.json()) == 1
+    sessions = r2.json()
+    assert len(sessions) == 1
+    assert sessions[0]["title"] == "hello"
+
+
+def test_update_session_title(client):
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+    chat = client.post(f"/api/chat/{bot['id']}", json={"message": "请解释 Memoria 的会话标题"}).json()
+
+    r = client.patch(f"/api/sessions/{chat['session_id']}", json={"title": "我的自定义标题"})
+
+    assert r.status_code == 200
+    assert r.json()["title"] == "我的自定义标题"
+    sessions = client.get(f"/api/bots/{bot['id']}/sessions").json()
+    assert sessions[0]["title"] == "我的自定义标题"
+
+
+def test_update_session_title_not_found(client):
+    r = client.patch("/api/sessions/nonexistent", json={"title": "不存在"})
+    assert r.status_code == 404
 
 
 def test_bot_sessions_not_found(client):

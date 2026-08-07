@@ -1,6 +1,6 @@
 import pytest
 from memoria.storage.db import DB
-from memoria.config import get_effective_settings
+from memoria.config import get_effective_settings, settings
 from memoria.core.pipeline import Pipeline
 
 
@@ -13,10 +13,13 @@ def test_get_effective_settings_defaults(db):
     result = get_effective_settings(db)
     assert set(result.keys()) == {
         "openai_base_url", "openai_api_key", "embedding_model",
-        "llm_model", "top_k", "chunk_size", "chunk_overlap"
+        "llm_model", "top_k", "min_score", "chunk_size", "chunk_overlap",
+        "vault_sync_interval_minutes"
     }
-    assert result["top_k"] == "5"
-    assert result["chunk_size"] == "512"
+    assert result["top_k"] == str(settings.top_k)
+    assert result["chunk_size"] == str(settings.chunk_size)
+    assert result["min_score"] == str(settings.min_score)
+    assert result["vault_sync_interval_minutes"] == "15"
 
 
 def test_get_effective_settings_override(db):
@@ -25,7 +28,7 @@ def test_get_effective_settings_override(db):
     result = get_effective_settings(db)
     assert result["top_k"] == "10"
     assert result["llm_model"] == "gpt-4o"
-    assert result["chunk_size"] == "512"  # unchanged default
+    assert result["chunk_size"] == str(settings.chunk_size)  # unchanged default
 
 
 def test_reset_pipeline_rebuilds(monkeypatch):

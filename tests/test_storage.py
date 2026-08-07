@@ -1,3 +1,4 @@
+import sqlite3
 import time
 import pytest
 from memoria.storage.db import DB
@@ -73,6 +74,47 @@ def test_list_sessions(db):
     assert len(sessions) == 2
     assert sessions[0]["id"] == s2["id"]  # DESC: s2 first
     assert sessions[1]["id"] == s1["id"]
+
+
+def test_session_title_from_first_message(db):
+    bot = db.create_bot("b", "", [])
+    session = db.create_session(bot["id"], "  请帮我总结\nMemoria 的同步机制  ")
+
+    assert session["title"] == "请帮我总结 Memoria 的同步机制"
+    assert db.get_session(session["id"])["title"] == "请帮我总结 Memoria 的同步机制"
+    assert db.list_sessions(bot["id"])[0]["title"] == "请帮我总结 Memoria 的同步机制"
+
+
+def test_update_session_title(db):
+    bot = db.create_bot("b", "", [])
+    session = db.create_session(bot["id"], "初始问题")
+
+    updated = db.update_session_title(session["id"], "  自定义标题  ")
+
+    assert updated is not None
+    assert updated["title"] == "自定义标题"
+    assert db.get_session(session["id"])["title"] == "自定义标题"
+
+
+def test_session_title_migration_backfills_from_first_user_message(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, created_at TEXT NOT NULL)")
+        conn.execute("""
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,
+                content TEXT NOT NULL, created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("INSERT INTO sessions VALUES ('s1', 'b1', '2026-08-07T00:00:00+00:00')")
+        conn.execute("""
+            INSERT INTO messages (id, session_id, role, content, created_at)
+            VALUES ('m1', 's1', 'user', '  旧会话的第一条问题  ', '2026-08-07T00:00:01+00:00')
+        """)
+
+    db = DB(str(db_path))
+
+    assert db.get_session("s1")["title"] == "旧会话的第一条问题"
 
 
 def test_get_messages_all(db):

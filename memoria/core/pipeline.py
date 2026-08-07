@@ -118,7 +118,7 @@ class Pipeline:
             if sess is None:
                 raise ValueError(f"session {session_id} not found")
         else:
-            sess = self.db.create_session(bot_id)
+            sess = self.db.create_session(bot_id, query)
             session_id = sess["id"]
 
         history = self.db.get_messages(session_id, limit=10)

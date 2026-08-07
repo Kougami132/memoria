@@ -78,6 +78,7 @@ class SessionRow(Base):
     __tablename__ = "sessions"
     id = Column(String, primary_key=True)
     bot_id = Column(String, ForeignKey("bots.id"), nullable=False)
+    title = Column(String, nullable=False, default="")
     created_at = Column(String, nullable=False)
 
 
@@ -104,6 +105,35 @@ def _now() -> str:
 
 def _uid() -> str:
     return str(uuid.uuid4())
+
+
+AUTO_SESSION_TITLE_MAX_CHARS = 32
+MANUAL_SESSION_TITLE_MAX_CHARS = 80
+DEFAULT_SESSION_TITLE = "新对话"
+
+
+def _clean_session_title(title: str | None) -> str:
+    return " ".join((title or "").split())
+
+
+def _truncate_title(title: str, max_chars: int) -> str:
+    if len(title) <= max_chars:
+        return title
+    return title[: max_chars - 1].rstrip() + "…"
+
+
+def _auto_session_title(message: str | None) -> str:
+    title = _clean_session_title(message)
+    if not title:
+        return DEFAULT_SESSION_TITLE
+    return _truncate_title(title, AUTO_SESSION_TITLE_MAX_CHARS)
+
+
+def _manual_session_title(title: str | None) -> str:
+    title = _clean_session_title(title)
+    if not title:
+        return DEFAULT_SESSION_TITLE
+    return _truncate_title(title, MANUAL_SESSION_TITLE_MAX_CHARS)
 
 
 class DB:
@@ -136,7 +166,12 @@ class DB:
             if "auto_sync" not in vault_cols:
                 conn.execute(text("ALTER TABLE vaults ADD COLUMN auto_sync INTEGER DEFAULT 1"))
                 conn.commit()
+            session_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(sessions)"))]
+            if "title" not in session_cols:
+                conn.execute(text("ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT ''"))
+                conn.commit()
         self._Session = sessionmaker(bind=engine)
+        self._backfill_missing_session_titles()
 
     @contextmanager
     def _s(self):
@@ -294,19 +329,48 @@ class DB:
 
     # ── Sessions & Messages ──────────────────────────────────────────────────
 
-    def create_session(self, bot_id: str) -> dict:
+    def _session_dict(self, r: SessionRow) -> dict:
+        return {
+            "id": r.id, "bot_id": r.bot_id,
+            "title": r.title or DEFAULT_SESSION_TITLE,
+            "created_at": r.created_at,
+        }
+
+    def _backfill_missing_session_titles(self) -> None:
         with self._s() as s:
-            row = SessionRow(id=_uid(), bot_id=bot_id, created_at=_now())
+            rows = (s.query(SessionRow)
+                    .filter(SessionRow.title.is_(None) | (SessionRow.title == ""))
+                    .all())
+            for row in rows:
+                first_user_msg = (s.query(MessageRow)
+                                  .filter(MessageRow.session_id == row.id, MessageRow.role == "user")
+                                  .order_by(MessageRow.created_at)
+                                  .first())
+                row.title = _auto_session_title(first_user_msg.content if first_user_msg else None)
+
+    def create_session(self, bot_id: str, title: str | None = None) -> dict:
+        with self._s() as s:
+            row = SessionRow(id=_uid(), bot_id=bot_id,
+                             title=_auto_session_title(title), created_at=_now())
             s.add(row)
             s.flush()
-            return {"id": row.id, "bot_id": row.bot_id, "created_at": row.created_at}
+            return self._session_dict(row)
 
     def get_session(self, session_id: str) -> dict | None:
         with self._s() as s:
             row = s.get(SessionRow, session_id)
             if row is None:
                 return None
-            return {"id": row.id, "bot_id": row.bot_id, "created_at": row.created_at}
+            return self._session_dict(row)
+
+    def update_session_title(self, session_id: str, title: str) -> dict | None:
+        with self._s() as s:
+            row = s.get(SessionRow, session_id)
+            if row is None:
+                return None
+            row.title = _manual_session_title(title)
+            s.flush()
+            return self._session_dict(row)
 
     def _msg_dict(self, r: MessageRow) -> dict:
         return {
@@ -363,7 +427,7 @@ class DB:
                     .filter(SessionRow.bot_id == bot_id)
                     .order_by(desc(SessionRow.created_at))
                     .all())
-            return [{"id": r.id, "bot_id": r.bot_id, "created_at": r.created_at} for r in rows]
+            return [self._session_dict(r) for r in rows]
 
     def get_messages_all(self, session_id: str) -> list[dict]:
         with self._s() as s:

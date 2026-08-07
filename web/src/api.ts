@@ -16,7 +16,7 @@ export interface Bot {
 }
 export interface BotCreate { name: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
 export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
-export interface Session { id: string; bot_id: string; created_at: string }
+export interface Session { id: string; bot_id: string; title: string; created_at: string }
 export interface Message {
   id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]
 }
@@ -123,6 +123,8 @@ export async function chatStream(
 }
 
 export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${sessionId}/messages`)
+export const updateSession = (id: string, data: { title: string }) =>
+  req<Session>(`/sessions/${id}`, { method: 'PATCH', ...json(data) })
 export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { method: 'DELETE' })
 
 export const getSettings = () => req<Settings>('/settings')
