@@ -11,21 +11,18 @@ import { Bot, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import * as api from '@/api'
 import type { Bot as BotType } from '@/api'
 
-const DEFAULT_SYSTEM_PROMPT = `你是一个专业的智能助手，请始终用用户所使用的语言回复。
-
-如果系统提供了参考资料，请优先基于参考资料回答问题，并保持回答简洁准确。若参考资料不足以回答问题，可结合自身知识补充，但需说明哪部分来自推断而非资料。`
-
 function BotForm({
-  initial, kbs, onSubmit, onCancel, isPending,
+  initial, kbs, onSubmit, onCancel, isPending, defaultPrompt,
 }: {
   initial?: BotType
   kbs: api.KB[]
   onSubmit: (data: api.BotCreate) => void
   onCancel?: () => void
   isPending: boolean
+  defaultPrompt: string
 }) {
   const [name, setName] = useState(initial?.name ?? '')
-  const [prompt, setPrompt] = useState(initial?.system_prompt ?? DEFAULT_SYSTEM_PROMPT)
+  const [prompt, setPrompt] = useState(initial?.system_prompt ?? defaultPrompt)
   const [selectedKBs, setSelectedKBs] = useState<Set<string>>(new Set(initial?.kb_ids ?? []))
   const [modelOverride, setModelOverride] = useState(initial?.model_override ?? '')
 
@@ -114,6 +111,8 @@ export default function Bots() {
   const qc = useQueryClient()
   const { data: bots = [] } = useQuery({ queryKey: ['bots'], queryFn: api.listBots })
   const { data: kbs = [] } = useQuery({ queryKey: ['kbs'], queryFn: api.listKBs })
+  const { data: settings, isPending: settingsPending } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
+  const defaultPrompt = settings?.system_prompt ?? ''
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
@@ -137,7 +136,12 @@ export default function Bots() {
           <h1 className="text-2xl font-semibold tracking-tight">机器人</h1>
           <p className="text-sm text-muted-foreground mt-1">配置 AI 助手，关联知识库，体验 RAG 检索对话</p>
         </div>
-        <Button variant="gradient" onClick={() => setShowCreate(v => !v)} className="gap-2 shrink-0">
+        <Button
+          variant="gradient"
+          onClick={() => setShowCreate(v => !v)}
+          disabled={settingsPending}
+          className="gap-2 shrink-0"
+        >
           <Plus className="h-4 w-4" />
           新建机器人
         </Button>
@@ -151,6 +155,7 @@ export default function Bots() {
               onSubmit={data => createBot.mutate(data)}
               onCancel={() => setShowCreate(false)}
               isPending={createBot.isPending}
+              defaultPrompt={defaultPrompt}
             />
           </CardContent>
         </Card>
@@ -218,6 +223,7 @@ export default function Bots() {
                     onSubmit={data => updateBot.mutate({ id: bot.id, data })}
                     onCancel={() => setEditingId(null)}
                     isPending={updateBot.isPending}
+                    defaultPrompt={defaultPrompt}
                   />
                 </CardContent>
               )}

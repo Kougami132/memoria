@@ -3,12 +3,13 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from memoria.config import get_effective_settings
+from memoria.core.embedder import MockEmbedder
+from memoria.core.pipeline import Pipeline
+from memoria.llm.caller import MockLLMCaller
 from memoria.server.app import create_app
 from memoria.server.deps import get_db, get_pipeline
 from memoria.storage.db import DB
-from memoria.core.pipeline import Pipeline
-from memoria.core.embedder import MockEmbedder
-from memoria.llm.caller import MockLLMCaller
 
 
 @pytest.fixture
@@ -20,7 +21,8 @@ def client(tmp_path):
 
     def _get_test_pipeline():
         return Pipeline(db=db, embedder=MockEmbedder(), llm=MockLLMCaller(),
-                        chroma_path=str(tmp_path / "chroma"), top_k=5)
+                        chroma_path=str(tmp_path / "chroma"), top_k=5,
+                        default_system_prompt=get_effective_settings(db)["system_prompt"])
 
     app = create_app(lifespan=None)
     app.dependency_overrides[get_db] = _get_test_db
@@ -92,6 +94,41 @@ def test_settings_put(client):
     data = r.json()
     assert data["top_k"] == "8"
     assert data["llm_model"] == "gpt-4o"
+
+
+def test_settings_system_prompt_get_and_put(client):
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    assert "system_prompt" in r.json()
+
+    r = client.put("/api/settings", json={"system_prompt": "configured default"})
+    assert r.status_code == 200
+    assert r.json()["system_prompt"] == "configured default"
+    assert client.get("/api/settings").json()["system_prompt"] == "configured default"
+
+
+def test_chat_fallback_uses_updated_default_system_prompt(client):
+    client.put("/api/settings", json={"system_prompt": "configured default"})
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
+
+    pipeline = client.app.dependency_overrides[get_pipeline]()
+    prepared = pipeline.prepare_query(bot["id"], "hello")
+
+    assert prepared["messages"][0]["role"] == "system"
+    assert prepared["messages"][0]["content"].startswith("configured default")
+
+
+def test_chat_keeps_bot_system_prompt_over_global_default(client):
+    client.put("/api/settings", json={"system_prompt": "configured default"})
+    kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
+    bot = client.post("/api/bots", json={"name": "b", "system_prompt": "bot custom", "kb_ids": [kb["id"]]}).json()
+
+    pipeline = client.app.dependency_overrides[get_pipeline]()
+    prepared = pipeline.prepare_query(bot["id"], "hello")
+
+    assert prepared["messages"][0]["role"] == "system"
+    assert prepared["messages"][0]["content"].startswith("bot custom")
 
 
 def test_settings_put_skip_empty_api_key(client):
@@ -267,7 +304,6 @@ def test_vault_sync_no_vault_404(client):
 
 def test_vault_doc_delete_409(client, tmp_path):
     """Vault-sourced documents must not be manually deletable (409)."""
-    from memoria.storage.db import DB
     # Need direct DB access to create a vault-sourced doc
     # Use the client's overridden db
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": ""}).json()
@@ -310,7 +346,9 @@ def test_vault_sync_409_when_syncing(client):
 
 def test_vault_cancel_sync_sets_event(client):
     """DELETE /sync must set the cancel event for the running sync."""
-    import threading, time
+    import threading
+    import time
+
     import memoria.server.routes.vaults as vaults_mod
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",
@@ -361,7 +399,6 @@ def test_vault_patch_no_vault_404(client):
 def test_sync_all_vaults_skips_auto_sync_false():
     """_sync_all_vaults must skip vaults where auto_sync=False."""
     from unittest.mock import MagicMock, patch
-    from memoria.server.app import _lifespan  # noqa: import triggers nothing
 
     # Import the module to access the inner function indirectly via patching
     import memoria.server.app as app_mod
@@ -387,6 +424,7 @@ def test_sync_all_vaults_skips_auto_sync_false():
 def test_sync_all_vaults_skips_already_syncing():
     """_sync_all_vaults must skip vaults where syncing=True."""
     from unittest.mock import MagicMock, patch
+
     import memoria.server.app as app_mod
 
     mock_db = MagicMock()

@@ -20,6 +20,7 @@ class SettingsUpdate(BaseModel):
     api_key: Optional[str] = None
     embedding_model: Optional[str] = None
     llm_model: Optional[str] = None
+    system_prompt: Optional[str] = None
     top_k: Optional[int] = None
     min_score: Optional[float] = None
     chunk_size: Optional[int] = None
@@ -41,6 +42,7 @@ def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get
         "openai_api_key": body.api_key,
         "embedding_model": body.embedding_model,
         "llm_model": body.llm_model,
+        "system_prompt": body.system_prompt,
         "top_k": str(body.top_k) if body.top_k is not None else None,
         "min_score": str(body.min_score) if body.min_score is not None else None,
         "chunk_size": str(body.chunk_size) if body.chunk_size is not None else None,

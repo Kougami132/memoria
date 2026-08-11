@@ -72,6 +72,7 @@ The system's functional behavior is defined by the following capability areas. U
 - [ ] Is the new setting in `Settings` (pydantic-settings) with an env default?
 - [ ] Is it included in `get_effective_settings()` so runtime overrides from the `runtime_settings` table apply?
 - [ ] Does `reset_pipeline()` need to be called after settings change for it to take effect (pipeline is a singleton)?
+- [ ] Does an empty Bot `system_prompt` fall back to the runtime `system_prompt` default, and does the Bot create form pre-fill that value?
 - [ ] Is the `openai_base_url` normalized to end with `/v1` in `get_effective_settings()`?
 
 ### When modifying the frontend

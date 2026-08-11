@@ -2,7 +2,7 @@ import logging
 import os
 from functools import lru_cache
 
-from memoria.config import settings, get_effective_settings
+from memoria.config import get_effective_settings, settings
 from memoria.core.embedder import Embedder, MockEmbedder
 from memoria.core.pipeline import Pipeline
 from memoria.llm.caller import LLMCaller, MockLLMCaller
@@ -37,7 +37,8 @@ def get_pipeline() -> Pipeline:
         os.makedirs(settings.chroma_path, exist_ok=True)
         _pipeline = Pipeline(db=db, embedder=embedder, llm=llm, chroma_path=settings.chroma_path,
                              top_k=int(effective["top_k"]),
-                             min_score=float(effective["min_score"]))
+                             min_score=float(effective["min_score"]),
+                             default_system_prompt=effective["system_prompt"])
     return _pipeline
 
 

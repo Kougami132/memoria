@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Eye, EyeOff, Save, Check, FlaskConical } from 'lucide-react'
@@ -27,6 +28,7 @@ export default function Settings() {
         openai_base_url: form.openai_base_url,
         embedding_model: form.embedding_model,
         llm_model: form.llm_model,
+        system_prompt: form.system_prompt,
         top_k: form.top_k ? Number(form.top_k) : undefined,
         min_score: form.min_score ? Number(form.min_score) : undefined,
         chunk_size: form.chunk_size ? Number(form.chunk_size) : undefined,
@@ -46,7 +48,7 @@ export default function Settings() {
     onError: () => alert('保存失败，请重试'),
   })
 
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }))
 
   const runTest = (fn: () => Promise<{ ok: boolean; dimensions?: number; elapsed_ms?: number }>,
@@ -209,6 +211,24 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">相邻块重叠字符数</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold text-foreground">对话提示词</CardTitle>
+          <CardDescription>控制新机器人预填内容和空提示词机器人的兜底行为</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">默认系统提示词</Label>
+          <Textarea
+            placeholder="定义机器人默认的角色和行为"
+            value={form.system_prompt ?? ''}
+            onChange={set('system_prompt')}
+            rows={6}
+            className="resize-none"
+          />
+          <p className="text-xs text-muted-foreground">Bot 已设置自定义提示词时，以 Bot 配置为准</p>
         </CardContent>
       </Card>
 

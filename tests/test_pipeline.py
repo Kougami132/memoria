@@ -1,10 +1,9 @@
-import os
 import pytest
 
-from memoria.storage.db import DB
-from memoria.core.pipeline import Pipeline
 from memoria.core.embedder import MockEmbedder
+from memoria.core.pipeline import Pipeline
 from memoria.llm.caller import MockLLMCaller
+from memoria.storage.db import DB
 
 
 @pytest.fixture
@@ -124,3 +123,37 @@ def test_query_source_degrades_gracefully_without_db_doc_id(pipeline, tmp_path):
         assert "filename" in src
         assert "path" in src
         assert "source" in src
+
+
+def test_prepare_query_uses_default_system_prompt_fallback(tmp_path):
+    db = DB(str(tmp_path / "test.db"))
+    pipeline = Pipeline(
+        db=db,
+        embedder=MockEmbedder(),
+        llm=MockLLMCaller(),
+        chroma_path=str(tmp_path / "chroma"),
+        default_system_prompt="global default",
+    )
+    bot = db.create_bot("bot1", "", [])
+
+    prepared = pipeline.prepare_query(bot["id"], "hello")
+
+    assert prepared["messages"][0]["role"] == "system"
+    assert prepared["messages"][0]["content"].startswith("global default")
+
+
+def test_prepare_query_prefers_bot_system_prompt(tmp_path):
+    db = DB(str(tmp_path / "test.db"))
+    pipeline = Pipeline(
+        db=db,
+        embedder=MockEmbedder(),
+        llm=MockLLMCaller(),
+        chroma_path=str(tmp_path / "chroma"),
+        default_system_prompt="global default",
+    )
+    bot = db.create_bot("bot1", "bot custom prompt", [])
+
+    prepared = pipeline.prepare_query(bot["id"], "hello")
+
+    assert prepared["messages"][0]["role"] == "system"
+    assert prepared["messages"][0]["content"].startswith("bot custom prompt")

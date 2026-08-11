@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings
 
+DEFAULT_SYSTEM_PROMPT = """你是一个专业的智能助手，请始终用用户所使用的语言回复。
+
+如果系统提供了参考资料，请优先基于参考资料回答问题，并保持回答简洁准确。若参考资料不足以回答问题，可结合自身知识补充，但需说明哪部分来自推断而非资料。"""
+
 
 class Settings(BaseSettings):
     openai_base_url: str = "http://localhost"
@@ -7,6 +11,7 @@ class Settings(BaseSettings):
     use_mock: bool = False
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "deepseek-v4-flash"
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
     chunk_size: int = 512
     chunk_overlap: int = 128
     top_k: int = 5
@@ -31,6 +36,7 @@ def get_effective_settings(db) -> dict:
         "openai_api_key": str(settings.openai_api_key),
         "embedding_model": str(settings.embedding_model),
         "llm_model": str(settings.llm_model),
+        "system_prompt": str(settings.system_prompt),
         "top_k": str(settings.top_k),
         "min_score": str(settings.min_score),
         "chunk_size": str(settings.chunk_size),

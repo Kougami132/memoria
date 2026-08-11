@@ -37,12 +37,12 @@ export interface ChatStreamErrorEvent { type: 'error'; detail: string }
 export type ChatStreamEvent = ChatStreamMetaEvent | ChatStreamDeltaEvent | ChatStreamStatusEvent | ChatStreamFinalEvent | ChatStreamErrorEvent
 export interface Settings {
   openai_base_url: string; openai_api_key: string; embedding_model: string;
-  llm_model: string; top_k: string; chunk_size: string; chunk_overlap: string;
+  llm_model: string; system_prompt: string; top_k: string; chunk_size: string; chunk_overlap: string;
   vault_sync_interval_minutes: string
 }
 export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; embedding_model?: string;
-  llm_model?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
+  llm_model?: string; system_prompt?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
   vault_sync_interval_minutes?: number
 }
 

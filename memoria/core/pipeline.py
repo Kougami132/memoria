@@ -17,13 +17,15 @@ logger = logging.getLogger(__name__)
 class Pipeline:
     def __init__(self, db: DB, embedder: Embedder | MockEmbedder,
                  llm: LLMCaller | MockLLMCaller, chroma_path: str,
-                 top_k: int = 5, min_score: float = 0.5) -> None:
+                 top_k: int = 5, min_score: float = 0.5,
+                 default_system_prompt: str = "") -> None:
         self.db = db
         self._embedder = embedder
         self._llm = llm
         self._chroma_path = chroma_path
         self._top_k = top_k
         self._min_score = min_score
+        self._default_system_prompt = default_system_prompt
         self._local = threading.local()  # 每个线程独立的 ChromaStore 缓存
 
     def _get_store(self, kb_id: str) -> ChromaStore:
@@ -126,7 +128,7 @@ class Pipeline:
 
         # Build prompt
         context_text = "\n\n".join(c["text"] for c in context_chunks)
-        system_content = bot["system_prompt"]
+        system_content = bot["system_prompt"] or self._default_system_prompt
         if context_text:
             system_content += f"\n\n参考资料：\n{context_text}"
         system_content += (
