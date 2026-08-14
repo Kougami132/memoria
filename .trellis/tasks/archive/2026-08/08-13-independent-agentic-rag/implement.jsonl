@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Session schema and inline SQLite migration conventions"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Agentic route exception mapping"}
+{"file":".trellis/spec/frontend/api-layer.md","reason":"Typed Agentic endpoints"}
+{"file":".trellis/spec/frontend/component-patterns.md","reason":"Independent React page and TanStack mutations"}
+{"file": "memoria/storage/db.py", "reason": "Agentic session schema and migration"}
+{"file": "memoria/agents/engine.py", "reason": "Application-scoped all-KB Agentic engine"}
+{"file": "web/src/pages/AgenticChat.tsx", "reason": "Independent Agentic RAG page"}

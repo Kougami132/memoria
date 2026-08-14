@@ -13,22 +13,25 @@ class SessionUpdate(BaseModel):
 
 @router.get("/{session_id}/messages")
 def get_messages(session_id: str, db: DB = Depends(get_db)):
-    if db.get_session(session_id) is None:
+    session = db.get_session(session_id)
+    if session is None or session.get("session_type") != "bot":
         raise HTTPException(status_code=404, detail="Session not found")
     return db.get_messages_all(session_id)
 
 
 @router.patch("/{session_id}")
 def update_session(session_id: str, body: SessionUpdate, db: DB = Depends(get_db)):
-    session = db.update_session_title(session_id, body.title)
-    if session is None:
+    existing = db.get_session(session_id)
+    if existing is None or existing.get("session_type") != "bot":
         raise HTTPException(status_code=404, detail="Session not found")
+    session = db.update_session_title(session_id, body.title)
     return session
 
 
 @router.delete("/{session_id}", status_code=204)
 def delete_session(session_id: str, db: DB = Depends(get_db)):
-    if db.get_session(session_id) is None:
+    session = db.get_session(session_id)
+    if session is None or session.get("session_type") != "bot":
         raise HTTPException(status_code=404, detail="Session not found")
     db.delete_session(session_id)
     return Response(status_code=204)

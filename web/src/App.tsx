@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import KnowledgeBases from './pages/KnowledgeBases'
 import Bots from './pages/Bots'
 import Chat from './pages/Chat'
+import AgenticChat from './pages/AgenticChat'
 import Settings from './pages/Settings'
 
 const queryClient = new QueryClient()
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="knowledge-bases" element={<KnowledgeBases />} />
             <Route path="bots" element={<Bots />} />
             <Route path="chat" element={<Chat />} />
+            <Route path="agentic-chat" element={<AgenticChat />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>

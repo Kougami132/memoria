@@ -16,7 +16,7 @@ export interface Bot {
 }
 export interface BotCreate { name: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
 export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
-export interface Session { id: string; bot_id: string; title: string; created_at: string }
+export interface Session { id: string; bot_id: string | null; session_type?: 'bot' | 'agentic'; title: string; created_at: string }
 export interface Message {
   id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]
 }
@@ -27,8 +27,20 @@ export interface Source {
   filename?: string
   path?: string
   source?: string
+  kb_id?: string
+  db_doc_id?: string
 }
 export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
+export interface AgentSource extends Source {
+  kb_id: string
+  db_doc_id?: string
+}
+export interface AgentChatResponse {
+  answer: string
+  session_id: string
+  used_kbs: string[]
+  sources: AgentSource[]
+}
 export interface ChatStreamMetaEvent { type: 'meta'; session_id: string; sources: Source[] }
 export interface ChatStreamDeltaEvent { type: 'delta'; delta: string }
 export interface ChatStreamStatusEvent { type: 'status'; message: string }
@@ -55,7 +67,7 @@ export const listKBs = () => req<KB[]>('/knowledge-bases')
 export const createKB = (data: {
   name: string; description?: string; type: 'upload' | 'vault';
   vault_type?: 'local' | 'webdav';
-  local_path?: string; webdav_url?: string; webdav_username?: string; webdav_password?: string;
+  local_path?: string; webdav_url?: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
 }) => req<KB>('/knowledge-bases', { method: 'POST', ...json(data) })
 export const updateKB = (id: string, data: { name?: string; description?: string }) =>
   req<KB>(`/knowledge-bases/${id}`, { method: 'PATCH', ...json(data) })
@@ -76,6 +88,17 @@ export const listSessions = (botId: string) => req<Session[]>(`/bots/${botId}/se
 
 export const chat = (botId: string, message: string, sessionId?: string) =>
   req<ChatResponse>(`/chat/${botId}`, { method: 'POST', ...json({ message, session_id: sessionId }) })
+
+export const agentChat = (message: string, sessionId?: string) =>
+  req<AgentChatResponse>('/agent-chat', {
+    method: 'POST',
+    ...json({ message, session_id: sessionId }),
+  })
+export const listAgentSessions = () => req<Session[]>('/agent-sessions')
+export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)
+export const updateAgentSession = (id: string, data: { title: string }) =>
+  req<Session>(`/agent-sessions/${id}`, { method: 'PATCH', ...json(data) })
+export const deleteAgentSession = (id: string) => req<void>(`/agent-sessions/${id}`, { method: 'DELETE' })
 
 export async function chatStream(
   botId: string,
@@ -137,13 +160,13 @@ export const testChat = () =>
 
 export interface Vault {
   id: string; kb_id: string; type: 'local' | 'webdav';
-  local_path?: string; webdav_url?: string; webdav_username?: string;
+  local_path?: string; webdav_url?: string; webdav_path?: string; webdav_username?: string;
   last_synced_at: string | null; syncing: boolean; auto_sync: boolean; created_at: string;
 }
 export interface VaultCreate {
   type: 'local' | 'webdav';
   local_path?: string;
-  webdav_url?: string; webdav_username?: string; webdav_password?: string;
+  webdav_url?: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
 }
 
 export const getVault = (kbId: string) => req<Vault>(`/knowledge-bases/${kbId}/vault`)
@@ -157,3 +180,16 @@ export const cancelVaultSync = (kbId: string): Promise<void> =>
   req<void>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'DELETE' })
 export const updateVault = (kbId: string, body: { auto_sync: boolean }): Promise<Vault> =>
   req<Vault>(`/knowledge-bases/${kbId}/vault`, { method: 'PATCH', ...json(body) })
+
+export interface VaultPathEntry { name: string; path: string; type: 'directory' }
+export interface VaultPathBrowseResult { path: string; parent: string | null; entries: VaultPathEntry[] }
+export interface WebDAVTestResult { ok: boolean; file_count: number; path: string }
+
+export const browseLocalVaultPath = (path?: string) =>
+  req<VaultPathBrowseResult>('/vaults/browse-local', { method: 'POST', ...json({ path }) })
+export const browseWebDAVVaultPath = (data: {
+  webdav_url: string; webdav_username?: string; webdav_password?: string; path?: string;
+}) => req<VaultPathBrowseResult>('/vaults/browse-webdav', { method: 'POST', ...json(data) })
+export const testWebDAVVault = (data: {
+  webdav_url: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
+}) => req<WebDAVTestResult>('/vaults/test-webdav', { method: 'POST', ...json(data) })

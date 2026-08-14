@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "web/src/api.ts", "reason": "Typed Agentic Chat API"}
+{"file": "web/src/pages/Chat.tsx", "reason": "Agentic/classic mode UI and mutation"}

@@ -56,6 +56,7 @@ class VaultRow(Base):
     type = Column(String, nullable=False)
     local_path = Column(String, nullable=True)
     webdav_url = Column(String, nullable=True)
+    webdav_path = Column(String, nullable=True)
     webdav_username = Column(String, nullable=True)
     webdav_password = Column(String, nullable=True)
     last_synced_at = Column(String, nullable=True)
@@ -77,7 +78,8 @@ class VaultFileRow(Base):
 class SessionRow(Base):
     __tablename__ = "sessions"
     id = Column(String, primary_key=True)
-    bot_id = Column(String, ForeignKey("bots.id"), nullable=False)
+    bot_id = Column(String, ForeignKey("bots.id"), nullable=True)
+    session_type = Column(String, nullable=False, default="bot")
     title = Column(String, nullable=False, default="")
     created_at = Column(String, nullable=False)
 
@@ -166,9 +168,29 @@ class DB:
             if "auto_sync" not in vault_cols:
                 conn.execute(text("ALTER TABLE vaults ADD COLUMN auto_sync INTEGER DEFAULT 1"))
                 conn.commit()
-            session_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(sessions)"))]
+            if "webdav_path" not in vault_cols:
+                conn.execute(text("ALTER TABLE vaults ADD COLUMN webdav_path TEXT DEFAULT '/'"))
+                conn.commit()
+            session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
+            session_cols = [r[1] for r in session_info]
+            bot_id_notnull = any(r[1] == "bot_id" and r[3] == 1 for r in session_info)
             if "title" not in session_cols:
                 conn.execute(text("ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT ''"))
+                conn.commit()
+                session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
+                session_cols = [r[1] for r in session_info]
+            if "session_type" not in session_cols or bot_id_notnull:
+                # SQLite cannot alter a column from NOT NULL to NULL in place. Rebuild
+                # the small sessions table while preserving all existing bot sessions.
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                conn.execute(text("ALTER TABLE sessions RENAME TO sessions_legacy"))
+                SessionRow.__table__.create(conn)
+                conn.execute(text(
+                    "INSERT INTO sessions (id, bot_id, session_type, title, created_at) "
+                    "SELECT id, bot_id, 'bot', title, created_at FROM sessions_legacy"
+                ))
+                conn.execute(text("DROP TABLE sessions_legacy"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
                 conn.commit()
         self._Session = sessionmaker(bind=engine)
         self._backfill_missing_session_titles()
@@ -332,6 +354,7 @@ class DB:
     def _session_dict(self, r: SessionRow) -> dict:
         return {
             "id": r.id, "bot_id": r.bot_id,
+            "session_type": r.session_type or "bot",
             "title": r.title or DEFAULT_SESSION_TITLE,
             "created_at": r.created_at,
         }
@@ -350,7 +373,15 @@ class DB:
 
     def create_session(self, bot_id: str, title: str | None = None) -> dict:
         with self._s() as s:
-            row = SessionRow(id=_uid(), bot_id=bot_id,
+            row = SessionRow(id=_uid(), bot_id=bot_id, session_type="bot",
+                             title=_auto_session_title(title), created_at=_now())
+            s.add(row)
+            s.flush()
+            return self._session_dict(row)
+
+    def create_agentic_session(self, title: str | None = None) -> dict:
+        with self._s() as s:
+            row = SessionRow(id=_uid(), bot_id=None, session_type="agentic",
                              title=_auto_session_title(title), created_at=_now())
             s.add(row)
             s.flush()
@@ -363,9 +394,38 @@ class DB:
                 return None
             return self._session_dict(row)
 
+    def get_bot_session(self, session_id: str, bot_id: str) -> dict | None:
+        with self._s() as s:
+            row = (s.query(SessionRow)
+                   .filter(SessionRow.id == session_id,
+                           SessionRow.bot_id == bot_id,
+                           SessionRow.session_type == "bot")
+                   .first())
+            return self._session_dict(row) if row else None
+
+    def get_agentic_session(self, session_id: str) -> dict | None:
+        with self._s() as s:
+            row = (s.query(SessionRow)
+                   .filter(SessionRow.id == session_id,
+                           SessionRow.session_type == "agentic")
+                   .first())
+            return self._session_dict(row) if row else None
+
     def update_session_title(self, session_id: str, title: str) -> dict | None:
         with self._s() as s:
             row = s.get(SessionRow, session_id)
+            if row is None:
+                return None
+            row.title = _manual_session_title(title)
+            s.flush()
+            return self._session_dict(row)
+
+    def update_agentic_session_title(self, session_id: str, title: str) -> dict | None:
+        with self._s() as s:
+            row = (s.query(SessionRow)
+                   .filter(SessionRow.id == session_id,
+                           SessionRow.session_type == "agentic")
+                   .first())
             if row is None:
                 return None
             row.title = _manual_session_title(title)
@@ -424,7 +484,15 @@ class DB:
     def list_sessions(self, bot_id: str) -> list[dict]:
         with self._s() as s:
             rows = (s.query(SessionRow)
-                    .filter(SessionRow.bot_id == bot_id)
+                    .filter(SessionRow.bot_id == bot_id, SessionRow.session_type == "bot")
+                    .order_by(desc(SessionRow.created_at))
+                    .all())
+            return [self._session_dict(r) for r in rows]
+
+    def list_agentic_sessions(self) -> list[dict]:
+        with self._s() as s:
+            rows = (s.query(SessionRow)
+                    .filter(SessionRow.session_type == "agentic")
                     .order_by(desc(SessionRow.created_at))
                     .all())
             return [self._session_dict(r) for r in rows]
@@ -450,6 +518,7 @@ class DB:
         return {
             "id": row.id, "kb_id": row.kb_id, "type": row.type,
             "local_path": row.local_path, "webdav_url": row.webdav_url,
+            "webdav_path": row.webdav_path,
             "webdav_username": row.webdav_username, "webdav_password": row.webdav_password,
             "last_synced_at": row.last_synced_at, "syncing": bool(row.syncing),
             "auto_sync": bool(row.auto_sync),
@@ -462,6 +531,7 @@ class DB:
                 id=_uid(), kb_id=kb_id, type=type,
                 local_path=kwargs.get("local_path"),
                 webdav_url=kwargs.get("webdav_url"),
+                webdav_path=kwargs.get("webdav_path"),
                 webdav_username=kwargs.get("webdav_username"),
                 webdav_password=kwargs.get("webdav_password"),
                 created_at=_now(),

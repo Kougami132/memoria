@@ -246,6 +246,58 @@ def test_vault_bind_local(client):
     assert "webdav_password" not in data
 
 
+
+
+def test_vault_bind_webdav_persists_path_without_password(client):
+    from unittest.mock import patch
+
+    kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
+    with patch("memoria.server.routes.vaults.threading.Thread"):
+        r = client.post(f"/api/knowledge-bases/{kb['id']}/vault", json={
+            "type": "webdav",
+            "webdav_url": "https://dav.example.com/remote.php/dav/files/me",
+            "webdav_path": "/Notes",
+            "webdav_username": "me",
+            "webdav_password": "secret",
+        })
+    assert r.status_code == 201
+    data = r.json()
+    assert data["type"] == "webdav"
+    assert data["webdav_path"] == "/Notes"
+    assert "webdav_password" not in data
+
+
+def test_vault_browse_local_returns_directories(client, tmp_path):
+    root = tmp_path / "vaults"
+    child = root / "Notes"
+    child.mkdir(parents=True)
+    (root / "note.md").write_text("ignored")
+
+    r = client.post("/api/vaults/browse-local", json={"path": str(root)})
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["path"] == str(root.resolve())
+    assert {entry["path"] for entry in data["entries"]} == {str(child.resolve())}
+
+
+def test_vault_test_webdav_uses_path(client):
+    from unittest.mock import patch
+
+    with patch("memoria.server.routes.vaults.WebDAVConnector") as connector_cls:
+        connector_cls.return_value.list_files.return_value = ["a.md", "nested/b.txt"]
+        r = client.post("/api/vaults/test-webdav", json={
+            "webdav_url": "https://dav.example.com",
+            "webdav_path": "Notes",
+            "webdav_username": "me",
+            "webdav_password": "secret",
+        })
+
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "file_count": 2, "path": "/Notes"}
+    connector_cls.assert_called_once_with("https://dav.example.com", "me", "secret", "Notes")
+
+
 def test_vault_get(client):
     kb = client.post("/api/knowledge-bases", json={"name": "kb1", "description": "", "type": "vault"}).json()
     client.post(f"/api/knowledge-bases/{kb['id']}/vault",

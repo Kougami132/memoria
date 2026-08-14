@@ -23,6 +23,7 @@ class KBCreate(BaseModel):
     vault_type: Optional[str] = None
     local_path: Optional[str] = None
     webdav_url: Optional[str] = None
+    webdav_path: Optional[str] = None
     webdav_username: Optional[str] = None
     webdav_password: Optional[str] = None
 
@@ -55,6 +56,7 @@ def create_kb(body: KBCreate, background_tasks: BackgroundTasks,
             kb["id"], body.vault_type,
             local_path=body.local_path,
             webdav_url=body.webdav_url,
+            webdav_path=body.webdav_path or "/",
             webdav_username=body.webdav_username,
             webdav_password=body.webdav_password,
         )

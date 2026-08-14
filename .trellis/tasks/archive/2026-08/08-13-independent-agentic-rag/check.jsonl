@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend quality checks"}
+{"file":".trellis/spec/frontend/styling-ui.md","reason":"Agentic page styling consistency"}
+{"file":".trellis/spec/frontend/api-layer.md","reason":"Frontend API contract verification"}
+{"file": "tests/test_agentic_rag.py", "reason": "Agentic API and session isolation tests"}

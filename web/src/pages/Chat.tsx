@@ -224,6 +224,8 @@ export default function Chat() {
     },
   })
 
+  const isSending = sendMsg.isPending
+
   const deleteSessionMutation = useMutation({
     mutationFn: (sid: string) => api.deleteSession(sid),
     onSuccess: (_data, sid) => {
@@ -235,12 +237,12 @@ export default function Chat() {
 
   const handleSend = () => {
     const message = input.trim()
-    if (!message || !botId || sendMsg.isPending) return
+    if (!message || !botId || isSending) return
     sendMsg.mutate({ message, placeholderId: crypto.randomUUID() })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && input.trim() && botId && !sendMsg.isPending) {
+    if (e.key === 'Enter' && !e.shiftKey && input.trim() && botId && !isSending) {
       e.preventDefault()
       handleSend()
     }
@@ -254,7 +256,7 @@ export default function Chat() {
           <Select
             value={botId}
             onValueChange={id => { setBotId(id); setSessionId(null); setMessages([]); clearRename() }}
-            disabled={sendMsg.isPending}
+            disabled={isSending}
           >
             <SelectTrigger className="bg-background text-sm h-9">
               <SelectValue placeholder="选择机器人" />
@@ -264,7 +266,7 @@ export default function Chat() {
             </SelectContent>
           </Select>
           {botId && (
-            <Button variant="outline" size="sm" className="w-full gap-1.5 h-8 text-xs" onClick={newSession} disabled={sendMsg.isPending}>
+            <Button variant="outline" size="sm" className="w-full gap-1.5 h-8 text-xs" onClick={newSession} disabled={isSending}>
               <Plus className="h-3.5 w-3.5" />
               新建对话
             </Button>
@@ -311,7 +313,7 @@ export default function Chat() {
                   <button
                     className="w-full text-left px-3 py-3 disabled:cursor-not-allowed"
                     onClick={() => loadSession(s.id)}
-                    disabled={sendMsg.isPending}
+                    disabled={isSending}
                   >
                     <p className="font-medium truncate pr-12">{sessionTitle(s)}</p>
                     <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
@@ -319,7 +321,7 @@ export default function Chat() {
                   <button
                     className={`absolute right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
                     onClick={e => { e.stopPropagation(); startRename(s) }}
-                    disabled={renameSessionMutation.isPending || sendMsg.isPending}
+                    disabled={renameSessionMutation.isPending || isSending}
                     aria-label="重命名会话"
                   >
                     <Pencil className="h-3.5 w-3.5" />
@@ -327,7 +329,7 @@ export default function Chat() {
                   <button
                     className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
                     onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
-                    disabled={deleteSessionMutation.isPending || sendMsg.isPending}
+                    disabled={deleteSessionMutation.isPending || isSending}
                     aria-label="删除会话"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -398,13 +400,13 @@ export default function Chat() {
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={sendMsg.isPending}
+                  disabled={isSending}
                   className="rounded-2xl text-sm"
                 />
                 <Button
                   variant="gradient"
                   onClick={handleSend}
-                  disabled={!input.trim() || sendMsg.isPending}
+                  disabled={!input.trim() || isSending}
                   className="rounded-2xl px-4 shrink-0"
                 >
                   <Send className="h-4 w-4" />

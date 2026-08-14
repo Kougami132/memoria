@@ -25,10 +25,11 @@ dependencies = [
 memoria = "memoria.cli.main:cli"
 
 [project.optional-dependencies]
+agents = ["openai-agents"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "black>=24", "ruff>=0.7"]
 
 [tool.setuptools]
-packages = ["memoria", "memoria.core", "memoria.storage", "memoria.models", "memoria.llm", "memoria.server", "memoria.server.routes", "memoria.cli", "memoria.vault"]
+packages = ["memoria", "memoria.agents", "memoria.core", "memoria.storage", "memoria.models", "memoria.llm", "memoria.server", "memoria.server.routes", "memoria.cli", "memoria.vault"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

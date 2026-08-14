@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from memoria.agents.state import SourceCollector
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from memoria.core.pipeline import Pipeline
+    from memoria.storage.db import DB
+
+
+class KnowledgeBaseAccessError(ValueError):
+    """Raised when the agent tries to access a KB outside its allowed scope."""
+
+
+@dataclass
+class AgentKnowledgeTools:
+    db: "DB"
+    pipeline: "Pipeline"
+    allowed_kb_ids: list[str]
+    collector: SourceCollector
+    max_top_k: int = 8
+
+    def __post_init__(self) -> None:
+        self._allowed = set(self.allowed_kb_ids)
+
+    def _ensure_allowed(self, kb_id: str) -> None:
+        if kb_id not in self._allowed:
+            raise KnowledgeBaseAccessError(f"Knowledge base {kb_id} is not allowed for this agent chat")
+        if self.db.get_kb(kb_id) is None:
+            raise ValueError(f"Knowledge base {kb_id} not found")
+
+    def list_knowledge_bases(self) -> list[dict]:
+        """Return compact metadata for KBs this agent may inspect."""
+        summaries: list[dict] = []
+        for kb in self.db.list_kbs():
+            if kb["id"] not in self._allowed:
+                continue
+            docs = self.db.list_docs(kb["id"])
+            summaries.append({
+                "id": kb["id"],
+                "name": kb["name"],
+                "description": kb.get("description") or "",
+                "type": kb.get("type") or "upload",
+                "document_count": len(docs),
+            })
+        return summaries
+
+    def search_knowledge_base(self, kb_id: str, query: str, top_k: int = 5) -> list[dict]:
+        """Search one allowed KB through Memoria's existing retrieval pipeline."""
+        self._ensure_allowed(kb_id)
+        if not query or not query.strip():
+            raise ValueError("Query must not be empty")
+        top_k = max(1, min(int(top_k or 5), self.max_top_k))
+        chunks = self.pipeline.retrieve(kb_id, query, k=top_k)
+        results: list[dict] = []
+        for chunk in chunks:
+            db_doc_id = str(chunk.get("db_doc_id") or "")
+            doc_info = self.db.get_doc(db_doc_id) if db_doc_id else None
+            source = self.collector.add_chunk(kb_id, chunk, doc_info)
+            results.append({
+                "kb_id": kb_id,
+                "text": source["text"],
+                "score": source["score"],
+                "doc_id": source["doc_id"],
+                "db_doc_id": source["db_doc_id"],
+                "filename": source["filename"],
+                "path": source["path"],
+                "source": source["source"],
+            })
+        return results

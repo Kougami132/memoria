@@ -32,6 +32,7 @@ class VaultSyncer:
             vault["webdav_url"],
             vault["webdav_username"],
             vault["webdav_password"],
+            vault.get("webdav_path") or "/",
         )
 
     def sync(self, vault_id: str, cancel_event: threading.Event | None = None) -> bool:

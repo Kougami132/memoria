@@ -2,6 +2,7 @@ import logging
 import os
 from functools import lru_cache
 
+from memoria.agents.engine import AgenticRagEngine
 from memoria.config import get_effective_settings, settings
 from memoria.core.embedder import Embedder, MockEmbedder
 from memoria.core.pipeline import Pipeline
@@ -11,6 +12,7 @@ from memoria.storage.db import DB
 logger = logging.getLogger(__name__)
 
 _pipeline: Pipeline | None = None
+_agentic_engine: AgenticRagEngine | None = None
 
 
 @lru_cache
@@ -42,6 +44,14 @@ def get_pipeline() -> Pipeline:
     return _pipeline
 
 
+def get_agentic_engine() -> AgenticRagEngine:
+    global _agentic_engine
+    if _agentic_engine is None:
+        _agentic_engine = AgenticRagEngine(db=get_db(), pipeline=get_pipeline())
+    return _agentic_engine
+
+
 def reset_pipeline() -> None:
-    global _pipeline
+    global _pipeline, _agentic_engine
     _pipeline = None
+    _agentic_engine = None

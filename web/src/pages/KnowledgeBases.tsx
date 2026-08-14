@@ -7,12 +7,237 @@ import { Badge } from '@/components/ui/badge'
 import { Plus, ChevronDown, ChevronRight, FileText, Trash2, Upload, Database, FolderOpen, RefreshCw, Unlink, Pencil, Check, X } from 'lucide-react'
 import * as api from '@/api'
 
+
+interface PathPickerProps {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}
+
+function LocalPathPicker({ value, onChange, placeholder = '/path/to/vault' }: PathPickerProps) {
+  const [open, setOpen] = useState(false)
+  const [browseResult, setBrowseResult] = useState<api.VaultPathBrowseResult | null>(null)
+  const [error, setError] = useState('')
+
+  const browse = useMutation({
+    mutationFn: (path?: string) => api.browseLocalVaultPath(path),
+    onSuccess: (data) => {
+      setBrowseResult(data)
+      setError('')
+    },
+    onError: (e) => {
+      setBrowseResult(null)
+      setError(e instanceof Error ? e.message : '浏览本地路径失败')
+    },
+  })
+
+  const load = (path?: string) => browse.mutate(path)
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-1.5">
+        <Input placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)} className="h-7 text-sm" />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 text-xs shrink-0"
+          onClick={() => {
+            setOpen(v => !v)
+            if (!open) load(value.trim() || undefined)
+          }}
+        >
+          <FolderOpen className="h-3 w-3" />
+          浏览
+        </Button>
+      </div>
+      {open && (
+        <div className="rounded-md border bg-background p-2 space-y-1.5">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="truncate font-mono text-muted-foreground">{browseResult?.path || '选择本地文件夹'}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs shrink-0"
+              disabled={!browseResult}
+              onClick={() => browseResult && onChange(browseResult.path)}
+            >
+              使用此路径
+            </Button>
+          </div>
+          {browseResult?.parent && (
+            <Button type="button" variant="ghost" size="sm" className="h-6 w-full justify-start text-xs" onClick={() => load(browseResult.parent || undefined)}>
+              ../
+            </Button>
+          )}
+          <div className="max-h-36 overflow-auto space-y-1">
+            {browse.isPending ? (
+              <p className="py-3 text-center text-xs text-muted-foreground">加载中…</p>
+            ) : browseResult && browseResult.entries.length > 0 ? (
+              browseResult.entries.map(entry => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted"
+                  onClick={() => load(entry.path)}
+                >
+                  <FolderOpen className="h-3 w-3 text-violet-500" />
+                  <span className="truncate">{entry.name}</span>
+                </button>
+              ))
+            ) : (
+              <p className="py-3 text-center text-xs text-muted-foreground">没有可进入的子文件夹</p>
+            )}
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface WebDAVPathPickerProps extends PathPickerProps {
+  webdavUrl: string
+  webdavUser: string
+  webdavPass: string
+}
+
+function WebDAVPathPicker({ value, onChange, webdavUrl, webdavUser, webdavPass }: WebDAVPathPickerProps) {
+  const [open, setOpen] = useState(false)
+  const [browseResult, setBrowseResult] = useState<api.VaultPathBrowseResult | null>(null)
+  const [error, setError] = useState('')
+
+  const browse = useMutation({
+    mutationFn: (path?: string) => api.browseWebDAVVaultPath({
+      webdav_url: webdavUrl.trim(),
+      webdav_username: webdavUser.trim(),
+      webdav_password: webdavPass,
+      path: path || '/',
+    }),
+    onSuccess: (data) => {
+      setBrowseResult(data)
+      setError('')
+    },
+    onError: (e) => {
+      setBrowseResult(null)
+      setError(e instanceof Error ? e.message : '浏览 WebDAV 路径失败')
+    },
+  })
+
+  const load = (path?: string) => {
+    if (!webdavUrl.trim()) {
+      setBrowseResult(null)
+      setError('请先填写 WebDAV 地址')
+      return
+    }
+    browse.mutate(path)
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-1.5">
+        <Input placeholder="远程路径，如 / 或 /Documents/Notes" value={value} onChange={e => onChange(e.target.value)} className="h-7 text-sm" />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 text-xs shrink-0"
+          onClick={() => {
+            setOpen(v => !v)
+            if (!open) load(value.trim() || '/')
+          }}
+        >
+          <FolderOpen className="h-3 w-3" />
+          浏览
+        </Button>
+      </div>
+      {open && (
+        <div className="rounded-md border bg-background p-2 space-y-1.5">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="truncate font-mono text-muted-foreground">{browseResult?.path || '选择 WebDAV 远程路径'}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs shrink-0"
+              disabled={!browseResult}
+              onClick={() => browseResult && onChange(browseResult.path)}
+            >
+              使用此路径
+            </Button>
+          </div>
+          {browseResult?.parent && (
+            <Button type="button" variant="ghost" size="sm" className="h-6 w-full justify-start text-xs" onClick={() => load(browseResult.parent || '/')}>../</Button>
+          )}
+          <div className="max-h-36 overflow-auto space-y-1">
+            {browse.isPending ? (
+              <p className="py-3 text-center text-xs text-muted-foreground">加载中…</p>
+            ) : browseResult && browseResult.entries.length > 0 ? (
+              browseResult.entries.map(entry => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted"
+                  onClick={() => load(entry.path)}
+                >
+                  <FolderOpen className="h-3 w-3 text-violet-500" />
+                  <span className="truncate">{entry.name}</span>
+                </button>
+              ))
+            ) : (
+              <p className="py-3 text-center text-xs text-muted-foreground">没有可进入的子文件夹</p>
+            )}
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function WebDAVTestButton({ webdavUrl, webdavPath, webdavUser, webdavPass }: {
+  webdavUrl: string
+  webdavPath: string
+  webdavUser: string
+  webdavPass: string
+}) {
+  const [message, setMessage] = useState('')
+  const test = useMutation({
+    mutationFn: () => api.testWebDAVVault({
+      webdav_url: webdavUrl.trim(),
+      webdav_path: webdavPath.trim() || '/',
+      webdav_username: webdavUser.trim(),
+      webdav_password: webdavPass,
+    }),
+    onSuccess: (data) => setMessage(`连接成功，当前路径发现 ${data.file_count} 个可同步文件`),
+    onError: (e) => setMessage(e instanceof Error ? e.message : 'WebDAV 测试失败'),
+  })
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-7 text-xs"
+        disabled={test.isPending || !webdavUrl.trim()}
+        onClick={() => test.mutate()}
+      >
+        {test.isPending ? '测试中…' : '测试连接'}
+      </Button>
+      {message && <span className={`text-xs ${message.startsWith('连接成功') ? 'text-green-600' : 'text-destructive'}`}>{message}</span>}
+    </div>
+  )
+}
+
 function VaultPanel({ kbId }: { kbId: string }) {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [vaultType, setVaultType] = useState<'local' | 'webdav'>('local')
   const [localPath, setLocalPath] = useState('')
   const [webdavUrl, setWebdavUrl] = useState('')
+  const [webdavPath, setWebdavPath] = useState('/')
   const [webdavUser, setWebdavUser] = useState('')
   const [webdavPass, setWebdavPass] = useState('')
 
@@ -31,12 +256,12 @@ function VaultPanel({ kbId }: { kbId: string }) {
   const bindVault = useMutation({
     mutationFn: () => api.createVault(kbId, vaultType === 'local'
       ? { type: 'local', local_path: localPath.trim() }
-      : { type: 'webdav', webdav_url: webdavUrl.trim(), webdav_username: webdavUser.trim(), webdav_password: webdavPass }),
+      : { type: 'webdav', webdav_url: webdavUrl.trim(), webdav_path: webdavPath.trim() || '/', webdav_username: webdavUser.trim(), webdav_password: webdavPass }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['vault', kbId] })
       qc.invalidateQueries({ queryKey: ['docs', kbId] })
       setShowForm(false)
-      setLocalPath(''); setWebdavUrl(''); setWebdavUser(''); setWebdavPass('')
+      setLocalPath(''); setWebdavUrl(''); setWebdavPath('/'); setWebdavUser(''); setWebdavPass('')
     },
   })
 
@@ -90,12 +315,14 @@ function VaultPanel({ kbId }: { kbId: string }) {
               <Button size="sm" variant={vaultType === 'webdav' ? 'default' : 'outline'} className="h-6 text-xs" onClick={() => setVaultType('webdav')}>WebDAV</Button>
             </div>
             {vaultType === 'local' ? (
-              <Input placeholder="/path/to/vault" value={localPath} onChange={e => setLocalPath(e.target.value)} className="h-7 text-sm" />
+              <LocalPathPicker value={localPath} onChange={setLocalPath} />
             ) : (
               <>
                 <Input placeholder="https://dav.example.com" value={webdavUrl} onChange={e => setWebdavUrl(e.target.value)} className="h-7 text-sm" />
+                <WebDAVPathPicker value={webdavPath} onChange={setWebdavPath} webdavUrl={webdavUrl} webdavUser={webdavUser} webdavPass={webdavPass} />
                 <Input placeholder="用户名" value={webdavUser} onChange={e => setWebdavUser(e.target.value)} className="h-7 text-sm" />
                 <Input placeholder="密码" type="password" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
+                <WebDAVTestButton webdavUrl={webdavUrl} webdavPath={webdavPath} webdavUser={webdavUser} webdavPass={webdavPass} />
               </>
             )}
             <div className="flex gap-1.5">
@@ -128,7 +355,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
               <span className="text-xs text-muted-foreground">{vaultDocCount} 个文档</span>
             </div>
             <p className="text-xs text-muted-foreground truncate mt-0.5">
-              {vault.type === 'local' ? vault.local_path : vault.webdav_url}
+              {vault.type === 'local' ? vault.local_path : `${vault.webdav_url}${vault.webdav_path || '/'}`}
             </p>
             {vault.last_synced_at && (
               <p className="text-xs text-muted-foreground mt-0.5">
@@ -266,12 +493,13 @@ export default function KnowledgeBases() {
   const [vaultType, setVaultType] = useState<'local' | 'webdav'>('local')
   const [localPath, setLocalPath] = useState('')
   const [webdavUrl, setWebdavUrl] = useState('')
+  const [webdavPath, setWebdavPath] = useState('/')
   const [webdavUser, setWebdavUser] = useState('')
   const [webdavPass, setWebdavPass] = useState('')
 
   const resetForm = () => {
     setName(''); setDesc(''); setKbType('upload'); setVaultType('local')
-    setLocalPath(''); setWebdavUrl(''); setWebdavUser(''); setWebdavPass('')
+    setLocalPath(''); setWebdavUrl(''); setWebdavPath('/'); setWebdavUser(''); setWebdavPass('')
     setShowForm(false)
   }
 
@@ -283,6 +511,7 @@ export default function KnowledgeBases() {
           vault_type: vaultType,
           local_path: vaultType === 'local' ? localPath.trim() : undefined,
           webdav_url: vaultType === 'webdav' ? webdavUrl.trim() : undefined,
+          webdav_path: vaultType === 'webdav' ? webdavPath.trim() || '/' : undefined,
           webdav_username: vaultType === 'webdav' ? webdavUser.trim() : undefined,
           webdav_password: vaultType === 'webdav' ? webdavPass : undefined,
         }),
@@ -360,12 +589,14 @@ export default function KnowledgeBases() {
                   <Button size="sm" variant={vaultType === 'webdav' ? 'default' : 'outline'} className="h-6 text-xs" onClick={() => setVaultType('webdav')}>WebDAV</Button>
                 </div>
                 {vaultType === 'local' ? (
-                  <Input placeholder="/path/to/vault" value={localPath} onChange={e => setLocalPath(e.target.value)} className="h-7 text-sm" />
+                  <LocalPathPicker value={localPath} onChange={setLocalPath} />
                 ) : (
                   <>
                     <Input placeholder="https://dav.example.com" value={webdavUrl} onChange={e => setWebdavUrl(e.target.value)} className="h-7 text-sm" />
+                    <WebDAVPathPicker value={webdavPath} onChange={setWebdavPath} webdavUrl={webdavUrl} webdavUser={webdavUser} webdavPass={webdavPass} />
                     <Input placeholder="用户名" value={webdavUser} onChange={e => setWebdavUser(e.target.value)} className="h-7 text-sm" />
                     <Input placeholder="密码" type="password" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
+                    <WebDAVTestButton webdavUrl={webdavUrl} webdavPath={webdavPath} webdavUser={webdavUser} webdavPass={webdavPass} />
                   </>
                 )}
               </div>

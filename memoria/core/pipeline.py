@@ -116,9 +116,9 @@ class Pipeline:
 
         # Session handling
         if session_id is not None:
-            sess = self.db.get_session(session_id)
+            sess = self.db.get_bot_session(session_id, bot_id)
             if sess is None:
-                raise ValueError(f"session {session_id} not found")
+                raise ValueError(f"session {session_id} not found for bot {bot_id}")
         else:
             sess = self.db.create_session(bot_id, query)
             session_id = sess["id"]
