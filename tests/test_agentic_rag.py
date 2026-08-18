@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from memoria.agents.engine import AgenticRagEngine
+from memoria.agents.engine import AgenticRagEngine, OpenAIAgentsRunner
 from memoria.agents.state import SourceCollector
 from memoria.agents.tools import AgentKnowledgeTools, KnowledgeBaseAccessError
 from memoria.config import get_effective_settings
@@ -112,6 +112,29 @@ def test_agent_tools_list_and_search_only_allowed_kbs(tmp_path):
         raise AssertionError("expected KnowledgeBaseAccessError")
 
 
+def test_openai_agents_runner_imports_sdk_and_returns_final_output(monkeypatch):
+    import agents
+
+    class FakeTools:
+        def list_knowledge_bases(self):
+            return []
+
+        def search_knowledge_base(self, kb_id: str, query: str, top_k: int = 5):
+            return []
+
+    async def fake_run(agent, message):
+        class Result:
+            final_output = "sdk answer"
+
+        return Result()
+
+    monkeypatch.setattr(agents.Runner, "run", staticmethod(fake_run))
+
+    runner = OpenAIAgentsRunner("http://localhost/v1", "test-key")
+
+    assert runner.run("hello", "instructions", FakeTools(), "gpt-4o-mini") == "sdk answer"
+
+
 def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_path):
     runner = FakeRunner()
     client, db, pipeline, engine = make_client(tmp_path, runner=runner)
@@ -155,8 +178,16 @@ def test_agentic_session_crud_and_reuse(tmp_path):
     first = client.post("/api/agent-chat", json={"message": "first"}).json()
     sid = first["session_id"]
     second = client.post("/api/agent-chat", json={"message": "second", "session_id": sid}).json()
+    other = client.post("/api/agent-chat", json={"message": "fresh session"}).json()
 
     assert second["session_id"] == sid
+    assert runner.calls[0]["message"] == "first"
+    assert "用户：first" in runner.calls[1]["message"]
+    assert "助手：agent answer" in runner.calls[1]["message"]
+    assert runner.calls[1]["message"].endswith("当前用户问题：second")
+    assert runner.calls[2]["message"] == "fresh session"
+    assert other["session_id"] != sid
+
     messages = client.get(f"/api/agent-sessions/{sid}/messages").json()
     assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
 

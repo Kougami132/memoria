@@ -103,6 +103,7 @@ class AgenticRagEngine:
     pipeline: "Pipeline"
     runner: AgentRunner | None = None
     max_sources: int = 20
+    history_limit: int = 12
 
     def run(self, message: str, session_id: str | None = None) -> dict:
         if not message or not message.strip():
@@ -127,11 +128,13 @@ class AgenticRagEngine:
             allowed_kb_ids=allowed_kb_ids,
             collector=collector,
         )
+        history = self.db.get_messages(session_id, limit=self.history_limit)
+        prompt = self._build_prompt(message, history)
 
         runner = self.runner or self._default_runner(effective)
         instructions = self._instructions(effective)
-        logger.debug("agentic chat: session=%s allowed_kbs=%s", session_id, allowed_kb_ids)
-        answer = runner.run(message, instructions, tools, effective["llm_model"])
+        logger.debug("agentic chat: session=%s allowed_kbs=%s history=%s", session_id, allowed_kb_ids, len(history))
+        answer = runner.run(prompt, instructions, tools, effective["llm_model"])
         sources = collector.list_sources()
         used_kbs = collector.used_kbs()
 
@@ -144,6 +147,20 @@ class AgenticRagEngine:
             "used_kbs": used_kbs,
             "sources": sources,
         }
+
+    def _build_prompt(self, message: str, history: list[dict]) -> str:
+        if not history:
+            return message
+
+        transcript: list[str] = ["以下是本会话此前的对话上下文，请结合它回答当前问题："]
+        for item in history:
+            role = "用户" if item.get("role") == "user" else "助手"
+            content = str(item.get("content") or "").strip()
+            if content:
+                transcript.append(f"{role}：{content}")
+        transcript.append("")
+        transcript.append(f"当前用户问题：{message}")
+        return "\n".join(transcript)
 
     def _default_runner(self, effective: dict) -> AgentRunner:
         from memoria.config import settings

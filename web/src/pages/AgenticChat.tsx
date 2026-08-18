@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
@@ -35,7 +35,7 @@ interface DisplayMessage {
   usedKbs?: string[]
 }
 
-function SourceList({ sources }: { sources: Source[] }) {
+function SourceList({ sources, getKnowledgeBaseName }: { sources: Source[]; getKnowledgeBaseName: (id: string) => string }) {
   const [open, setOpen] = useState(false)
   if (!sources.length) return null
 
@@ -58,7 +58,7 @@ function SourceList({ sources }: { sources: Source[] }) {
                   <span className="block truncate font-mono text-muted-foreground">
                     {source.source === 'vault' && source.filename ? source.filename : source.doc_id}
                   </span>
-                  {source.kb_id && <span className="block truncate text-muted-foreground/70">知识库：{source.kb_id}</span>}
+                  {source.kb_id && <span className="block truncate text-muted-foreground/70">知识库：{getKnowledgeBaseName(source.kb_id)}</span>}
                   {source.source === 'vault' && source.path && (
                     <span className="block truncate font-mono text-xs text-muted-foreground/70">{source.path}</span>
                   )}
@@ -76,12 +76,12 @@ function SourceList({ sources }: { sources: Source[] }) {
   )
 }
 
-function UsedKnowledgeBases({ ids }: { ids: string[] }) {
+function UsedKnowledgeBases({ ids, getKnowledgeBaseName }: { ids: string[]; getKnowledgeBaseName: (id: string) => string }) {
   if (!ids.length) return null
   return (
     <div className="mt-2 ml-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
       <span className="font-medium">使用知识库：</span>
-      {ids.map(id => <Badge key={id} variant="secondary" className="font-normal">{id}</Badge>)}
+      {ids.map(id => <Badge key={id} variant="secondary" className="font-normal">{getKnowledgeBaseName(id)}</Badge>)}
     </div>
   )
 }
@@ -100,6 +100,15 @@ export default function AgenticChat() {
     queryKey: ['agent-sessions'],
     queryFn: api.listAgentSessions,
   })
+  const { data: knowledgeBases = [] } = useQuery({
+    queryKey: ['knowledge-bases'],
+    queryFn: api.listKBs,
+  })
+  const knowledgeBaseNameById = useMemo(
+    () => new Map(knowledgeBases.map(kb => [kb.id, kb.name])),
+    [knowledgeBases],
+  )
+  const getKnowledgeBaseName = (id: string) => knowledgeBaseNameById.get(id) ?? id
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -330,8 +339,8 @@ export default function AgenticChat() {
                         ? <ReactMarkdown components={mdComponents}>{message.content}</ReactMarkdown>
                         : <span className="text-sm text-muted-foreground">正在思考并检索知识库…</span>}
                     </div>
-                    <UsedKnowledgeBases ids={message.usedKbs || []} />
-                    {message.sources && <SourceList sources={message.sources} />}
+                    <UsedKnowledgeBases ids={message.usedKbs || []} getKnowledgeBaseName={getKnowledgeBaseName} />
+                    {message.sources && <SourceList sources={message.sources} getKnowledgeBaseName={getKnowledgeBaseName} />}
                   </div>
                 </div>
               ) : (
