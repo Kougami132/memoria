@@ -1,31 +1,49 @@
-import { useState, useRef, useEffect } from 'react'
+﻿import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Send, Plus, ChevronDown, ChevronUp, MessageSquare, BookOpen, Brain, Trash2, Pencil } from 'lucide-react'
+import { 
+  ArrowUp, 
+  Plus, 
+  ChevronDown, 
+  ChevronUp, 
+  BookOpen, 
+  Sparkle, 
+  Trash2, 
+  Pencil, 
+  Copy, 
+  Check, 
+  Bot,
+  MessageSquarePlus,
+  Sparkles
+} from 'lucide-react'
 import * as api from '@/api'
 import type { Source } from '@/api'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 
 const mdComponents: Components = {
-  p:      ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul:     ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
-  ol:     ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+  p:      ({ children }) => <p className="mb-3 leading-7 last:mb-0">{children}</p>,
+  ul:     ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1">{children}</ul>,
+  ol:     ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1">{children}</ol>,
+  li:     ({ children }) => <li className="leading-7">{children}</li>,
   code:   ({ className, children, node: _node, ...props }) => {
     const isInline = !className
     return isInline
-      ? <code className="bg-muted rounded px-1 font-mono text-xs" {...props}>{children}</code>
-      : <code className="block" {...props}>{children}</code>
+      ? <code className="bg-muted text-foreground px-1.5 py-0.5 rounded font-mono text-[13px]" {...props}>{children}</code>
+      : <code className="block text-sm" {...props}>{children}</code>
   },
-  pre:    ({ children }) => <pre className="bg-muted rounded-xl p-3 overflow-x-auto mb-2 text-xs font-mono">{children}</pre>,
-  h1:     ({ children }) => <h1 className="font-semibold text-base mt-3 mb-1">{children}</h1>,
-  h2:     ({ children }) => <h2 className="font-semibold text-sm mt-3 mb-1">{children}</h2>,
-  h3:     ({ children }) => <h3 className="font-semibold text-sm mt-2 mb-1">{children}</h3>,
-  a:      ({ href, children }) => <a href={href} className="text-primary underline" target="_blank" rel="noreferrer">{children}</a>,
-  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  pre:    ({ children }) => (
+    <pre className="bg-[#1e1e1e] text-[#d4d4d4] rounded-xl p-4 overflow-x-auto my-3 text-xs font-mono border border-border/40">
+      {children}
+    </pre>
+  ),
+  h1:     ({ children }) => <h1 className="font-semibold text-xl mt-5 mb-2">{children}</h1>,
+  h2:     ({ children }) => <h2 className="font-semibold text-lg mt-4 mb-2">{children}</h2>,
+  h3:     ({ children }) => <h3 className="font-semibold text-base mt-3 mb-1.5">{children}</h3>,
+  blockquote: ({ children }) => <blockquote className="border-l-2 border-border pl-4 my-2 text-muted-foreground italic">{children}</blockquote>,
+  a:      ({ href, children }) => <a href={href} className="text-blue-500 hover:underline underline-offset-4" target="_blank" rel="noreferrer">{children}</a>,
+  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
 }
 
 interface DisplayMessage {
@@ -41,33 +59,33 @@ function SourceList({ sources }: { sources: Source[] }) {
   const [open, setOpen] = useState(false)
   if (!sources.length) return null
   return (
-    <div className="mt-2 ml-1">
+    <div className="mt-3">
       <button
-        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-secondary/70 hover:bg-secondary px-2.5 py-1 rounded-lg border border-border/60 transition-colors"
         onClick={() => setOpen(v => !v)}
       >
-        <BookOpen className="h-3 w-3" />
-        <span>检索依据 ({sources.length})</span>
-        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        <BookOpen className="h-3.5 w-3.5" />
+        <span>参考来源 ({sources.length})</span>
+        {open ? <ChevronUp className="h-3 w-3 ml-0.5" /> : <ChevronDown className="h-3 w-3 ml-0.5" />}
       </button>
       {open && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2.5 space-y-2 max-w-2xl">
           {sources.map((s, i) => (
-            <div key={i} className="rounded-xl border bg-card px-3 py-2.5 text-xs space-y-1.5 shadow-sm">
+            <div key={i} className="rounded-xl border border-border bg-card p-3 text-xs space-y-1.5 shadow-xs">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <span className="font-mono text-muted-foreground truncate block">
+                  <span className="font-medium text-foreground truncate block">
                     {s.source === 'vault' && s.filename ? s.filename : s.doc_id}
                   </span>
                   {s.source === 'vault' && s.path && (
-                    <span className="text-xs text-muted-foreground/70 font-mono truncate block">{s.path}</span>
+                    <span className="text-[11px] text-muted-foreground font-mono truncate block">{s.path}</span>
                   )}
                 </div>
-                <Badge variant="outline" className="text-xs shrink-0 font-normal">
-                  相关度 {(s.score * 100).toFixed(0)}%
+                <Badge variant="secondary" className="text-[11px] shrink-0 font-normal">
+                  匹配度 {(s.score * 100).toFixed(0)}%
                 </Badge>
               </div>
-              <p className="text-muted-foreground line-clamp-2 leading-relaxed">{s.text}</p>
+              <p className="text-muted-foreground line-clamp-3 leading-relaxed">{s.text}</p>
             </div>
           ))}
         </div>
@@ -87,9 +105,17 @@ export default function Chat() {
   const [input, setInput] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const skipRenameSaveRef = useRef(false)
+
+  // Auto-select first bot if none selected
+  useEffect(() => {
+    if (!botId && bots.length > 0) {
+      setBotId(bots[0].id)
+    }
+  }, [bots, botId])
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
     queryKey: ['sessions', botId],
@@ -97,9 +123,24 @@ export default function Chat() {
     enabled: !!botId,
   })
 
+  // Listen to global new chat event from sidebar
+  useEffect(() => {
+    const handleGlobalNewChat = () => newSession()
+    window.addEventListener('memoria:new-chat', handleGlobalNewChat)
+    return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
+  }, [])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Auto resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
+    }
+  }, [input])
 
   const loadSession = async (sid: string) => {
     setSessionId(sid)
@@ -121,7 +162,7 @@ export default function Chat() {
     setMessages([])
     setEditingSessionId(null)
     setEditingTitle('')
-    inputRef.current?.focus()
+    textareaRef.current?.focus()
   }
 
   const sessionTitle = (session: api.Session) => session.title?.trim() || '新对话'
@@ -143,7 +184,6 @@ export default function Chat() {
       skipRenameSaveRef.current = false
     }, 0)
   }
-
 
   const renameSessionMutation = useMutation({
     mutationFn: ({ sid, title }: { sid: string; title: string }) => api.updateSession(sid, { title }),
@@ -241,53 +281,74 @@ export default function Chat() {
     sendMsg.mutate({ message, placeholderId: crypto.randomUUID() })
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && input.trim() && botId && !isSending) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
   }
 
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  const currentBot = bots.find(b => b.id === botId)
+
   return (
-    <div className="flex h-full">
-      {/* 左侧会话栏 */}
-      <div className="w-52 border-r flex flex-col bg-muted/20 shrink-0">
-        <div className="p-3 border-b space-y-2">
+    <div className="flex h-full w-full">
+      {/* Session History Sidebar (ChatGPT style) */}
+      <div className="w-64 border-r border-border bg-sidebar/50 flex flex-col shrink-0">
+        <div className="p-3 border-b border-border/80 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground tracking-wider uppercase">助手模型</span>
+          </div>
           <Select
             value={botId}
             onValueChange={id => { setBotId(id); setSessionId(null); setMessages([]); clearRename() }}
             disabled={isSending}
           >
-            <SelectTrigger className="bg-background text-sm h-9">
+            <SelectTrigger className="bg-background text-sm h-9 rounded-xl border-border">
               <SelectValue placeholder="选择机器人" />
             </SelectTrigger>
             <SelectContent>
               {bots.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          {botId && (
-            <Button variant="outline" size="sm" className="w-full gap-1.5 h-8 text-xs" onClick={newSession} disabled={isSending}>
-              <Plus className="h-3.5 w-3.5" />
-              新建对话
-            </Button>
-          )}
         </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-0.5 min-h-0">
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
+          <div className="flex items-center justify-between px-2 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            <span>历史会话</span>
+            <button 
+              onClick={newSession}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="新建会话"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
           {botId && sessions.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-6">暂无历史会话</p>
+            <p className="text-xs text-muted-foreground text-center py-8">暂无历史记录</p>
           )}
+
           {sessions.map(s => (
             <div
               key={s.id}
-              className={`group relative w-full rounded-xl text-xs transition-colors ${
+              className={`group relative flex items-center rounded-xl text-sm transition-all px-3 py-2 cursor-pointer ${
                 s.id === sessionId
-                  ? 'bg-gradient-to-r from-purple-600/90 to-blue-500/90 text-white shadow-sm'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  ? 'bg-accent text-foreground font-medium'
+                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
               }`}
+              onClick={() => {
+                if (editingSessionId !== s.id) loadSession(s.id)
+              }}
             >
               {editingSessionId === s.id ? (
-                <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-                  <Input
+                <div className="w-full" onClick={e => e.stopPropagation()}>
+                  <input
                     autoFocus
                     value={editingTitle}
                     onChange={e => setEditingTitle(e.target.value)}
@@ -304,36 +365,30 @@ export default function Chat() {
                       }
                     }}
                     disabled={renameSessionMutation.isPending}
-                    className="h-6 rounded-lg bg-background px-2 py-0 text-xs text-foreground"
+                    className="w-full h-7 rounded-md bg-background px-2 text-xs text-foreground border border-border focus:outline-hidden"
                   />
-                  <p className="opacity-60 mt-1">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
                 </div>
               ) : (
                 <>
-                  <button
-                    className="w-full text-left px-3 py-3 disabled:cursor-not-allowed"
-                    onClick={() => loadSession(s.id)}
-                    disabled={isSending}
-                  >
-                    <p className="font-medium truncate pr-12">{sessionTitle(s)}</p>
-                    <p className="opacity-60 mt-0.5">{s.created_at.slice(0, 16).replace('T', ' ')}</p>
-                  </button>
-                  <button
-                    className={`absolute right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
-                    onClick={e => { e.stopPropagation(); startRename(s) }}
-                    disabled={renameSessionMutation.isPending || isSending}
-                    aria-label="重命名会话"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${s.id === sessionId ? 'hover:bg-white/20' : 'hover:bg-black/10'}`}
-                    onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
-                    disabled={deleteSessionMutation.isPending || isSending}
-                    aria-label="删除会话"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <span className="truncate pr-12 text-xs">{sessionTitle(s)}</span>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      className="p-1 rounded hover:bg-background/80 text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={e => { e.stopPropagation(); startRename(s) }}
+                      disabled={renameSessionMutation.isPending || isSending}
+                      title="重命名"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      className="p-1 rounded hover:bg-background/80 text-muted-foreground hover:text-destructive transition-colors"
+                      onClick={e => { e.stopPropagation(); deleteSessionMutation.mutate(s.id) }}
+                      disabled={deleteSessionMutation.isPending || isSending}
+                      title="删除"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -341,80 +396,150 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* 主聊天区 */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {!botId ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-2xl p-5 mb-4 inline-block">
-              <MessageSquare className="h-10 w-10 text-purple-500" />
-            </div>
-            <p className="font-medium">从左侧选择机器人开始对话</p>
-            <p className="text-sm text-muted-foreground mt-1">机器人将基于关联知识库进行 RAG 检索</p>
+      {/* Main Chat Flow (ChatGPT layout) */}
+      <div className="flex-1 flex flex-col min-w-0 h-full bg-background relative">
+        {/* Top Header */}
+        <header className="h-12 border-b border-border/60 flex items-center justify-between px-6 shrink-0 bg-background/80 backdrop-blur-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm">{currentBot?.name || '请选择助手'}</span>
+            {currentBot && (
+              <Badge variant="outline" className="text-[11px] font-normal text-muted-foreground">
+                常规模式
+              </Badge>
+            )}
           </div>
-        ) : (
-          <>
-            <div className="flex-1 overflow-y-auto p-6 space-y-5 min-h-0">
-              {messages.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <p className="text-muted-foreground text-sm">发送消息开始对话</p>
-                  <p className="text-xs text-muted-foreground mt-1">机器人将自动检索相关知识库内容作为参考</p>
+          <button
+            onClick={newSession}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg hover:bg-accent transition-colors"
+          >
+            <MessageSquarePlus className="w-3.5 h-3.5" />
+            <span>新对话</span>
+          </button>
+        </header>
+
+        {/* Message Stream */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center text-foreground shadow-xs">
+                  <Sparkles className="w-6 h-6" />
                 </div>
-              )}
-              {messages.map((m, i) => (
-                <div key={m.id || i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  {m.role === 'assistant' ? (
-                    <div className="flex items-start gap-3 max-w-[75%]">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shrink-0 shadow-sm">
-                        <Brain className="h-4 w-4 text-white" />
+                <div className="space-y-1">
+                  <h2 className="text-xl font-semibold tracking-tight">有什么我可以帮你的？</h2>
+                  <p className="text-sm text-muted-foreground">
+                    基于 RAG 知识库与大语言模型，为你提供精准的检索与解答。
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 max-w-lg w-full pt-4">
+                  <button 
+                    onClick={() => { setInput('总结一下知识库中的核心内容'); textareaRef.current?.focus() }}
+                    className="p-3 text-left rounded-xl border border-border hover:bg-accent/50 text-xs transition-colors space-y-1"
+                  >
+                    <div className="font-medium text-foreground">总结知识库</div>
+                    <div className="text-muted-foreground text-[11px]">提炼核心内容与重点</div>
+                  </button>
+                  <button 
+                    onClick={() => { setInput('帮我搜索并解答关键概念'); textareaRef.current?.focus() }}
+                    className="p-3 text-left rounded-xl border border-border hover:bg-accent/50 text-xs transition-colors space-y-1"
+                  >
+                    <div className="font-medium text-foreground">概念查询</div>
+                    <div className="text-muted-foreground text-[11px]">检索相关知识切片与定义</div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {messages.map((m, i) => (
+              <div key={m.id || i} className="group">
+                {m.role === 'user' ? (
+                  <div className="flex justify-end">
+                    <div className="max-w-[85%] rounded-3xl bg-[#f4f4f4] dark:bg-[#2f2f2f] px-5 py-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                      {m.content}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-4">
+                    <div className="w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                      <Sparkle className="w-4 h-4 fill-current" />
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="text-sm leading-relaxed text-foreground">
+                        {m.content ? (
+                          <ReactMarkdown components={mdComponents}>{m.content}</ReactMarkdown>
+                        ) : m.streaming ? (
+                          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                            <span className="inline-block w-2 h-2 rounded-full bg-foreground animate-ping" />
+                            <span>{m.status || '正在思考与检索…'}</span>
+                          </div>
+                        ) : null}
+                        {m.streaming && m.content && (
+                          <span className="ml-1 inline-block animate-pulse align-baseline text-muted-foreground">▋</span>
+                        )}
                       </div>
-                      <div>
-                        <div className="rounded-2xl rounded-tl-sm bg-card border px-4 py-3 text-sm leading-relaxed shadow-sm">
-                          {m.content ? (
-                            <ReactMarkdown components={mdComponents}>{m.content}</ReactMarkdown>
-                          ) : m.streaming ? (
-                            <span className="text-muted-foreground text-sm">{m.status || '正在生成思路与答案…'}</span>
-                          ) : null}
-                          {m.streaming && (
-                            <span className="ml-1 inline-block animate-pulse align-baseline text-muted-foreground">▋</span>
-                          )}
+
+                      {m.sources && <SourceList sources={m.sources} />}
+
+                      {/* Action buttons (Copy) */}
+                      {m.content && !m.streaming && (
+                        <div className="flex items-center gap-2 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => copyToClipboard(m.content, m.id)}
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary text-xs flex items-center gap-1 transition-colors"
+                            title="复制内容"
+                          >
+                            {copiedId === m.id ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span className="text-[11px]">{copiedId === m.id ? '已复制' : '复制'}</span>
+                          </button>
                         </div>
-                        {m.sources && <SourceList sources={m.sources} />}
-                      </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="max-w-[75%]">
-                      <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
-                        {m.content}
-                      </div>
-                    </div>
-                  )}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        </div>
+
+        {/* Floating Input Area (ChatGPT Style) */}
+        <div className="shrink-0 pb-6 pt-2 bg-gradient-to-t from-background via-background to-transparent">
+          <div className="max-w-3xl mx-auto px-4">
+            <div className="relative flex flex-col rounded-3xl border border-border bg-[#f4f4f4] dark:bg-[#2f2f2f] shadow-sm focus-within:border-foreground/40 transition-colors p-2.5">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                placeholder={botId ? "给 Memoria 发送消息…" : "请先选择助手模型…"}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isSending || !botId}
+                className="w-full bg-transparent resize-none border-0 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden px-2.5 pt-1.5 pb-2 min-h-[28px] max-h-[200px]"
+              />
+              <div className="flex items-center justify-between pt-1 px-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Bot className="w-3.5 h-3.5" />
+                  <span className="text-[11px]">{currentBot?.name || '未选择'}</span>
                 </div>
-              ))}
-              <div ref={bottomRef} />
-            </div>
-            <div className="border-t bg-background/80 backdrop-blur-sm px-4 py-4 shrink-0">
-              <div className="flex gap-2 max-w-3xl mx-auto">
-                <Input
-                  ref={inputRef}
-                  placeholder="输入消息，按 Enter 发送…"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  disabled={isSending}
-                  className="rounded-2xl text-sm"
-                />
-                <Button
-                  variant="gradient"
+                <button
                   onClick={handleSend}
-                  disabled={!input.trim() || isSending}
-                  className="rounded-2xl px-4 shrink-0"
+                  disabled={!input.trim() || isSending || !botId}
+                  className={`p-2 rounded-full transition-all ${
+                    input.trim() && !isSending && botId
+                      ? 'bg-foreground text-background hover:opacity-90 shadow-xs'
+                      : 'bg-muted-foreground/20 text-muted-foreground cursor-not-allowed'
+                  }`}
+                  title="发送消息"
                 >
-                  <Send className="h-4 w-4" />
-                </Button>
+                  <ArrowUp className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          </>
-        )}
+            <p className="text-center text-[11px] text-muted-foreground mt-2">
+              Memoria 可能会生成不准确的信息，请以检索依据与事实为准。
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )

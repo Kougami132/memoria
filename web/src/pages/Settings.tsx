@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Eye, EyeOff, Save, Check, FlaskConical } from 'lucide-react'
+import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw } from 'lucide-react'
 import * as api from '@/api'
 import type { SettingsUpdate } from '@/api'
 
@@ -56,75 +56,89 @@ export default function Settings() {
     set({ status: 'loading' })
     try {
       const r = await fn()
-      set({ status: 'ok', msg: r.dimensions != null ? `✓ ${r.dimensions}维` : `✓ ${r.elapsed_ms}ms` })
+      set({ status: 'ok', msg: r.dimensions != null ? `✓ 连接正常 (${r.dimensions}维)` : `✓ 响应成功 (${r.elapsed_ms}ms)` })
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
-      set({ status: 'err', msg })
+      set({ status: 'err', msg: `✗ ${msg}` })
     }
   }
 
   const testBadge = (s: TestState) => {
     if (s.status === 'idle') return null
     if (s.status === 'loading') return <span className="text-xs text-muted-foreground">测试中…</span>
-    if (s.status === 'ok') return <span className="text-xs text-green-600 dark:text-green-400 break-all">{s.msg}</span>
-    return <span className="text-xs text-red-500 break-all">{s.msg}</span>
+    if (s.status === 'ok') return <span className="text-xs text-emerald-600 dark:text-emerald-400 break-all">{s.msg}</span>
+    return <span className="text-xs text-destructive break-all">{s.msg}</span>
   }
 
   return (
-    <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">系统设置</h1>
-        <p className="text-sm text-muted-foreground mt-1">配置 API 连接和 RAG 参数，保存后将自动重建 Pipeline</p>
+    <div className="p-8 w-[860px] max-w-full mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">全局设置</h1>
+          <p className="text-sm text-muted-foreground mt-1">配置大模型服务商、嵌入模型及 RAG 核心管道参数</p>
+        </div>
+        <Button
+          onClick={() => update.mutate()}
+          disabled={update.isPending}
+          className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs"
+        >
+          {saved ? <Check className="h-4 w-4 text-green-400" /> : <Save className="h-4 w-4" />}
+          {update.isPending ? '保存中…' : saved ? '已保存设置' : '保存设置'}
+        </Button>
       </div>
 
-      <Card>
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
-          <CardTitle className="text-base font-semibold text-foreground">API 配置</CardTitle>
-          <CardDescription>OpenAI 兼容接口，支持 OpenAI、Azure、本地部署模型等</CardDescription>
+          <div className="flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">API 与模型服务</CardTitle>
+          </div>
+          <CardDescription>兼容 OpenAI 规范的任何大模型与向量嵌入服务接口</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API 地址</Label>
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL (API 地址)</Label>
             <Input
               placeholder="https://api.openai.com/v1"
               value={form.openai_base_url ?? ''}
               onChange={set('openai_base_url')}
+              className="rounded-xl border-border bg-background"
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API 密钥</Label>
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key (密钥)</Label>
             <div className="flex gap-2">
               <Input
                 type={showKey ? 'text' : 'password'}
                 placeholder="sk-…"
                 value={form.openai_api_key ?? ''}
                 onChange={set('openai_api_key')}
-                className="flex-1"
+                className="flex-1 rounded-xl border-border bg-background font-mono text-sm"
               />
               <Button
                 variant="outline"
                 size="icon"
-                className="shrink-0"
+                className="shrink-0 rounded-xl border-border"
                 onClick={() => setShowKey(v => !v)}
               >
                 {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>
             </div>
           </div>
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">嵌入模型</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量嵌入模型</Label>
               <div className="flex gap-2 items-center">
                 <Input
                   placeholder="text-embedding-3-small"
                   value={form.embedding_model ?? ''}
                   onChange={set('embedding_model')}
-                  className="flex-1"
+                  className="flex-1 rounded-xl border-border bg-background font-mono text-xs"
                 />
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1.5"
+                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs"
                   disabled={embedTest.status === 'loading'}
                   onClick={runTest(api.testEmbedding, setEmbedTest)}
                 >
@@ -135,18 +149,18 @@ export default function Settings() {
               {testBadge(embedTest)}
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">对话模型</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">对话生成模型</Label>
               <div className="flex gap-2 items-center">
                 <Input
                   placeholder="gpt-4o-mini"
                   value={form.llm_model ?? ''}
                   onChange={set('llm_model')}
-                  className="flex-1"
+                  className="flex-1 rounded-xl border-border bg-background font-mono text-xs"
                 />
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1.5"
+                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs"
                   disabled={chatTest.status === 'loading'}
                   onClick={runTest(api.testChat, setChatTest)}
                 >
@@ -160,25 +174,29 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
-          <CardTitle className="text-base font-semibold text-foreground">RAG 参数</CardTitle>
-          <CardDescription>控制文档检索和分块的核心参数</CardDescription>
+          <div className="flex items-center gap-2">
+            <Sliders className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">RAG 检索参数</CardTitle>
+          </div>
+          <CardDescription>控制文档分块切割和向量相似度召回逻辑</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Top-K</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Top-K 数量</Label>
               <Input
                 type="number"
                 placeholder="5"
                 value={form.top_k ?? ''}
                 onChange={set('top_k')}
+                className="rounded-xl border-border bg-background"
               />
-              <p className="text-xs text-muted-foreground">每次检索的块数量</p>
+              <p className="text-[11px] text-muted-foreground">每次召回块数</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">最低相关度</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">最低相似度</Label>
               <Input
                 type="number"
                 step="0.05"
@@ -187,85 +205,77 @@ export default function Settings() {
                 placeholder="0.5"
                 value={form.min_score ?? ''}
                 onChange={set('min_score')}
+                className="rounded-xl border-border bg-background"
               />
-              <p className="text-xs text-muted-foreground">低于此分数的块不注入提示词</p>
+              <p className="text-[11px] text-muted-foreground">过滤低相关度块</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">块大小</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">分块大小</Label>
               <Input
                 type="number"
                 placeholder="512"
                 value={form.chunk_size ?? ''}
                 onChange={set('chunk_size')}
+                className="rounded-xl border-border bg-background"
               />
-              <p className="text-xs text-muted-foreground">每块字符数上限</p>
+              <p className="text-[11px] text-muted-foreground">单块字符上限</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">块重叠</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重叠大小</Label>
               <Input
                 type="number"
                 placeholder="50"
                 value={form.chunk_overlap ?? ''}
                 onChange={set('chunk_overlap')}
+                className="rounded-xl border-border bg-background"
               />
-              <p className="text-xs text-muted-foreground">相邻块重叠字符数</p>
+              <p className="text-[11px] text-muted-foreground">相邻块重叠字符</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
-          <CardTitle className="text-base font-semibold text-foreground">对话提示词</CardTitle>
-          <CardDescription>控制新机器人预填内容和空提示词机器人的兜底行为</CardDescription>
+          <div className="flex items-center gap-2">
+            <MessageSquareCode className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">系统通用提示词</CardTitle>
+          </div>
+          <CardDescription>用于未单独配置系统提示词的对话与兜底处理</CardDescription>
         </CardHeader>
         <CardContent className="space-y-1.5">
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">默认系统提示词</Label>
           <Textarea
-            placeholder="定义机器人默认的角色和行为"
+            placeholder="定义机器人全局默认人设与检索引用行为…"
             value={form.system_prompt ?? ''}
             onChange={set('system_prompt')}
-            rows={6}
-            className="resize-none"
+            rows={5}
+            className="rounded-xl border-border bg-background resize-none leading-relaxed"
           />
-          <p className="text-xs text-muted-foreground">Bot 已设置自定义提示词时，以 Bot 配置为准</p>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
-          <CardTitle className="text-base font-semibold text-foreground">Vault 同步</CardTitle>
-          <CardDescription>配置 Vault 自动同步行为</CardDescription>
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">Vault 笔记库同步</CardTitle>
+          </div>
+          <CardDescription>Obsidian / 本地 Markdown 笔记的自动增量同步设置</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">自动同步间隔（分钟）</Label>
+          <div className="space-y-1.5 max-w-xs">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">同步间隔（分钟）</Label>
             <Input
               type="number"
               min="1"
               placeholder="15"
               value={form.vault_sync_interval_minutes ?? ''}
               onChange={set('vault_sync_interval_minutes')}
+              className="rounded-xl border-border bg-background"
             />
-            <p className="text-xs text-muted-foreground">Vault 自动同步的时间间隔，单位为分钟</p>
           </div>
         </CardContent>
       </Card>
-
-      <div className="flex items-center gap-3">
-        <Button
-          variant={saved ? 'gradient-success' : 'gradient'}
-          onClick={() => update.mutate()}
-          disabled={update.isPending}
-          className="gap-2"
-        >
-          {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-          {update.isPending ? '保存中…' : saved ? '已保存' : '保存设置'}
-        </Button>
-        {saved && (
-          <p className="text-sm text-muted-foreground">设置已生效，Pipeline 已重建</p>
-        )}
-      </div>
     </div>
   )
 }

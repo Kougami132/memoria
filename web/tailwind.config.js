@@ -3,24 +3,7 @@ export default {
   darkMode: ["class"],
   content: [
     "./index.html",
-    "./src/main.tsx",
-    "./src/api.ts",
-    "./src/App.tsx",
-    "./src/App.css",
-    "./src/components/Layout.tsx",
-    "./src/components/ui/badge.tsx",
-    "./src/components/ui/button.tsx",
-    "./src/components/ui/card.tsx",
-    "./src/components/ui/checkbox.tsx",
-    "./src/components/ui/input.tsx",
-    "./src/components/ui/label.tsx",
-    "./src/components/ui/select.tsx",
-    "./src/components/ui/textarea.tsx",
-    "./src/lib/utils.ts",
-    "./src/pages/Bots.tsx",
-    "./src/pages/Chat.tsx",
-    "./src/pages/KnowledgeBases.tsx",
-    "./src/pages/Settings.tsx",
+    "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
@@ -32,6 +15,11 @@ export default {
       colors: {
         background: 'var(--background)',
         foreground: 'var(--foreground)',
+        sidebar: {
+          DEFAULT: 'var(--sidebar)',
+          foreground: 'var(--sidebar-foreground)',
+          border: 'var(--sidebar-border)',
+        },
         card: {
           DEFAULT: 'var(--card)',
           foreground: 'var(--card-foreground)',
@@ -60,13 +48,6 @@ export default {
         border: 'var(--border)',
         input: 'var(--input)',
         ring: 'var(--ring)',
-        chart: {
-          '1': 'var(--chart-1)',
-          '2': 'var(--chart-2)',
-          '3': 'var(--chart-3)',
-          '4': 'var(--chart-4)',
-          '5': 'var(--chart-5)',
-        },
       },
     },
   },

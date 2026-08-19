@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -82,7 +82,7 @@ function LocalPathPicker({ value, onChange, placeholder = '/path/to/vault' }: Pa
                   className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted"
                   onClick={() => load(entry.path)}
                 >
-                  <FolderOpen className="h-3 w-3 text-violet-500" />
+                  <FolderOpen className="h-3 w-3 text-muted-foreground" />
                   <span className="truncate">{entry.name}</span>
                 </button>
               ))
@@ -181,7 +181,7 @@ function WebDAVPathPicker({ value, onChange, webdavUrl, webdavUser, webdavPass }
                   className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted"
                   onClick={() => load(entry.path)}
                 >
-                  <FolderOpen className="h-3 w-3 text-violet-500" />
+                  <FolderOpen className="h-3 w-3 text-muted-foreground" />
                   <span className="truncate">{entry.name}</span>
                 </button>
               ))
@@ -344,14 +344,14 @@ function VaultPanel({ kbId }: { kbId: string }) {
 
   const isSyncing = vault.syncing || syncVault.isPending
   return (
-    <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/50 dark:border-violet-900/50 dark:bg-violet-950/20 px-4 py-3">
+    <div className="mb-4 rounded-xl border border-border/80 bg-muted/40 px-4 py-3 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <FolderOpen className="h-4 w-4 text-violet-500 shrink-0" />
+        <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+          <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium text-violet-700 dark:text-violet-400">仓库</span>
-              <Badge variant="outline" className="text-xs py-0 h-4 text-violet-600 border-violet-300">{vault.type}</Badge>
+              <span className="text-xs font-medium text-foreground font-medium">仓库</span>
+              <Badge variant="outline" className="text-xs py-0 h-4 text-muted-foreground border-border">{vault.type}</Badge>
               <span className="text-xs text-muted-foreground">{vaultDocCount} 个文档</span>
             </div>
             <p className="text-xs text-muted-foreground truncate mt-0.5">
@@ -444,13 +444,13 @@ function DocList({ kb }: { kb: api.KB }) {
       ) : (
         <div className="space-y-1.5">
           {docs.map(doc => (
-            <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 transition-colors hover:bg-muted/60">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileText className="h-4 w-4 text-purple-500 shrink-0" />
-                <div className="min-w-0">
-                  <span className="text-sm truncate block">{doc.filename}</span>
+            <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2 transition-colors hover:bg-muted/60 min-w-0 overflow-hidden">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+                <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <span className="text-sm font-medium text-foreground truncate block" title={doc.filename}>{doc.filename}</span>
                   {doc.source === 'vault' && doc.path && (
-                    <div className="text-xs text-muted-foreground/70 font-mono truncate">{doc.path}</div>
+                    <div className="text-xs text-muted-foreground/70 font-mono truncate block" title={doc.path}>{doc.path}</div>
                   )}
                 </div>
               </div>
@@ -553,13 +553,13 @@ export default function KnowledgeBases() {
   })
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-8 w-[860px] max-w-full mx-auto space-y-6">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">知识库</h1>
           <p className="text-sm text-muted-foreground mt-1">管理文档集合，为机器人提供知识来源</p>
         </div>
-        <Button variant="gradient" onClick={() => setShowForm(v => !v)} className="gap-2 shrink-0">
+        <Button variant="default" onClick={() => setShowForm(v => !v)} className="gap-2 shrink-0">
           <Plus className="h-4 w-4" />
           新建知识库
         </Button>
@@ -613,8 +613,8 @@ export default function KnowledgeBases() {
 
       {kbs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-2xl p-5 mb-4 inline-block">
-            <Database className="h-10 w-10 text-purple-500" />
+          <div className="bg-gradient-to-br bg-muted rounded-2xl p-5 mb-4 inline-block">
+            <Database className="h-10 w-10 text-muted-foreground" />
           </div>
           <p className="font-medium">暂无知识库</p>
           <p className="text-sm text-muted-foreground mt-1">点击右上角「新建知识库」开始</p>
@@ -622,7 +622,7 @@ export default function KnowledgeBases() {
       ) : (
         <div className="space-y-3">
           {kbs.map(kb => (
-            <Card key={kb.id} className="overflow-hidden transition-[transform,box-shadow] hover:shadow-md hover:-translate-y-0.5">
+            <Card key={kb.id} className="overflow-hidden rounded-2xl border-border/80 min-w-0">
               <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between gap-2">
                   {editingId === kb.id ? (
@@ -674,7 +674,7 @@ export default function KnowledgeBases() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="font-medium text-sm">{kb.name}</span>
-                          <Badge variant="outline" className={`text-xs py-0 h-4 ${kb.type === 'vault' ? 'text-violet-600 border-violet-300' : 'text-blue-600 border-blue-300'}`}>
+                          <Badge variant="outline" className={`text-xs py-0 h-4 ${kb.type === 'vault' ? 'text-muted-foreground border-border' : 'text-muted-foreground border-border'}`}>
                             {kb.type === 'vault' ? '仓库' : '上传'}
                           </Badge>
                         </div>
@@ -707,7 +707,7 @@ export default function KnowledgeBases() {
                 </div>
               </CardHeader>
               {expanded.has(kb.id) && (
-                <CardContent className="border-t bg-muted/20 pt-4 pb-4">
+                <CardContent className="border-t border-border/60 bg-muted/15 pt-4 pb-4 px-4 min-w-0 overflow-hidden">
                   {kb.type === 'vault' && <VaultPanel kbId={kb.id} />}
                   <DocList kb={kb} />
                 </CardContent>
