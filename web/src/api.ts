@@ -185,6 +185,11 @@ export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { meth
 export const getSettings = () => req<Settings>('/settings')
 export const updateSettings = (data: SettingsUpdate) =>
   req<Settings>('/settings', { method: 'PUT', ...json(data) })
+export const fetchModels = (data?: { openai_base_url?: string; api_key?: string }) =>
+  req<{ models: string[] }>('/settings/fetch-models', {
+    method: 'POST',
+    ...json(data || {}),
+  })
 export const testEmbedding = () =>
   req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', { method: 'POST' })
 export const testChat = () =>

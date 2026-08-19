@@ -530,3 +530,18 @@ def test_delete_session(client):
 def test_delete_session_not_found(client):
     r = client.delete("/api/sessions/nonexistent")
     assert r.status_code == 404
+
+def test_fetch_models(client):
+    from unittest.mock import MagicMock, patch
+    mock_model_1 = MagicMock()
+    mock_model_1.id = "gpt-4o"
+    mock_model_2 = MagicMock()
+    mock_model_2.id = "text-embedding-3-small"
+
+    mock_client = MagicMock()
+    mock_client.models.list.return_value.data = [mock_model_1, mock_model_2]
+
+    with patch("openai.OpenAI", return_value=mock_client):
+        r = client.post("/api/settings/fetch-models", json={"openai_base_url": "https://api.openai.com/v1", "api_key": "sk-123"})
+        assert r.status_code == 200
+        assert r.json() == {"models": ["gpt-4o", "text-embedding-3-small"]}

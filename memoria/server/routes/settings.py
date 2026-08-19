@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+class FetchModelsRequest(BaseModel):
+    openai_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
 class SettingsUpdate(BaseModel):
     openai_base_url: Optional[str] = None
     api_key: Optional[str] = None
@@ -94,5 +99,22 @@ def test_chat(db: DB = Depends(get_db)):
         llm.call([{"role": "user", "content": "hi"}])
         elapsed_ms = round((time.monotonic() - t0) * 1000)
         return {"ok": True, "elapsed_ms": elapsed_ms}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/fetch-models")
+def fetch_models(body: Optional[FetchModelsRequest] = None, db: DB = Depends(get_db)):
+    from openai import OpenAI
+    effective = get_effective_settings(db)
+    base_url = (body.openai_base_url if body and body.openai_base_url is not None else effective["openai_base_url"]) or ""
+    api_key = (body.api_key if body and body.api_key is not None else effective["openai_api_key"]) or ""
+    if not base_url:
+        raise HTTPException(status_code=422, detail="openai_base_url is required")
+    try:
+        client = OpenAI(base_url=base_url.rstrip("/"), api_key=api_key or "dummy")
+        model_list = client.models.list()
+        models = sorted([m.id for m in model_list.data if getattr(m, "id", None)])
+        return {"models": models}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))

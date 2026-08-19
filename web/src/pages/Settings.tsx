@@ -1,15 +1,17 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download } from 'lucide-react'
 import * as api from '@/api'
 import type { SettingsUpdate } from '@/api'
 
 type TestState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
+type FetchState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
 
 export default function Settings() {
   const qc = useQueryClient()
@@ -17,10 +19,22 @@ export default function Settings() {
   const [form, setForm] = useState<Partial<Record<string, string>>>({})
   const [showKey, setShowKey] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' })
   const [embedTest, setEmbedTest] = useState<TestState>({ status: 'idle' })
   const [chatTest, setChatTest] = useState<TestState>({ status: 'idle' })
 
-  useEffect(() => { if (settings) setForm({ ...settings }) }, [settings])
+  useEffect(() => {
+    if (settings) {
+      setForm({ ...settings })
+      const initialModels = new Set<string>()
+      if (settings.embedding_model) initialModels.add(settings.embedding_model)
+      if (settings.llm_model) initialModels.add(settings.llm_model)
+      if (initialModels.size > 0) {
+        setAvailableModels(Array.from(initialModels))
+      }
+    }
+  }, [settings])
 
   const update = useMutation({
     mutationFn: () => {
@@ -51,6 +65,33 @@ export default function Settings() {
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }))
 
+  const handleFetchModels = async () => {
+    const baseUrl = form.openai_base_url || ''
+    if (!baseUrl.trim()) {
+      setFetchState({ status: 'err', msg: '请先填写 API Base URL' })
+      return
+    }
+    setFetchState({ status: 'loading' })
+    try {
+      const res = await api.fetchModels({
+        openai_base_url: form.openai_base_url,
+        api_key: form.openai_api_key !== settings?.openai_api_key ? form.openai_api_key : undefined,
+      })
+      const list = res.models || []
+      // Preserve currently selected models in list if not in list
+      const combined = Array.from(new Set([
+        ...(form.embedding_model ? [form.embedding_model] : []),
+        ...(form.llm_model ? [form.llm_model] : []),
+        ...list,
+      ]))
+      setAvailableModels(combined)
+      setFetchState({ status: 'ok', msg: `成功获取 ${list.length} 个模型` })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setFetchState({ status: 'err', msg: `获取模型失败: ${msg}` })
+    }
+  }
+
   const runTest = (fn: () => Promise<{ ok: boolean; dimensions?: number; elapsed_ms?: number }>,
                    set: (s: TestState) => void) => async () => {
     set({ status: 'loading' })
@@ -66,6 +107,13 @@ export default function Settings() {
   const testBadge = (s: TestState) => {
     if (s.status === 'idle') return null
     if (s.status === 'loading') return <span className="text-xs text-muted-foreground">测试中…</span>
+    if (s.status === 'ok') return <span className="text-xs text-emerald-600 dark:text-emerald-400 break-all">{s.msg}</span>
+    return <span className="text-xs text-destructive break-all">{s.msg}</span>
+  }
+
+  const fetchBadge = (s: FetchState) => {
+    if (s.status === 'idle') return null
+    if (s.status === 'loading') return <span className="text-xs text-muted-foreground">获取模型中…</span>
     if (s.status === 'ok') return <span className="text-xs text-emerald-600 dark:text-emerald-400 break-all">{s.msg}</span>
     return <span className="text-xs text-destructive break-all">{s.msg}</span>
   }
@@ -125,21 +173,55 @@ export default function Settings() {
               </Button>
             </div>
           </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleFetchModels}
+                disabled={fetchState.status === 'loading'}
+                className="gap-1.5 rounded-xl border-border text-xs"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {fetchState.status === 'loading' ? '获取模型中…' : '获取模型列表'}
+              </Button>
+              {fetchBadge(fetchState)}
+            </div>
+            {availableModels.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                已加载 {availableModels.length} 个可用模型
+              </span>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量嵌入模型</Label>
               <div className="flex gap-2 items-center">
-                <Input
-                  placeholder="text-embedding-3-small"
-                  value={form.embedding_model ?? ''}
-                  onChange={set('embedding_model')}
-                  className="flex-1 rounded-xl border-border bg-background font-mono text-xs"
-                />
+                <div className="flex-1">
+                  <Select
+                    value={form.embedding_model ?? ''}
+                    onValueChange={val => setForm(f => ({ ...f, embedding_model: val }))}
+                    disabled={availableModels.length === 0}
+                  >
+                    <SelectTrigger className="rounded-xl border-border bg-background font-mono text-xs h-9">
+                      <SelectValue placeholder={availableModels.length === 0 ? "请先点击获取模型列表" : "从列表中选择嵌入模型"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableModels.map(m => (
+                        <SelectItem key={m} value={m} className="font-mono text-xs">
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs"
-                  disabled={embedTest.status === 'loading'}
+                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs h-9"
+                  disabled={embedTest.status === 'loading' || !form.embedding_model}
                   onClick={runTest(api.testEmbedding, setEmbedTest)}
                 >
                   <FlaskConical className="h-3.5 w-3.5" />
@@ -151,17 +233,29 @@ export default function Settings() {
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">对话生成模型</Label>
               <div className="flex gap-2 items-center">
-                <Input
-                  placeholder="gpt-4o-mini"
-                  value={form.llm_model ?? ''}
-                  onChange={set('llm_model')}
-                  className="flex-1 rounded-xl border-border bg-background font-mono text-xs"
-                />
+                <div className="flex-1">
+                  <Select
+                    value={form.llm_model ?? ''}
+                    onValueChange={val => setForm(f => ({ ...f, llm_model: val }))}
+                    disabled={availableModels.length === 0}
+                  >
+                    <SelectTrigger className="rounded-xl border-border bg-background font-mono text-xs h-9">
+                      <SelectValue placeholder={availableModels.length === 0 ? "请先点击获取模型列表" : "从列表中选择对话模型"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableModels.map(m => (
+                        <SelectItem key={m} value={m} className="font-mono text-xs">
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs"
-                  disabled={chatTest.status === 'loading'}
+                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs h-9"
+                  disabled={chatTest.status === 'loading' || !form.llm_model}
                   onClick={runTest(api.testChat, setChatTest)}
                 >
                   <FlaskConical className="h-3.5 w-3.5" />
