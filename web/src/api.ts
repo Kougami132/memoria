@@ -18,7 +18,7 @@ export interface BotCreate { name: string; system_prompt?: string; kb_ids?: stri
 export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
 export interface Session { id: string; bot_id: string | null; session_type?: 'bot' | 'agentic'; title: string; created_at: string }
 export interface Message {
-  id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]
+  id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]; trace?: AgentTrace | null
 }
 export interface Source {
   text: string
@@ -35,11 +35,43 @@ export interface AgentSource extends Source {
   kb_id: string
   db_doc_id?: string
 }
+export interface AgentTraceSummary {
+  duration_ms?: number | null
+  span_count: number
+  tool_count: number
+  model_count: number
+  error_count: number
+}
+export interface AgentTraceSpan {
+  id?: string | null
+  trace_id?: string | null
+  parent_id?: string | null
+  type: string
+  name: string
+  started_at?: string | null
+  ended_at?: string | null
+  duration_ms?: number | null
+  data?: Record<string, unknown>
+  error?: unknown
+}
+export interface AgentTrace {
+  id?: string
+  session_id?: string
+  message_id?: string
+  trace_id: string
+  workflow_name?: string | null
+  group_id?: string | null
+  metadata: Record<string, unknown>
+  spans: AgentTraceSpan[]
+  summary: AgentTraceSummary
+  created_at?: string
+}
 export interface AgentChatResponse {
   answer: string
   session_id: string
   used_kbs: string[]
   sources: AgentSource[]
+  trace?: AgentTrace | null
 }
 export interface ChatStreamMetaEvent { type: 'meta'; session_id: string; sources: Source[] }
 export interface ChatStreamDeltaEvent { type: 'delta'; delta: string }

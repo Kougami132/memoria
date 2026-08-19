@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Protocol
 
 from memoria.agents.state import SourceCollector
 from memoria.agents.tools import AgentKnowledgeTools
@@ -26,9 +28,171 @@ class AgenticRunResult:
     used_kbs: list[str]
 
 
+@dataclass
+class AgentRunnerOutput:
+    answer: str
+    trace: dict | None = None
+
+
 class AgentRunner(Protocol):
-    def run(self, message: str, instructions: str, tools: AgentKnowledgeTools, model_name: str) -> str:
+    def run(
+        self,
+        message: str,
+        instructions: str,
+        tools: AgentKnowledgeTools,
+        model_name: str,
+        session_id: str | None = None,
+    ) -> AgentRunnerOutput | str:
         ...
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _duration_ms(started_at: str | None, ended_at: str | None) -> int | None:
+    start = _parse_timestamp(started_at)
+    end = _parse_timestamp(ended_at)
+    if start is None or end is None:
+        return None
+    return max(0, round((end - start).total_seconds() * 1000))
+
+
+def _span_name(span_data: dict[str, Any]) -> str:
+    span_type = str(span_data.get("type") or "span")
+    if span_data.get("name"):
+        return str(span_data["name"])
+    if span_type == "generation" and span_data.get("model"):
+        return str(span_data["model"])
+    if span_type == "handoff":
+        from_agent = span_data.get("from_agent") or "agent"
+        to_agent = span_data.get("to_agent") or "agent"
+        return f"{from_agent} → {to_agent}"
+    return span_type
+
+
+class _LocalTraceProcessor:
+    """Process-wide local trace collector for the optional OpenAI Agents SDK.
+
+    The Agents SDK registers tracing processors globally. This collector replaces the default
+    OpenAI backend exporter once, stores all traces keyed by trace id, and lets each runner pop
+    the trace it created after the SDK run finishes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._traces: dict[str, dict[str, Any]] = {}
+
+    def on_trace_start(self, trace: Any) -> None:
+        exported = trace.export() or {}
+        trace_id = str(exported.get("id") or trace.trace_id)
+        with self._lock:
+            current = self._traces.setdefault(trace_id, {"trace": exported, "spans": []})
+            current["trace"] = exported
+
+    def on_trace_end(self, trace: Any) -> None:
+        exported = trace.export() or {}
+        trace_id = str(exported.get("id") or trace.trace_id)
+        with self._lock:
+            current = self._traces.setdefault(trace_id, {"trace": exported, "spans": []})
+            current["trace"] = exported
+
+    def on_span_start(self, span: Any) -> None:
+        # We only persist ended spans so duration and error fields are complete.
+        return None
+
+    def on_span_end(self, span: Any) -> None:
+        exported = span.export()
+        if not exported:
+            return
+        normalized = _normalize_span(exported)
+        trace_id = str(normalized.get("trace_id") or "")
+        if not trace_id:
+            return
+        with self._lock:
+            current = self._traces.setdefault(trace_id, {"trace": {"id": trace_id}, "spans": []})
+            current["spans"].append(normalized)
+
+    def shutdown(self) -> None:
+        return None
+
+    def force_flush(self) -> None:
+        return None
+
+    def pop_trace(self, trace_id: str) -> dict | None:
+        with self._lock:
+            payload = self._traces.pop(trace_id, None)
+        if payload is None:
+            return None
+        return _normalize_trace_payload(payload)
+
+
+_LOCAL_TRACE_PROCESSOR = _LocalTraceProcessor()
+_TRACE_PROCESSOR_LOCK = threading.Lock()
+_TRACE_PROCESSOR_CONFIGURED = False
+
+
+def _normalize_span(exported: dict[str, Any]) -> dict:
+    span_data = exported.get("span_data") or {}
+    started_at = exported.get("started_at")
+    ended_at = exported.get("ended_at")
+    return {
+        "id": exported.get("id"),
+        "trace_id": exported.get("trace_id"),
+        "parent_id": exported.get("parent_id"),
+        "type": span_data.get("type") or "span",
+        "name": _span_name(span_data),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": _duration_ms(started_at, ended_at),
+        "data": span_data,
+        "error": exported.get("error"),
+    }
+
+
+def _normalize_trace_payload(payload: dict[str, Any]) -> dict:
+    trace = payload.get("trace") or {}
+    spans = payload.get("spans") or []
+    spans = sorted(spans, key=lambda item: item.get("started_at") or "")
+    starts = [_parse_timestamp(span.get("started_at")) for span in spans]
+    ends = [_parse_timestamp(span.get("ended_at")) for span in spans]
+    valid_starts = [value for value in starts if value is not None]
+    valid_ends = [value for value in ends if value is not None]
+    duration = None
+    if valid_starts and valid_ends:
+        duration = max(0, round((max(valid_ends) - min(valid_starts)).total_seconds() * 1000))
+    error_count = sum(1 for span in spans if span.get("error"))
+    return {
+        "trace_id": trace.get("id"),
+        "workflow_name": trace.get("workflow_name"),
+        "group_id": trace.get("group_id"),
+        "metadata": trace.get("metadata") or {},
+        "spans": spans,
+        "summary": {
+            "duration_ms": duration,
+            "span_count": len(spans),
+            "tool_count": sum(1 for span in spans if span.get("type") == "function"),
+            "model_count": sum(1 for span in spans if span.get("type") in {"generation", "response"}),
+            "error_count": error_count,
+        },
+    }
+
+
+def _ensure_local_trace_processor(set_trace_processors: Any) -> None:
+    global _TRACE_PROCESSOR_CONFIGURED
+    if _TRACE_PROCESSOR_CONFIGURED:
+        return
+    with _TRACE_PROCESSOR_LOCK:
+        if _TRACE_PROCESSOR_CONFIGURED:
+            return
+        # Replace the SDK's default OpenAI backend exporter so traces stay local to Memoria.
+        set_trace_processors([_LOCAL_TRACE_PROCESSOR])
+        _TRACE_PROCESSOR_CONFIGURED = True
 
 
 class OpenAIAgentsRunner:
@@ -42,10 +206,17 @@ class OpenAIAgentsRunner:
         self._base_url = base_url
         self._api_key = api_key
 
-    def run(self, message: str, instructions: str, tools: AgentKnowledgeTools, model_name: str) -> str:
+    def run(
+        self,
+        message: str,
+        instructions: str,
+        tools: AgentKnowledgeTools,
+        model_name: str,
+        session_id: str | None = None,
+    ) -> AgentRunnerOutput:
         try:
             from openai import AsyncOpenAI
-            from agents import Agent, Runner, function_tool, set_tracing_disabled
+            from agents import Agent, RunConfig, Runner, function_tool, gen_trace_id, set_trace_processors
             from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
         except ImportError as e:
             raise AgenticSdkUnavailable(
@@ -53,7 +224,8 @@ class OpenAIAgentsRunner:
                 "or add the optional 'openai-agents' package to enable agentic chat."
             ) from e
 
-        set_tracing_disabled(True)
+        _ensure_local_trace_processor(set_trace_processors)
+        trace_id = gen_trace_id()
 
         @function_tool
         def list_knowledge_bases() -> list[dict]:
@@ -73,10 +245,19 @@ class OpenAIAgentsRunner:
             model=model,
             tools=[list_knowledge_bases, search_knowledge_base],
         )
+        run_config = RunConfig(
+            tracing_disabled=False,
+            trace_include_sensitive_data=False,
+            workflow_name="Memoria agentic chat",
+            trace_id=trace_id,
+            group_id=session_id,
+            trace_metadata={"session_id": session_id, "model": model_name},
+        )
 
-        async def _run() -> str:
-            result = await Runner.run(agent, message)
-            return str(result.final_output)
+        async def _run() -> AgentRunnerOutput:
+            result = await Runner.run(agent, message, run_config=run_config)
+            trace = _LOCAL_TRACE_PROCESSOR.pop_trace(trace_id)
+            return AgentRunnerOutput(answer=str(result.final_output), trace=trace)
 
         try:
             return asyncio.run(_run())
@@ -91,10 +272,17 @@ class OpenAIAgentsRunner:
 class MockAgentRunner:
     """Deterministic no-network runner used when USE_MOCK=true."""
 
-    def run(self, message: str, instructions: str, tools: AgentKnowledgeTools, model_name: str) -> str:
+    def run(
+        self,
+        message: str,
+        instructions: str,
+        tools: AgentKnowledgeTools,
+        model_name: str,
+        session_id: str | None = None,
+    ) -> AgentRunnerOutput:
         for kb in tools.list_knowledge_bases():
             tools.search_knowledge_base(kb["id"], message, top_k=3)
-        return "[mock agentic response]"
+        return AgentRunnerOutput(answer="[mock agentic response]")
 
 
 @dataclass
@@ -134,18 +322,26 @@ class AgenticRagEngine:
         runner = self.runner or self._default_runner(effective)
         instructions = self._instructions(effective)
         logger.debug("agentic chat: session=%s allowed_kbs=%s history=%s", session_id, allowed_kb_ids, len(history))
-        answer = runner.run(prompt, instructions, tools, effective["llm_model"])
+        runner_output = runner.run(prompt, instructions, tools, effective["llm_model"], session_id=session_id)
+        if isinstance(runner_output, AgentRunnerOutput):
+            answer = runner_output.answer
+            trace = runner_output.trace
+        else:
+            answer = str(runner_output)
+            trace = None
         sources = collector.list_sources()
         used_kbs = collector.used_kbs()
 
         self.db.add_message(session_id, "user", message)
-        self.db.add_message(session_id, "assistant", answer, sources=sources)
+        assistant_message = self.db.add_message(session_id, "assistant", answer, sources=sources)
+        stored_trace = self.db.add_message_trace(session_id, assistant_message["id"], trace) if trace else None
 
         return {
             "answer": answer,
             "session_id": session_id,
             "used_kbs": used_kbs,
             "sources": sources,
+            "trace": stored_trace,
         }
 
     def _build_prompt(self, message: str, history: list[dict]) -> str:

@@ -269,12 +269,42 @@ def test_delete_session_cascades_messages(tmp_path):
     bot = db.create_bot("b")
     session = db.create_session(bot["id"])
     db.add_message(session["id"], "user", "hello")
-    db.add_message(session["id"], "assistant", "hi")
+    assistant = db.add_message(session["id"], "assistant", "hi")
+    db.add_message_trace(session["id"], assistant["id"], {
+        "trace_id": "trace-1",
+        "workflow_name": "workflow",
+        "group_id": session["id"],
+        "metadata": {"model": "test"},
+        "spans": [{"id": "span-1", "type": "function", "name": "tool"}],
+        "summary": {"span_count": 1, "tool_count": 1, "model_count": 0, "error_count": 0},
+    })
+
+    messages = db.get_messages_all(session["id"])
+    assert messages[1]["trace"]["trace_id"] == "trace-1"
+    assert messages[1]["trace"]["metadata"] == {"model": "test"}
 
     db.delete_session(session["id"])
 
     assert db.get_session(session["id"]) is None
     assert db.get_messages_all(session["id"]) == []
+    assert db.get_message_trace(assistant["id"]) is None
+
+
+def test_legacy_session_migration_keeps_message_trace_fk_to_sessions(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, created_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO sessions VALUES ('session-1', 'bot-1', '2026-08-18T00:00:00+00:00')")
+    conn.commit()
+    conn.close()
+
+    DB(str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    fk_targets = [row[2] for row in conn.execute("PRAGMA foreign_key_list(message_traces)")]
+    conn.close()
+    assert "sessions" in fk_targets
+    assert "sessions_legacy" not in fk_targets
 
 
 def test_delete_session_nonexistent_is_noop(tmp_path):

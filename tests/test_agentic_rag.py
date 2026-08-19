@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from memoria.agents.engine import AgenticRagEngine, OpenAIAgentsRunner
+from memoria.agents.engine import AgentRunnerOutput, AgenticRagEngine, OpenAIAgentsRunner
 from memoria.agents.state import SourceCollector
 from memoria.agents.tools import AgentKnowledgeTools, KnowledgeBaseAccessError
 from memoria.config import get_effective_settings
@@ -18,7 +18,7 @@ class FakeRunner:
     def __init__(self):
         self.calls = []
 
-    def run(self, message, instructions, tools, model_name):
+    def run(self, message, instructions, tools, model_name, session_id=None):
         kbs = tools.list_knowledge_bases()
         self.calls.append({
             "message": message,
@@ -30,7 +30,30 @@ class FakeRunner:
             if kb["document_count"]:
                 tools.search_knowledge_base(kb["id"], message, top_k=2)
                 break
-        return "agent answer"
+        return AgentRunnerOutput(
+            answer="agent answer",
+            trace={
+                "trace_id": "trace-fake",
+                "workflow_name": "Memoria agentic chat",
+                "group_id": session_id,
+                "metadata": {"session_id": session_id, "model": model_name},
+                "spans": [
+                    {
+                        "id": "span-tool",
+                        "trace_id": "trace-fake",
+                        "parent_id": None,
+                        "type": "function",
+                        "name": "search_knowledge_base",
+                        "started_at": None,
+                        "ended_at": None,
+                        "duration_ms": None,
+                        "data": {"name": "search_knowledge_base"},
+                        "error": None,
+                    }
+                ],
+                "summary": {"duration_ms": None, "span_count": 1, "tool_count": 1, "model_count": 0, "error_count": 0},
+            },
+        )
 
 
 class FakeRetrievePipeline:
@@ -122,7 +145,17 @@ def test_openai_agents_runner_imports_sdk_and_returns_final_output(monkeypatch):
         def search_knowledge_base(self, kb_id: str, query: str, top_k: int = 5):
             return []
 
-    async def fake_run(agent, message):
+    async def fake_run(agent, message, *, run_config=None, **kwargs):
+        assert run_config is not None
+        with agents.trace(
+            run_config.workflow_name,
+            trace_id=run_config.trace_id,
+            group_id=run_config.group_id,
+            metadata=run_config.trace_metadata,
+        ):
+            with agents.function_span("search_knowledge_base", input="{}", output="[]"):
+                pass
+
         class Result:
             final_output = "sdk answer"
 
@@ -132,7 +165,15 @@ def test_openai_agents_runner_imports_sdk_and_returns_final_output(monkeypatch):
 
     runner = OpenAIAgentsRunner("http://localhost/v1", "test-key")
 
-    assert runner.run("hello", "instructions", FakeTools(), "gpt-4o-mini") == "sdk answer"
+    output = runner.run("hello", "instructions", FakeTools(), "gpt-4o-mini", session_id="session-1")
+
+    assert output.answer == "sdk answer"
+    assert output.trace is not None
+    assert output.trace["workflow_name"] == "Memoria agentic chat"
+    assert output.trace["group_id"] == "session-1"
+    assert output.trace["metadata"] == {"session_id": "session-1", "model": "gpt-4o-mini"}
+    assert output.trace["summary"]["tool_count"] == 1
+    assert output.trace["spans"][0]["type"] == "function"
 
 
 def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_path):
@@ -151,6 +192,9 @@ def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_pa
     data = response.json()
     assert data["answer"] == "agent answer"
     assert data["session_id"]
+    assert data["trace"]["trace_id"] == "trace-fake"
+    assert data["trace"]["group_id"] == data["session_id"]
+    assert data["trace"]["summary"]["tool_count"] == 1
     assert [kb["id"] for kb in runner.calls[0]["kbs"]] == [kb_bound["id"], kb_unbound["id"]]
     assert runner.calls[0]["message"] == "hello"
     assert "independent agentic RAG assistant" in runner.calls[0]["instructions"]
@@ -165,6 +209,9 @@ def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_pa
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[1]["content"] == "agent answer"
     assert messages[1]["sources"][0]["kb_id"] == kb_unbound["id"]
+    assert messages[1]["trace"]["trace_id"] == "trace-fake"
+    assert messages[1]["trace"]["message_id"] == messages[1]["id"]
+    assert messages[1]["trace"]["summary"]["tool_count"] == 1
 
     assert client.get(f"/api/sessions/{data['session_id']}/messages").status_code == 404
     assert client.post(f"/api/chat/{bot['id']}", json={"message": "hello classic"}).status_code == 200

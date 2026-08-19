@@ -94,6 +94,20 @@ class MessageRow(Base):
     created_at = Column(String, nullable=False)
 
 
+class MessageTraceRow(Base):
+    __tablename__ = "message_traces"
+    id = Column(String, primary_key=True)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=False)
+    message_id = Column(String, ForeignKey("messages.id"), nullable=False)
+    trace_id = Column(String, nullable=False)
+    workflow_name = Column(String, nullable=True)
+    group_id = Column(String, nullable=True)
+    trace_metadata = Column("metadata", Text, nullable=True)
+    spans = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    created_at = Column(String, nullable=False)
+
+
 class RuntimeSettingRow(Base):
     __tablename__ = "runtime_settings"
     key = Column(String, primary_key=True)
@@ -191,6 +205,21 @@ class DB:
                 ))
                 conn.execute(text("DROP TABLE sessions_legacy"))
                 conn.execute(text("PRAGMA foreign_keys=ON"))
+                conn.commit()
+            trace_fk_targets = [r[2] for r in conn.execute(text("PRAGMA foreign_key_list(message_traces)"))]
+            if "sessions_legacy" in trace_fk_targets:
+                # The new trace table may have been created before the legacy sessions-table
+                # rebuild above; SQLite rewrites FK targets on table rename, so rebuild it
+                # once more to point traces at the final sessions table.
+                conn.execute(text("ALTER TABLE message_traces RENAME TO message_traces_legacy"))
+                MessageTraceRow.__table__.create(conn)
+                conn.execute(text(
+                    "INSERT INTO message_traces "
+                    "(id, session_id, message_id, trace_id, workflow_name, group_id, metadata, spans, summary, created_at) "
+                    "SELECT id, session_id, message_id, trace_id, workflow_name, group_id, metadata, spans, summary, created_at "
+                    "FROM message_traces_legacy"
+                ))
+                conn.execute(text("DROP TABLE message_traces_legacy"))
                 conn.commit()
         self._Session = sessionmaker(bind=engine)
         self._backfill_missing_session_titles()
@@ -308,6 +337,7 @@ class DB:
         with self._s() as s:
             session_ids = [r.id for r in s.query(SessionRow).filter(SessionRow.bot_id == bot_id).all()]
             if session_ids:
+                s.query(MessageTraceRow).filter(MessageTraceRow.session_id.in_(session_ids)).delete(synchronize_session=False)
                 s.query(MessageRow).filter(MessageRow.session_id.in_(session_ids)).delete(synchronize_session=False)
             s.query(SessionRow).filter(SessionRow.bot_id == bot_id).delete()
             s.query(BotKBLink).filter(BotKBLink.bot_id == bot_id).delete()
@@ -432,11 +462,26 @@ class DB:
             s.flush()
             return self._session_dict(row)
 
-    def _msg_dict(self, r: MessageRow) -> dict:
+    def _trace_dict(self, r: MessageTraceRow) -> dict:
+        return {
+            "id": r.id,
+            "session_id": r.session_id,
+            "message_id": r.message_id,
+            "trace_id": r.trace_id,
+            "workflow_name": r.workflow_name,
+            "group_id": r.group_id,
+            "metadata": json.loads(r.trace_metadata) if r.trace_metadata else {},
+            "spans": json.loads(r.spans) if r.spans else [],
+            "summary": json.loads(r.summary) if r.summary else {},
+            "created_at": r.created_at,
+        }
+
+    def _msg_dict(self, r: MessageRow, trace: dict | None = None) -> dict:
         return {
             "id": r.id, "session_id": r.session_id, "role": r.role,
             "content": r.content, "created_at": r.created_at,
             "sources": json.loads(r.sources) if r.sources else [],
+            "trace": trace,
         }
 
     def get_messages(self, session_id: str, limit: int = 10) -> list[dict]:
@@ -448,12 +493,33 @@ class DB:
                     .all())
             return [self._msg_dict(r) for r in reversed(rows)]
 
-    def add_message(self, session_id: str, role: str, content: str, sources: list | None = None) -> None:
+    def add_message(self, session_id: str, role: str, content: str, sources: list | None = None) -> dict:
         with self._s() as s:
-            s.add(MessageRow(id=_uid(), session_id=session_id, role=role,
+            row = MessageRow(id=_uid(), session_id=session_id, role=role,
                              content=content,
                              sources=json.dumps(sources, ensure_ascii=False) if sources else None,
-                             created_at=_now()))
+                             created_at=_now())
+            s.add(row)
+            s.flush()
+            return self._msg_dict(row)
+
+    def add_message_trace(self, session_id: str, message_id: str, trace: dict) -> dict:
+        with self._s() as s:
+            row = MessageTraceRow(
+                id=_uid(),
+                session_id=session_id,
+                message_id=message_id,
+                trace_id=trace.get("trace_id") or _uid(),
+                workflow_name=trace.get("workflow_name"),
+                group_id=trace.get("group_id"),
+                trace_metadata=json.dumps(trace.get("metadata") or {}, ensure_ascii=False, default=str),
+                spans=json.dumps(trace.get("spans") or [], ensure_ascii=False, default=str),
+                summary=json.dumps(trace.get("summary") or {}, ensure_ascii=False, default=str),
+                created_at=_now(),
+            )
+            s.add(row)
+            s.flush()
+            return self._trace_dict(row)
 
     # -- Runtime Settings ---------------------------------------------------
 
@@ -503,10 +569,25 @@ class DB:
                     .filter(MessageRow.session_id == session_id)
                     .order_by(MessageRow.created_at)
                     .all())
-            return [self._msg_dict(r) for r in rows]
+            message_ids = [r.id for r in rows]
+            traces = {}
+            if message_ids:
+                trace_rows = (s.query(MessageTraceRow)
+                              .filter(MessageTraceRow.message_id.in_(message_ids))
+                              .all())
+                traces = {r.message_id: self._trace_dict(r) for r in trace_rows}
+            return [self._msg_dict(r, trace=traces.get(r.id)) for r in rows]
+
+    def get_message_trace(self, message_id: str) -> dict | None:
+        with self._s() as s:
+            row = (s.query(MessageTraceRow)
+                   .filter(MessageTraceRow.message_id == message_id)
+                   .first())
+            return self._trace_dict(row) if row else None
 
     def delete_session(self, session_id: str) -> None:
         with self._s() as s:
+            s.query(MessageTraceRow).filter(MessageTraceRow.session_id == session_id).delete(synchronize_session=False)
             s.query(MessageRow).filter(MessageRow.session_id == session_id).delete(synchronize_session=False)
             row = s.get(SessionRow, session_id)
             if row:

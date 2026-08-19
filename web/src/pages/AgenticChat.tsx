@@ -5,7 +5,7 @@ import type { Components } from 'react-markdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { BookOpen, BrainCircuit, ChevronDown, ChevronUp, Pencil, Plus, Send, Sparkles, Trash2 } from 'lucide-react'
+import { Activity, AlertCircle, Bot, BookOpen, BrainCircuit, ChevronDown, ChevronUp, Clock3, Cpu, FileJson, Pencil, Plus, Send, Sparkles, Trash2, Wrench } from 'lucide-react'
 import * as api from '@/api'
 import type { Source } from '@/api'
 
@@ -33,6 +33,7 @@ interface DisplayMessage {
   content: string
   sources?: Source[]
   usedKbs?: string[]
+  trace?: api.AgentTrace | null
 }
 
 function SourceList({ sources, getKnowledgeBaseName }: { sources: Source[]; getKnowledgeBaseName: (id: string) => string }) {
@@ -86,6 +87,84 @@ function UsedKnowledgeBases({ ids, getKnowledgeBaseName }: { ids: string[]; getK
   )
 }
 
+
+function formatDuration(ms?: number | null) {
+  if (ms == null) return '—'
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+}
+
+function formatTraceJson(value: unknown) {
+  if (value == null) return ''
+  const formatted = JSON.stringify(value, null, 2)
+  if (!formatted || formatted === '{}' || formatted === '[]') return ''
+  return formatted.length > 1200 ? `${formatted.slice(0, 1200)}…` : formatted
+}
+
+function TraceSpanIcon({ type, hasError }: { type: string; hasError: boolean }) {
+  if (hasError) return <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+  if (type === 'function') return <Wrench className="h-3.5 w-3.5 text-blue-500" />
+  if (type === 'generation' || type === 'response') return <Cpu className="h-3.5 w-3.5 text-purple-500" />
+  if (type === 'agent') return <Bot className="h-3.5 w-3.5 text-emerald-500" />
+  return <FileJson className="h-3.5 w-3.5 text-muted-foreground" />
+}
+
+function TracePanel({ trace }: { trace: api.AgentTrace }) {
+  const [open, setOpen] = useState(false)
+  const summary = trace.summary
+  const spans = trace.spans || []
+  const hasErrors = (summary?.error_count || 0) > 0
+
+  return (
+    <div className="ml-1 mt-2">
+      <button
+        className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setOpen(value => !value)}
+      >
+        <Activity className="h-3 w-3" />
+        <span>执行轨迹 / Trace</span>
+        <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">{summary?.span_count ?? spans.length} steps</Badge>
+        <span className="inline-flex items-center gap-1"><Clock3 className="h-3 w-3" />{formatDuration(summary?.duration_ms)}</span>
+        {summary?.tool_count ? <span>工具 {summary.tool_count}</span> : null}
+        {summary?.model_count ? <span>模型 {summary.model_count}</span> : null}
+        {hasErrors ? <span className="text-destructive">错误 {summary.error_count}</span> : null}
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 rounded-xl border bg-muted/20 p-2 text-xs shadow-sm">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-muted-foreground">
+            <span>Trace ID: <code className="font-mono">{trace.trace_id}</code></span>
+            {trace.workflow_name && <span>Workflow: {trace.workflow_name}</span>}
+          </div>
+          {spans.length ? (
+            <div className="space-y-1.5">
+              {spans.map((span, index) => {
+                const dataJson = formatTraceJson(span.data)
+                const errorJson = formatTraceJson(span.error)
+                return (
+                  <div key={span.id || `${span.name}-${index}`} className="rounded-lg border bg-card px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <TraceSpanIcon type={span.type} hasError={Boolean(span.error)} />
+                        <span className="truncate font-medium">{span.name}</span>
+                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">{span.type}</Badge>
+                      </div>
+                      <span className="shrink-0 text-muted-foreground">{formatDuration(span.duration_ms)}</span>
+                    </div>
+                    {errorJson && <pre className="mt-2 overflow-x-auto rounded bg-destructive/10 p-2 font-mono text-[11px] text-destructive">{errorJson}</pre>}
+                    {dataJson && <pre className="mt-2 max-h-44 overflow-auto rounded bg-muted p-2 font-mono text-[11px] text-muted-foreground">{dataJson}</pre>}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="px-1 py-2 text-muted-foreground">本次运行没有可展示的 span。</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AgenticChat() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<DisplayMessage[]>([])
@@ -134,6 +213,7 @@ export default function AgenticChat() {
         usedKbs: message.role === 'assistant'
           ? [...new Set(message.sources.flatMap(source => source.kb_id ? [source.kb_id] : []))]
           : undefined,
+        trace: message.trace,
       })))
     } catch {
       setMessages([])
@@ -186,6 +266,7 @@ export default function AgenticChat() {
           assistant.content = response.answer
           assistant.sources = response.sources
           assistant.usedKbs = response.used_kbs
+          assistant.trace = response.trace
         }
         return next
       })
@@ -341,6 +422,7 @@ export default function AgenticChat() {
                     </div>
                     <UsedKnowledgeBases ids={message.usedKbs || []} getKnowledgeBaseName={getKnowledgeBaseName} />
                     {message.sources && <SourceList sources={message.sources} getKnowledgeBaseName={getKnowledgeBaseName} />}
+                    {message.trace && <TracePanel trace={message.trace} />}
                   </div>
                 </div>
               ) : (
