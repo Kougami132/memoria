@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+import copy
 import json
 import logging
 import threading
@@ -447,7 +448,7 @@ class OpenAIAgentsRunner:
                         "ended_at": None,
                         "duration_ms": None,
                         "data": {
-                            "input": messages,
+                            "input": copy.deepcopy(messages),
                         },
                         "error": None,
                     }
