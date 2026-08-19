@@ -197,7 +197,7 @@ def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_pa
     assert data["trace"]["summary"]["tool_count"] == 1
     assert [kb["id"] for kb in runner.calls[0]["kbs"]] == [kb_bound["id"], kb_unbound["id"]]
     assert runner.calls[0]["message"] == "hello"
-    assert "independent agentic RAG assistant" in runner.calls[0]["instructions"]
+    assert "independent AI Agent assistant" in runner.calls[0]["instructions"]
 
     sessions = client.get("/api/agent-sessions").json()
     assert sessions[0]["id"] == data["session_id"]

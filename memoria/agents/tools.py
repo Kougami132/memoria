@@ -10,6 +10,19 @@ if TYPE_CHECKING:
     from memoria.storage.db import DB
 
 
+
+TOOL_METADATA: dict[str, dict[str, str]] = {
+    "list_knowledge_bases": {
+        "label": "查询可用知识库",
+        "description": "获取当前允许访问的所有知识库元数据与文档总数",
+    },
+    "search_knowledge_base": {
+        "label": "检索知识库内容",
+        "description": "在指定知识库中执行向量与关键字混合检索，返回高相关文本片段",
+    },
+}
+
+
 class KnowledgeBaseAccessError(ValueError):
     """Raised when the agent tries to access a KB outside its allowed scope."""
 

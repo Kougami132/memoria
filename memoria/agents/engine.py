@@ -137,10 +137,33 @@ _TRACE_PROCESSOR_LOCK = threading.Lock()
 _TRACE_PROCESSOR_CONFIGURED = False
 
 
+
+def _extract_reasoning_content(span_data: dict[str, Any]) -> str | None:
+    """Extract reasoning / thought text if present from generation output."""
+    output = span_data.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if isinstance(item, dict):
+                if item.get("reasoning_content"):
+                    return str(item["reasoning_content"])
+                if item.get("thought"):
+                    return str(item["thought"])
+                if item.get("reasoning"):
+                    return str(item["reasoning"])
+    elif isinstance(output, dict):
+        if output.get("reasoning_content"):
+            return str(output["reasoning_content"])
+        if output.get("thought"):
+            return str(output["thought"])
+        if output.get("reasoning"):
+            return str(output["reasoning"])
+    return None
+
 def _normalize_span(exported: dict[str, Any]) -> dict:
     span_data = exported.get("span_data") or {}
     started_at = exported.get("started_at")
     ended_at = exported.get("ended_at")
+    reasoning = _extract_reasoning_content(span_data)
     return {
         "id": exported.get("id"),
         "trace_id": exported.get("trace_id"),
@@ -150,6 +173,7 @@ def _normalize_span(exported: dict[str, Any]) -> dict:
         "started_at": started_at,
         "ended_at": ended_at,
         "duration_ms": _duration_ms(started_at, ended_at),
+        "reasoning": reasoning,
         "data": span_data,
         "error": exported.get("error"),
     }
@@ -240,7 +264,7 @@ class OpenAIAgentsRunner:
         client = AsyncOpenAI(base_url=self._base_url, api_key=self._api_key)
         model = OpenAIChatCompletionsModel(model=model_name, openai_client=client)
         agent = Agent(
-            name="Memoria Agentic RAG",
+            name="Memoria AI Agent",
             instructions=instructions,
             model=model,
             tools=[list_knowledge_bases, search_knowledge_base],
@@ -369,7 +393,7 @@ class AgenticRagEngine:
         base_prompt = effective.get("system_prompt") or ""
         return (
             f"{base_prompt}\n\n"
-            "You are Memoria's independent agentic RAG assistant. You can access every knowledge "
+            "You are Memoria's independent AI Agent assistant. You can access every knowledge "
             "base available in the system. When the user asks about stored knowledge, first inspect "
             "available knowledge bases with list_knowledge_bases, then search the most relevant ones "
             "with search_knowledge_base. Use retrieved evidence when available. If the retrieved "

@@ -13,7 +13,7 @@
 3. **可集成第一** — 现有系统只需调 HTTP 接口即可接入 Bot 能力
 4. **引擎与交互层完全解耦** — RAG 引擎是独立的 Python 库，服务 / CLI 都导入它
 5. **Bot 是核心抽象** — 每个 Bot 是一个独立 AI 助手，可关联多个知识库，对外暴露统一对话入口
-6. **渐进式演进** — Phase 1 手写简单 RAG Loop 跑通全流程，Phase 2 引入 Agent SDK 升级为 Agentic RAG
+6. **渐进式演进** — Phase 1 手写简单 RAG Loop 跑通全流程，Phase 2 引入 Agent SDK 升级为 AI Agent
 
 ---
 
@@ -396,7 +396,7 @@ memoria/
 | 运行时设置覆盖 | ✅ |
 | 会话删除 | ✅ |
 
-### Phase 2 — Agentic RAG（待规划）
+### Phase 2 — AI Agent（待规划）
 
 | 组件 | 说明 |
 |------|------|

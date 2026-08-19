@@ -135,11 +135,199 @@ function TraceSpanIcon({ type, hasError }: { type: string; hasError: boolean }) 
   return <FileJson className="h-3.5 w-3.5 text-muted-foreground" />
 }
 
-function TracePanel({ trace }: { trace: api.AgentTrace }) {
+
+const TOOL_CN_MAP: Record<string, { label: string; icon: string; desc?: string }> = {
+  list_knowledge_bases: {
+    label: '查询可用知识库',
+    icon: 'search',
+    desc: '获取系统所有可用知识库及其文档数量',
+  },
+  search_knowledge_base: {
+    label: '检索知识库内容',
+    icon: 'book-open',
+    desc: '执行多路混合向量召回与关键词匹配',
+  },
+}
+
+function getToolDisplayInfo(name: string, type: string) {
+  if (TOOL_CN_MAP[name]) {
+    return TOOL_CN_MAP[name]
+  }
+  if (type === 'function') {
+    // Human readable fallback for future custom tools: format snake_case to Chinese / title case
+    const readable = name
+      .replace(/_/g, ' ')
+      .replace(/^./, str => str.toUpperCase())
+    return { label: `执行工具: ${readable}`, icon: 'wrench' }
+  }
+  if (type === 'generation' || type === 'response') {
+    return { label: '模型思考与回复生成', icon: 'cpu' }
+  }
+  if (type === 'agent') {
+    return { label: 'Agent 路由流转', icon: 'bot' }
+  }
+  return { label: name || '执行步骤', icon: 'file-json' }
+}
+
+function SpanDataView({ span, getKnowledgeBaseName }: { span: api.AgentTraceSpan; getKnowledgeBaseName: (id: string) => string }) {
+  const [showRaw, setShowRaw] = useState(false)
+  const data = (span.data || {}) as Record<string, any>
+  const isFunction = span.type === 'function'
+  const isGeneration = span.type === 'generation' || span.type === 'response'
+
+  // Extract function input & output for structured rendering
+  const fnInput = data.input || {}
+  const fnOutput = data.output
+
+  const renderHumanContent = () => {
+    if (span.reasoning) {
+      return (
+        <div className="mt-2 space-y-1.5 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-xs">
+          <div className="flex items-center gap-1.5 font-medium text-purple-600 dark:text-purple-400">
+            <BrainCircuit className="h-3.5 w-3.5" />
+            <span>深度思维链 (Chain of Thought)</span>
+          </div>
+          <div className="text-foreground/90 whitespace-pre-wrap leading-relaxed font-sans text-xs bg-background/60 p-2.5 rounded-md border border-border/40">
+            {span.reasoning}
+          </div>
+        </div>
+      )
+    }
+
+    if (span.name === 'search_knowledge_base') {
+      const kbName = fnInput.kb_id ? getKnowledgeBaseName(fnInput.kb_id) : fnInput.kb_id
+      const query = fnInput.query
+      const topK = fnInput.top_k
+      const resultList = Array.isArray(fnOutput) ? fnOutput : []
+
+      return (
+        <div className="mt-2 space-y-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-muted-foreground bg-muted/50 p-2 rounded-md border border-border/40">
+            <span>目标知识库: <strong className="text-foreground font-medium">{kbName || '全部'}</strong></span>
+            {query && <span>检索关键词: <code className="bg-background px-1.5 py-0.5 rounded text-foreground font-mono">{query}</code></span>}
+            {topK && <span>Top K: <span className="text-foreground font-mono">{topK}</span></span>}
+            <Badge variant="outline" className="text-[10px] ml-auto">命中 {resultList.length} 条片段</Badge>
+          </div>
+          {resultList.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              {resultList.slice(0, 3).map((item: any, idx: number) => (
+                <div key={idx} className="rounded-md border border-border/60 bg-muted/20 p-2 text-[11px] space-y-1">
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span className="font-mono truncate max-w-[240px]">{item.filename || item.doc_id || `片段 #${idx + 1}`}</span>
+                    {item.score != null && (
+                      <span className="text-[10px] text-purple-600 dark:text-purple-400">匹配度 {(item.score * 100).toFixed(0)}%</span>
+                    )}
+                  </div>
+                  {item.text && <p className="text-muted-foreground/90 line-clamp-2 leading-relaxed">{item.text}</p>}
+                </div>
+              ))}
+              {resultList.length > 3 && (
+                <div className="text-[10px] text-muted-foreground text-center py-0.5">
+                  已收起剩余 {resultList.length - 3} 条检索片段
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (span.name === 'list_knowledge_bases') {
+      const kbList = Array.isArray(fnOutput) ? fnOutput : []
+      return (
+        <div className="mt-2 text-xs bg-muted/50 p-2.5 rounded-md border border-border/40 space-y-1.5">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>发现系统可用知识库</span>
+            <Badge variant="secondary" className="text-[10px]">{kbList.length} 个知识库</Badge>
+          </div>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {kbList.map((kb: any) => (
+              <span key={kb.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-background border border-border text-[11px]">
+                <BookOpen className="w-3 h-3 text-muted-foreground" />
+                <span className="font-medium text-foreground">{kb.name}</span>
+                <span className="text-[10px] text-muted-foreground">({kb.document_count ?? 0}篇)</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    if (isGeneration) {
+      const usage = data.usage || {}
+      const model = data.model || span.name
+      return (
+        <div className="mt-2 text-xs bg-muted/40 p-2.5 rounded-md border border-border/40 space-y-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
+            <span>模型引擎: <strong className="text-foreground">{model}</strong></span>
+            {usage.total_tokens ? (
+              <span className="text-[11px] font-mono">
+                Tokens: {usage.prompt_tokens ?? 0} in / {usage.completion_tokens ?? 0} out (总计 {usage.total_tokens})
+              </span>
+            ) : null}
+          </div>
+        </div>
+      )
+    }
+
+    // Default friendly view for other function tools
+    if (isFunction) {
+      return (
+        <div className="mt-2 text-xs bg-muted/40 p-2.5 rounded-md border border-border/40 space-y-1">
+          {Object.keys(fnInput).length > 0 && (
+            <div className="text-muted-foreground">
+              <span>调用入参: </span>
+              <code className="bg-background px-1.5 py-0.5 rounded text-foreground font-mono text-[11px]">
+                {JSON.stringify(fnInput)}
+              </code>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    return null
+  }
+
+  const rawJson = formatTraceJson(span.data)
+  const errorJson = formatTraceJson(span.error)
+
+  return (
+    <div className="space-y-1.5">
+      {renderHumanContent()}
+      
+      {errorJson && (
+        <pre className="mt-2 overflow-x-auto rounded bg-destructive/10 p-2 font-mono text-[11px] text-destructive">
+          {errorJson}
+        </pre>
+      )}
+
+      {/* Toggle raw JSON inspection */}
+      <div className="pt-1 flex items-center justify-end">
+        <button
+          onClick={() => setShowRaw(!showRaw)}
+          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+        >
+          <FileJson className="h-3 w-3" />
+          <span>{showRaw ? '收起底层 JSON' : '查看原始 JSON'}</span>
+        </button>
+      </div>
+
+      {showRaw && rawJson && (
+        <pre className="mt-1.5 max-h-48 overflow-auto rounded bg-muted/80 p-2.5 font-mono text-[11px] text-muted-foreground border border-border">
+          {rawJson}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+function TracePanel({ trace, getKnowledgeBaseName }: { trace: api.AgentTrace; getKnowledgeBaseName: (id: string) => string }) {
   const [open, setOpen] = useState(false)
   const summary = trace.summary
   const spans = trace.spans || []
   const hasErrors = (summary?.error_count || 0) > 0
+  const hasReasoning = spans.some(s => Boolean(s.reasoning))
 
   return (
     <div className="mt-2.5">
@@ -149,6 +337,12 @@ function TracePanel({ trace }: { trace: api.AgentTrace }) {
       >
         <Activity className="h-3.5 w-3.5 text-purple-500" />
         <span className="font-medium text-foreground">思考与执行轨迹</span>
+        {hasReasoning && (
+          <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20 text-[10px] px-1.5 py-0 flex items-center gap-1">
+            <BrainCircuit className="h-2.5 w-2.5" />
+            包含思维链
+          </Badge>
+        )}
         <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
           {summary?.span_count ?? spans.length} 步
         </Badge>
@@ -168,24 +362,28 @@ function TracePanel({ trace }: { trace: api.AgentTrace }) {
             {trace.workflow_name && <span>Workflow: {trace.workflow_name}</span>}
           </div>
           {spans.length ? (
-            <div className="space-y-1.5 pt-1">
+            <div className="space-y-2 pt-1">
               {spans.map((span, index) => {
-                const dataJson = formatTraceJson(span.data)
-                const errorJson = formatTraceJson(span.error)
+                const info = getToolDisplayInfo(span.name, span.type)
                 return (
-                  <div key={span.id || `${span.name}-${index}`} className="rounded-lg border border-border bg-background p-2.5">
+                  <div key={span.id || `${span.name}-${index}`} className="rounded-lg border border-border bg-background p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-2">
                         <TraceSpanIcon type={span.type} hasError={Boolean(span.error)} />
-                        <span className="truncate font-medium text-foreground">{span.name}</span>
+                        <span className="truncate font-semibold text-foreground">{info.label}</span>
+                        {span.name !== info.label && (
+                          <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[140px]">
+                            ({span.name})
+                          </span>
+                        )}
                         <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
                           {span.type}
                         </Badge>
                       </div>
                       <span className="shrink-0 text-muted-foreground text-[11px]">{formatDuration(span.duration_ms)}</span>
                     </div>
-                    {errorJson && <pre className="mt-2 overflow-x-auto rounded bg-destructive/10 p-2 font-mono text-[11px] text-destructive">{errorJson}</pre>}
-                    {dataJson && <pre className="mt-2 max-h-44 overflow-auto rounded bg-muted p-2 font-mono text-[11px] text-muted-foreground">{dataJson}</pre>}
+
+                    <SpanDataView span={span} getKnowledgeBaseName={getKnowledgeBaseName} />
                   </div>
                 )
               })}
@@ -198,6 +396,7 @@ function TracePanel({ trace }: { trace: api.AgentTrace }) {
     </div>
   )
 }
+
 
 export default function AgenticChat() {
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -374,7 +573,7 @@ export default function AgenticChat() {
         <div className="p-3 border-b border-border/80 space-y-1.5">
           <div className="flex items-center gap-2 px-1">
             <Sparkles className="w-4 h-4 text-purple-500" />
-            <span className="text-sm font-semibold">Agentic RAG</span>
+            <span className="text-sm font-semibold">AI Agent</span>
           </div>
           <p className="text-[11px] text-muted-foreground px-1 leading-relaxed">
             多知识库协同决策与自主推理
@@ -464,7 +663,7 @@ export default function AgenticChat() {
         {/* Top Header */}
         <header className="h-12 border-b border-border/60 flex items-center justify-between px-6 shrink-0 bg-background/80 backdrop-blur-xs">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm">Agentic 智能推理</span>
+            <span className="font-semibold text-sm">AI Agent 智能推理</span>
             <Badge variant="outline" className="text-[11px] font-normal text-muted-foreground gap-1">
               <Sparkles className="w-3 h-3 text-purple-500" />
               Agentic Mode
@@ -488,7 +687,7 @@ export default function AgenticChat() {
                   <BrainCircuit className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
-                  <h2 className="text-xl font-semibold tracking-tight">Agentic RAG 自主推理模式</h2>
+                  <h2 className="text-xl font-semibold tracking-tight">AI Agent 自主推理模式</h2>
                   <p className="text-sm text-muted-foreground max-w-md">
                     智能体将根据问题自主调度多个知识库，执行多步推理并追踪每一步工具调用。
                   </p>
@@ -539,7 +738,7 @@ export default function AgenticChat() {
 
                       <UsedKnowledgeBases ids={message.usedKbs || []} getKnowledgeBaseName={getKnowledgeBaseName} />
                       {message.sources && <SourceList sources={message.sources} getKnowledgeBaseName={getKnowledgeBaseName} />}
-                      {message.trace && <TracePanel trace={message.trace} />}
+                      {message.trace && <TracePanel trace={message.trace} getKnowledgeBaseName={getKnowledgeBaseName} />}
 
                       {/* Action buttons (Copy) */}
                       {message.content && !sendMutation.isPending && (
@@ -570,7 +769,7 @@ export default function AgenticChat() {
               <textarea
                 ref={textareaRef}
                 rows={1}
-                placeholder="给 Agentic RAG 发送消息…"
+                placeholder="给 AI Agent 发送消息…"
                 value={input}
                 onChange={event => setInput(event.target.value)}
                 onKeyDown={handleKeyDown}

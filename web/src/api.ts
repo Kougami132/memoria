@@ -37,6 +37,7 @@ export interface AgentSource extends Source {
 }
 export interface AgentTraceSummary {
   duration_ms?: number | null
+  reasoning?: string | null
   span_count: number
   tool_count: number
   model_count: number
@@ -51,6 +52,7 @@ export interface AgentTraceSpan {
   started_at?: string | null
   ended_at?: string | null
   duration_ms?: number | null
+  reasoning?: string | null
   data?: Record<string, unknown>
   error?: unknown
 }
