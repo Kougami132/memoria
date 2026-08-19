@@ -128,6 +128,58 @@ export const agentChat = (message: string, sessionId?: string) =>
     method: 'POST',
     ...json({ message, session_id: sessionId }),
   })
+
+export interface AgentStreamEvent {
+  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'done' | 'error'
+  phase?: 'start' | 'end'
+  session_id?: string
+  span?: AgentTraceSpan
+  delta?: string
+  detail?: string
+  answer?: string
+  sources?: AgentSource[]
+  used_kbs?: string[]
+  trace?: AgentTrace | null
+}
+
+export async function* streamAgentChat(
+  message: string,
+  sessionId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<AgentStreamEvent> {
+  const res = await fetch(`${BASE}/agent-chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId }),
+    signal,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Agent stream request failed')
+  }
+  if (!res.body) throw new Error('ReadableStream not supported')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (trimmed) {
+        yield JSON.parse(trimmed) as AgentStreamEvent
+      }
+    }
+  }
+  if (buffer.trim()) {
+    yield JSON.parse(buffer.trim()) as AgentStreamEvent
+  }
+}
 export const listAgentSessions = () => req<Session[]>('/agent-sessions')
 export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)
 export const updateAgentSession = (id: string, data: { title: string }) =>

@@ -1,7 +1,9 @@
+import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 try:
     from openai import APIConnectionError, APIError
 except ImportError:  # pragma: no cover - openai is a core dependency in normal installs
@@ -21,6 +23,10 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+def _json_line(event: dict) -> str:
+    return json.dumps(event, ensure_ascii=False) + "\n"
+
+
 @router.post("/agent-chat")
 def agent_chat(body: AgentChatRequest, engine: AgenticRagEngine = Depends(get_agentic_engine)):
     try:
@@ -35,3 +41,27 @@ def agent_chat(body: AgentChatRequest, engine: AgenticRagEngine = Depends(get_ag
     except (AgenticSdkUnavailable, APIError, RuntimeError) as e:
         logger.error("Agentic chat 502: %s: %s", type(e).__name__, e)
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/agent-chat/stream")
+def agent_chat_stream(body: AgentChatRequest, engine: AgenticRagEngine = Depends(get_agentic_engine)):
+    def event_stream():
+        try:
+            for event in engine.run_stream(
+                message=body.message,
+                session_id=body.session_id,
+            ):
+                yield _json_line(event)
+        except ValueError as e:
+            yield _json_line({"type": "error", "detail": str(e)})
+        except APIConnectionError as e:
+            yield _json_line({"type": "error", "detail": f"AI service unavailable: {e}"})
+        except Exception as e:
+            logger.exception("Agentic chat stream error: %s", e)
+            yield _json_line({"type": "error", "detail": str(e)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

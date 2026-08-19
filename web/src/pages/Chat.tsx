@@ -18,6 +18,7 @@ import {
   Sparkles
 } from 'lucide-react'
 import * as api from '@/api'
+import { generateId } from '@/lib/utils'
 import type { Source } from '@/api'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
@@ -278,7 +279,7 @@ export default function Chat() {
   const handleSend = () => {
     const message = input.trim()
     if (!message || !botId || isSending) return
-    sendMsg.mutate({ message, placeholderId: crypto.randomUUID() })
+    sendMsg.mutate({ message, placeholderId: generateId() })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

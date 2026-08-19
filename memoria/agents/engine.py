@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import ast
+import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -138,6 +140,26 @@ _TRACE_PROCESSOR_CONFIGURED = False
 
 
 
+def _safe_parse_json_or_literal(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        return val
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        try:
+            return ast.literal_eval(s)
+        except Exception:
+            pass
+    return val
+
+
 def _extract_reasoning_content(span_data: dict[str, Any]) -> str | None:
     """Extract reasoning / thought text if present from generation output."""
     output = span_data.get("output")
@@ -161,6 +183,13 @@ def _extract_reasoning_content(span_data: dict[str, Any]) -> str | None:
 
 def _normalize_span(exported: dict[str, Any]) -> dict:
     span_data = exported.get("span_data") or {}
+    # Deep parse input and output if they are serialized strings
+    cleaned_data = dict(span_data)
+    if "input" in cleaned_data:
+        cleaned_data["input"] = _safe_parse_json_or_literal(cleaned_data["input"])
+    if "output" in cleaned_data:
+        cleaned_data["output"] = _safe_parse_json_or_literal(cleaned_data["output"])
+
     started_at = exported.get("started_at")
     ended_at = exported.get("ended_at")
     reasoning = _extract_reasoning_content(span_data)
@@ -174,7 +203,7 @@ def _normalize_span(exported: dict[str, Any]) -> dict:
         "ended_at": ended_at,
         "duration_ms": _duration_ms(started_at, ended_at),
         "reasoning": reasoning,
-        "data": span_data,
+        "data": cleaned_data,
         "error": exported.get("error"),
     }
 
@@ -218,6 +247,62 @@ def _ensure_local_trace_processor(set_trace_processors: Any) -> None:
         set_trace_processors([_LOCAL_TRACE_PROCESSOR])
         _TRACE_PROCESSOR_CONFIGURED = True
 
+
+
+def _get_agent_tools_schema() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_knowledge_bases",
+                "description": "查询当前允许访问的所有可用知识库列表及文档统计信息。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": "在指定的知识库中检索与问题相关的文本片段与参考资料。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kb_id": {
+                            "type": "string",
+                            "description": "要检索的知识库ID",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "检索关键词或查询问题",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "返回最相关的片段数量，默认5",
+                            "default": 5,
+                        },
+                    },
+                    "required": ["kb_id", "query"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
+
+
+def _execute_agent_tool(name: str, args: dict, tools: AgentKnowledgeTools) -> Any:
+    if name == "list_knowledge_bases":
+        return tools.list_knowledge_bases()
+    elif name == "search_knowledge_base":
+        kb_id = str(args.get("kb_id") or "")
+        query = str(args.get("query") or "")
+        top_k = int(args.get("top_k") or 5)
+        return tools.search_knowledge_base(kb_id, query, top_k)
+    else:
+        raise ValueError(f"Unknown agent tool: {name}")
 
 class OpenAIAgentsRunner:
     """Thin boundary around the optional OpenAI Agents SDK.
@@ -293,6 +378,299 @@ class OpenAIAgentsRunner:
             raise
 
 
+
+    def run_stream(
+        self,
+        message: str,
+        instructions: str,
+        tools: AgentKnowledgeTools,
+        model_name: str,
+        session_id: str | None = None,
+        max_turns: int = 6,
+    ) -> Iterator[dict[str, Any]]:
+        import queue
+        import uuid
+        import time
+        from openai import AsyncOpenAI
+
+        event_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        trace_id = f"trace-{uuid.uuid4().hex[:12]}"
+        spans: list[dict[str, Any]] = []
+
+        tools_schema = _get_agent_tools_schema()
+        agent_span_id = f"span-agent-{uuid.uuid4().hex[:8]}"
+        agent_span = {
+            "id": agent_span_id,
+            "trace_id": trace_id,
+            "parent_id": None,
+            "type": "agent",
+            "name": "Memoria AI Agent",
+            "started_at": datetime.utcnow().isoformat() + "Z",
+            "ended_at": None,
+            "duration_ms": None,
+            "data": {
+                "input": message,
+                "tools": [t["function"]["name"] for t in tools_schema],
+            },
+            "error": None,
+        }
+        spans.append(agent_span)
+        event_queue.put({
+            "type": "trace_span",
+            "phase": "start",
+            "span": dict(agent_span),
+        })
+
+        async def _async_worker():
+            try:
+                client = AsyncOpenAI(base_url=self._base_url, api_key=self._api_key)
+                messages: list[dict[str, Any]] = [
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": message},
+                ]
+
+                turn = 0
+                final_answer = ""
+                collected_thought = ""
+
+                while turn < max_turns:
+                    turn += 1
+                    gen_span_id = f"span-gen-{turn}-{uuid.uuid4().hex[:6]}"
+                    gen_start = time.time()
+                    gen_span = {
+                        "id": gen_span_id,
+                        "trace_id": trace_id,
+                        "parent_id": agent_span_id,
+                        "type": "generation",
+                        "name": model_name,
+                        "started_at": datetime.utcnow().isoformat() + "Z",
+                        "ended_at": None,
+                        "duration_ms": None,
+                        "data": {
+                            "input": messages,
+                        },
+                        "error": None,
+                    }
+                    spans.append(gen_span)
+                    event_queue.put({
+                        "type": "trace_span",
+                        "phase": "start",
+                        "span": dict(gen_span),
+                    })
+
+                    stream = await client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        tools=tools_schema,
+                        stream=True,
+                    )
+
+                    current_content = ""
+                    current_thought = ""
+                    tool_calls_acc: dict[int, dict[str, Any]] = {}
+
+                    async for chunk in stream:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
+
+                        reasoning = (
+                            getattr(delta, "reasoning_content", None)
+                            or getattr(delta, "thought", None)
+                            or getattr(delta, "reasoning", None)
+                        )
+                        if reasoning:
+                            current_thought += reasoning
+                            collected_thought += reasoning
+                            event_queue.put({
+                                "type": "thought_delta",
+                                "delta": reasoning,
+                            })
+
+                        if delta.content:
+                            current_content += delta.content
+                            event_queue.put({
+                                "type": "answer_delta",
+                                "delta": delta.content,
+                            })
+
+                        if delta.tool_calls:
+                            for tc in delta.tool_calls:
+                                idx = tc.index
+                                if idx not in tool_calls_acc:
+                                    tool_calls_acc[idx] = {
+                                        "id": tc.id or f"call_{uuid.uuid4().hex[:8]}",
+                                        "name": tc.function.name if tc.function and tc.function.name else "",
+                                        "arguments": "",
+                                    }
+                                if tc.id:
+                                    tool_calls_acc[idx]["id"] = tc.id
+                                if tc.function:
+                                    if tc.function.name:
+                                        tool_calls_acc[idx]["name"] = tc.function.name
+                                    if tc.function.arguments:
+                                        tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+                    gen_end = time.time()
+                    gen_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
+                    gen_span["duration_ms"] = max(0, round((gen_end - gen_start) * 1000))
+                    
+                    # Unified output structure
+                    gen_output: dict[str, Any] = {}
+                    if current_thought:
+                        gen_span["reasoning"] = current_thought
+                        gen_output["thought"] = current_thought
+                    if tool_calls_acc:
+                        gen_output["tool_calls"] = list(tool_calls_acc.values())
+                    if current_content:
+                        gen_output["content"] = current_content
+
+                    gen_span["data"]["output"] = gen_output if gen_output else (current_content or None)
+
+                    event_queue.put({
+                        "type": "trace_span",
+                        "phase": "end",
+                        "span": dict(gen_span),
+                    })
+
+                    if not tool_calls_acc:
+                        final_answer = current_content
+                        break
+
+                    assistant_msg: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": current_content or None,
+                        "tool_calls": [
+                            {
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": tc["name"],
+                                    "arguments": tc["arguments"],
+                                },
+                            }
+                            for tc in tool_calls_acc.values()
+                        ],
+                    }
+                    messages.append(assistant_msg)
+
+                    for tc in tool_calls_acc.values():
+                        tool_name = tc["name"]
+                        raw_args = tc["arguments"]
+                        args = _safe_parse_json_or_literal(raw_args) or {}
+                        if not isinstance(args, dict):
+                            args = {}
+
+                        tool_span_id = f"span-tool-{uuid.uuid4().hex[:8]}"
+                        tool_start = time.time()
+                        tool_span = {
+                            "id": tool_span_id,
+                            "trace_id": trace_id,
+                            "parent_id": agent_span_id,
+                            "type": "function",
+                            "name": tool_name,
+                            "started_at": datetime.utcnow().isoformat() + "Z",
+                            "ended_at": None,
+                            "duration_ms": None,
+                            "data": {
+                                "name": tool_name,
+                                "input": args,
+                            },
+                            "error": None,
+                        }
+                        spans.append(tool_span)
+
+                        event_queue.put({
+                            "type": "trace_span",
+                            "phase": "start",
+                            "span": dict(tool_span),
+                        })
+
+                        tool_error = None
+                        tool_result = None
+                        try:
+                            tool_result = _execute_agent_tool(tool_name, args, tools)
+                        except Exception as e:
+                            tool_error = str(e)
+                            tool_result = {"error": str(e)}
+
+                        tool_end = time.time()
+                        tool_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
+                        tool_span["duration_ms"] = max(0, round((tool_end - tool_start) * 1000))
+                        tool_span["data"]["output"] = tool_result
+                        if tool_error:
+                            tool_span["error"] = tool_error
+
+                        event_queue.put({
+                            "type": "trace_span",
+                            "phase": "end",
+                            "span": dict(tool_span),
+                        })
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": json.dumps(tool_result, ensure_ascii=False) if not isinstance(tool_result, str) else tool_result,
+                        })
+
+                agent_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
+                total_duration = sum(s.get("duration_ms", 0) or 0 for s in spans)
+                agent_span["duration_ms"] = total_duration
+                agent_span["data"]["output"] = final_answer
+                if collected_thought:
+                    agent_span["reasoning"] = collected_thought
+                    agent_span["data"]["thought"] = collected_thought
+
+                event_queue.put({
+                    "type": "trace_span",
+                    "phase": "end",
+                    "span": dict(agent_span),
+                })
+
+                final_trace = {
+                    "trace_id": trace_id,
+                    "workflow_name": "Memoria AI Agent",
+                    "group_id": session_id,
+                    "metadata": {
+                        "session_id": session_id,
+                        "model": model_name,
+                        "thought": collected_thought,
+                    },
+                    "spans": spans,
+                    "summary": {
+                        "duration_ms": total_duration,
+                        "reasoning": collected_thought or None,
+                        "span_count": len(spans),
+                        "tool_count": sum(1 for s in spans if s.get("type") == "function"),
+                        "model_count": sum(1 for s in spans if s.get("type") == "generation"),
+                        "error_count": sum(1 for s in spans if s.get("error")),
+                    },
+                }
+
+                event_queue.put({
+                    "type": "done",
+                    "answer": final_answer,
+                    "trace": final_trace,
+                })
+            except Exception as e:
+                logger.exception("Streaming agent error: %s", e)
+                event_queue.put({"type": "error", "detail": str(e)})
+            finally:
+                event_queue.put(None)
+
+        def _thread_target():
+            asyncio.run(_async_worker())
+
+        worker_thread = threading.Thread(target=_thread_target, daemon=True)
+        worker_thread.start()
+
+        while True:
+            event = event_queue.get()
+            if event is None:
+                break
+            yield event
+
+
 class MockAgentRunner:
     """Deterministic no-network runner used when USE_MOCK=true."""
 
@@ -365,6 +743,76 @@ class AgenticRagEngine:
             "session_id": session_id,
             "used_kbs": used_kbs,
             "sources": sources,
+            "trace": stored_trace,
+        }
+
+    def run_stream(self, message: str, session_id: str | None = None) -> Iterator[dict[str, Any]]:
+        if not message or not message.strip():
+            raise ValueError("Query must not be empty")
+
+        if session_id is not None:
+            sess = self.db.get_agentic_session(session_id)
+            if sess is None:
+                raise ValueError(f"agentic session {session_id} not found")
+        else:
+            sess = self.db.create_agentic_session(message)
+            session_id = sess["id"]
+
+        from memoria.config import get_effective_settings
+
+        effective = get_effective_settings(self.db)
+        allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
+        collector = SourceCollector(max_sources=self.max_sources)
+        tools = AgentKnowledgeTools(
+            db=self.db,
+            pipeline=self.pipeline,
+            allowed_kb_ids=allowed_kb_ids,
+            collector=collector,
+        )
+        history = self.db.get_messages(session_id, limit=self.history_limit)
+        prompt = self._build_prompt(message, history)
+
+        runner = self.runner or self._default_runner(effective)
+        instructions = self._instructions(effective)
+
+        self.db.add_message(session_id, "user", message)
+
+        yield {
+            "type": "init",
+            "session_id": session_id,
+        }
+
+        final_answer = ""
+        final_trace = None
+
+        if hasattr(runner, "run_stream"):
+            for event in runner.run_stream(prompt, instructions, tools, effective["llm_model"], session_id=session_id):
+                if event.get("type") == "done":
+                    final_answer = event.get("answer") or ""
+                    final_trace = event.get("trace")
+                else:
+                    yield event
+        else:
+            runner_output = runner.run(prompt, instructions, tools, effective["llm_model"], session_id=session_id)
+            if isinstance(runner_output, AgentRunnerOutput):
+                final_answer = runner_output.answer
+                final_trace = runner_output.trace
+            else:
+                final_answer = str(runner_output)
+            yield {"type": "answer_delta", "delta": final_answer}
+
+        sources = collector.list_sources()
+        used_kbs = collector.used_kbs()
+
+        assistant_message = self.db.add_message(session_id, "assistant", final_answer, sources=sources)
+        stored_trace = self.db.add_message_trace(session_id, assistant_message["id"], final_trace) if final_trace else None
+
+        yield {
+            "type": "done",
+            "session_id": session_id,
+            "answer": final_answer,
+            "sources": sources,
+            "used_kbs": used_kbs,
             "trace": stored_trace,
         }
 
