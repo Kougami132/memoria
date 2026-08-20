@@ -40,6 +40,7 @@ memoria serve --host 0.0.0.0 --port 8080 --log-file ./data/memoria.log
 cd web && npm install && npm run build
 ```
 
+
 ## Docker 部署
 
 ### 使用 Docker Compose（推荐）
@@ -51,24 +52,18 @@ version: "3.8"
 
 services:
   memoria:
-    image: ghcr.io/<your-github-username>/memoria:latest
-    # 或本地源码构建:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+    image: ghcr.io/kougami132/memoria:latest
     container_name: memoria
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-    env_file:
-      - .env
     environment:
-      - DB_PATH=/app/data/memoria.db
-      - CHROMA_PATH=/app/data/chroma
-      - UPLOAD_DIR=/app/data/uploads
-      - LOG_PATH=/app/data/memoria.log
+      - OPENAI_BASE_URL=https://your-api.example.com
+      - OPENAI_API_KEY=sk-xxxxx
+      - EMBEDDING_MODEL=text-embedding-3-large
+      - LLM_MODEL=deepseek-v4-flash
 ```
 
 启动服务：
