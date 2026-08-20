@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
+  Coins,
   Pencil,
   Plus,
   ArrowUp,
@@ -490,6 +491,12 @@ function ChatMessageItem({ msg }: { msg: Message }) {
                     <span>执行轨迹与工具调用 ({trace.spans.filter((s) => s.type !== 'agent').length} 个步骤)</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    {trace?.summary?.total_tokens !== undefined && trace.summary.total_tokens !== null && (
+                      <span className="text-[11px] font-normal text-muted-foreground flex items-center gap-1 bg-muted/60 px-1.5 py-0.5 rounded" title={`Prompt: ${trace.summary.prompt_tokens ?? '-'}, Completion: ${trace.summary.completion_tokens ?? '-'}`}>
+                        <Coins className="w-3 h-3 text-amber-500" />
+                        <span>{trace.summary.total_tokens.toLocaleString()} tokens</span>
+                      </span>
+                    )}
                     {totalDuration && (
                       <span className="text-[11px] font-normal text-muted-foreground flex items-center gap-0.5">
                         <Clock3 className="w-3 h-3" />
@@ -536,6 +543,10 @@ function StreamingMessageItem({ state }: { state: StreamingAssistantState }) {
   const [traceExpanded, setTraceExpanded] = useState(true)
   const streamDurationMs = state.traces?.reduce((acc, s) => acc + (s.duration_ms || 0), 0)
   const totalDuration = formatDuration(streamDurationMs && streamDurationMs > 0 ? streamDurationMs : null)
+  const streamTotalTokens = state.traces?.reduce((acc, s) => {
+    const u = s.usage || (s.data as any)?.usage
+    return acc + (u?.total_tokens || 0)
+  }, 0)
 
   return (
     <div className="flex gap-3 max-w-4xl mx-auto justify-start">
@@ -577,6 +588,12 @@ function StreamingMessageItem({ state }: { state: StreamingAssistantState }) {
                 <span>执行轨迹与工具调用 ({state.traces.filter((s) => s.type !== 'agent').length} 个步骤)</span>
               </div>
               <div className="flex items-center gap-2">
+                {streamTotalTokens > 0 && (
+                  <span className="text-[11px] font-normal text-muted-foreground flex items-center gap-1 bg-muted/60 px-1.5 py-0.5 rounded">
+                    <Coins className="w-3 h-3 text-amber-500" />
+                    <span>{streamTotalTokens.toLocaleString()} tokens</span>
+                  </span>
+                )}
                 {totalDuration && (
                   <span className="text-[11px] font-normal text-muted-foreground flex items-center gap-0.5">
                     <Clock3 className="w-3 h-3" />
@@ -627,6 +644,7 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
   const rawInput = (rawData as Record<string, unknown>).input ?? (rawData as Record<string, unknown>).args
   const rawOutput = (rawData as Record<string, unknown>).output ?? (rawData as Record<string, unknown>).result ?? (rawData as Record<string, unknown>).content
 
+  const usage = span.usage || (rawData as any)?.usage
   const formattedInput = rawInput !== undefined ? (typeof rawInput === 'object' ? JSON.stringify(rawInput, null, 2) : String(rawInput)) : ''
   const formattedOutput = rawOutput !== undefined ? (typeof rawOutput === 'object' ? JSON.stringify(rawOutput, null, 2) : String(rawOutput)) : ''
   const formattedError = span.error ? (typeof span.error === 'object' ? JSON.stringify(span.error, null, 2) : String(span.error)) : ''
@@ -658,6 +676,12 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {usage && usage.total_tokens !== undefined && usage.total_tokens !== null && (
+            <span className="text-[10px] text-muted-foreground flex items-center gap-1 bg-muted/70 px-1.5 py-0.5 rounded font-mono" title={`Prompt: ${usage.prompt_tokens ?? '-'}, Completion: ${usage.completion_tokens ?? '-'}`}>
+              <Coins className="w-3 h-3 text-amber-500" />
+              {usage.total_tokens.toLocaleString()} tokens
+            </span>
+          )}
           {span.duration_ms !== undefined && span.duration_ms !== null && (
             <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
               <Clock3 className="w-3 h-3" />
@@ -670,6 +694,17 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
 
       {expanded && (
         <div className="px-3 py-2 border-t border-border/50 bg-muted/20 space-y-2">
+          {usage && (
+            <div className="flex items-center gap-3 text-[11px] text-muted-foreground bg-muted/40 p-2 rounded border border-border/40">
+              <span className="font-medium text-foreground flex items-center gap-1">
+                <Coins className="w-3.5 h-3.5 text-amber-500" />
+                Token 消耗统计:
+              </span>
+              <span>输入 (Prompt): <strong className="font-mono text-foreground">{usage.prompt_tokens ?? '-'}</strong></span>
+              <span>输出 (Completion): <strong className="font-mono text-foreground">{usage.completion_tokens ?? '-'}</strong></span>
+              <span>总计 (Total): <strong className="font-mono text-foreground">{usage.total_tokens ?? '-'}</strong></span>
+            </div>
+          )}
           {formattedInput && (
             <div>
               <div className="text-[10px] font-semibold text-muted-foreground mb-1">

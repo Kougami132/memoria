@@ -194,6 +194,9 @@ def _normalize_span(exported: dict[str, Any]) -> dict:
     started_at = exported.get("started_at")
     ended_at = exported.get("ended_at")
     reasoning = _extract_reasoning_content(span_data)
+    usage = span_data.get("usage") or exported.get("usage")
+    if usage is None and isinstance(cleaned_data.get("output"), dict):
+        usage = cleaned_data["output"].get("usage")
     return {
         "id": exported.get("id"),
         "trace_id": exported.get("trace_id"),
@@ -205,6 +208,7 @@ def _normalize_span(exported: dict[str, Any]) -> dict:
         "duration_ms": _duration_ms(started_at, ended_at),
         "reasoning": reasoning,
         "data": cleaned_data,
+        "usage": usage,
         "error": exported.get("error"),
     }
 
@@ -221,6 +225,15 @@ def _normalize_trace_payload(payload: dict[str, Any]) -> dict:
     if valid_starts and valid_ends:
         duration = max(0, round((max(valid_ends) - min(valid_starts)).total_seconds() * 1000))
     error_count = sum(1 for span in spans if span.get("error"))
+    total_tokens = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    for span in spans:
+        u = span.get("usage") or (span.get("data") or {}).get("usage")
+        if isinstance(u, dict):
+            total_tokens += int(u.get("total_tokens") or 0)
+            prompt_tokens += int(u.get("prompt_tokens") or 0)
+            completion_tokens += int(u.get("completion_tokens") or 0)
     return {
         "trace_id": trace.get("id"),
         "workflow_name": trace.get("workflow_name"),
@@ -233,6 +246,9 @@ def _normalize_trace_payload(payload: dict[str, Any]) -> dict:
             "tool_count": sum(1 for span in spans if span.get("type") == "function"),
             "model_count": sum(1 for span in spans if span.get("type") in {"generation", "response"}),
             "error_count": error_count,
+            "total_tokens": total_tokens or None,
+            "prompt_tokens": prompt_tokens or None,
+            "completion_tokens": completion_tokens or None,
         },
     }
 
@@ -463,14 +479,25 @@ class OpenAIAgentsRunner:
                         model=model_name,
                         messages=messages,
                         tools=tools_schema,
+                        stream_options={"include_usage": True},
                         stream=True,
                     )
 
                     current_content = ""
                     current_thought = ""
                     tool_calls_acc: dict[int, dict[str, Any]] = {}
+                    gen_usage = None
 
                     async for chunk in stream:
+                        if getattr(chunk, "usage", None):
+                            u = chunk.usage
+                            gen_usage = {
+                                "prompt_tokens": getattr(u, "prompt_tokens", None),
+                                "completion_tokens": getattr(u, "completion_tokens", None),
+                                "total_tokens": getattr(u, "total_tokens", None),
+                            }
+                        elif isinstance(chunk, dict) and chunk.get("usage"):
+                            gen_usage = chunk["usage"]
                         if not chunk.choices:
                             continue
                         delta = chunk.choices[0].delta
@@ -526,7 +553,10 @@ class OpenAIAgentsRunner:
                     if current_content:
                         gen_output["content"] = current_content
 
+                    if gen_usage:
+                        gen_output["usage"] = gen_usage
                     gen_span["data"]["output"] = gen_output if gen_output else (current_content or None)
+                    gen_span["usage"] = gen_usage
 
                     event_queue.put({
                         "type": "trace_span",
@@ -628,6 +658,16 @@ class OpenAIAgentsRunner:
                     "span": dict(agent_span),
                 })
 
+                total_tokens = 0
+                prompt_tokens = 0
+                completion_tokens = 0
+                for s in spans:
+                    u = s.get("usage") or (s.get("data") or {}).get("usage")
+                    if isinstance(u, dict):
+                        total_tokens += int(u.get("total_tokens") or 0)
+                        prompt_tokens += int(u.get("prompt_tokens") or 0)
+                        completion_tokens += int(u.get("completion_tokens") or 0)
+
                 final_trace = {
                     "trace_id": trace_id,
                     "workflow_name": "Memoria AI Agent",
@@ -645,6 +685,9 @@ class OpenAIAgentsRunner:
                         "tool_count": sum(1 for s in spans if s.get("type") == "function"),
                         "model_count": sum(1 for s in spans if s.get("type") == "generation"),
                         "error_count": sum(1 for s in spans if s.get("error")),
+                        "total_tokens": total_tokens or None,
+                        "prompt_tokens": prompt_tokens or None,
+                        "completion_tokens": completion_tokens or None,
                     },
                 }
 

@@ -42,6 +42,9 @@ export interface AgentTraceSummary {
   tool_count: number
   model_count: number
   error_count: number
+  total_tokens?: number | null
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
 }
 export interface AgentTraceSpan {
   id?: string | null
@@ -53,6 +56,11 @@ export interface AgentTraceSpan {
   ended_at?: string | null
   duration_ms?: number | null
   reasoning?: string | null
+  usage?: {
+    prompt_tokens?: number | null
+    completion_tokens?: number | null
+    total_tokens?: number | null
+  } | null
   data?: Record<string, unknown>
   error?: unknown
 }
