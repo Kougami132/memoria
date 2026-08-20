@@ -80,6 +80,12 @@ function getToolIcon(name?: string, type?: string) {
   return <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
 }
 
+function formatDuration(ms?: number | null): string | null {
+  if (ms === undefined || ms === null || isNaN(ms)) return null
+  const s = ms / 1000
+  return s < 0.1 ? `${s.toFixed(2)}s` : `${s.toFixed(1)}s`
+}
+
 interface StreamingAssistantState {
   thought: string
   thoughtExpanded: boolean
@@ -105,14 +111,12 @@ export function AgenticChat() {
     queryFn: api.listAgentSessions,
   })
 
-  // Select first session on initial mount if not selected
-  const hasInitializedRef = useRef(false)
+  // Listen to global new chat event from sidebar
   useEffect(() => {
-    if (!hasInitializedRef.current && sessions.length > 0 && activeSessionId === null) {
-      hasInitializedRef.current = true
-      setActiveSessionId(sessions[0].id)
-    }
-  }, [sessions, activeSessionId])
+    const handleGlobalNewChat = () => handleCreateSession()
+    window.addEventListener('memoria:new-chat', handleGlobalNewChat)
+    return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
+  }, [])
 
   // Load messages for current session
   useEffect(() => {
@@ -434,6 +438,8 @@ function ChatMessageItem({ msg }: { msg: Message }) {
   const trace = msg.trace
   const rawThought = trace?.metadata?.thought || trace?.metadata?.reasoning_content || trace?.summary?.reasoning
   const thought = typeof rawThought === 'string' ? rawThought : null
+  const totalDurationMs = trace?.summary?.duration_ms ?? trace?.spans?.reduce((acc, s) => acc + (s.duration_ms || 0), 0)
+  const totalDuration = formatDuration(totalDurationMs && totalDurationMs > 0 ? totalDurationMs : null)
 
   return (
     <div className={`flex gap-3 max-w-4xl mx-auto ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -483,7 +489,15 @@ function ChatMessageItem({ msg }: { msg: Message }) {
                     <Activity className="w-3.5 h-3.5 text-primary" />
                     <span>执行轨迹与工具调用 ({trace.spans.filter((s) => s.type !== 'agent').length} 个步骤)</span>
                   </div>
-                  {traceExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <div className="flex items-center gap-2">
+                    {totalDuration && (
+                      <span className="text-[11px] font-normal text-muted-foreground flex items-center gap-0.5">
+                        <Clock3 className="w-3 h-3" />
+                        {totalDuration}
+                      </span>
+                    )}
+                    {traceExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </div>
                 </button>
                 {traceExpanded && (
                   <div className="p-3 border-t border-border space-y-2">
@@ -520,6 +534,8 @@ function ChatMessageItem({ msg }: { msg: Message }) {
 function StreamingMessageItem({ state }: { state: StreamingAssistantState }) {
   const [thoughtExpanded, setThoughtExpanded] = useState(true)
   const [traceExpanded, setTraceExpanded] = useState(true)
+  const streamDurationMs = state.traces?.reduce((acc, s) => acc + (s.duration_ms || 0), 0)
+  const totalDuration = formatDuration(streamDurationMs && streamDurationMs > 0 ? streamDurationMs : null)
 
   return (
     <div className="flex gap-3 max-w-4xl mx-auto justify-start">
@@ -560,7 +576,15 @@ function StreamingMessageItem({ state }: { state: StreamingAssistantState }) {
                 <Activity className="w-3.5 h-3.5 text-primary" />
                 <span>执行轨迹与工具调用 ({state.traces.filter((s) => s.type !== 'agent').length} 个步骤)</span>
               </div>
-              {traceExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              <div className="flex items-center gap-2">
+                {totalDuration && (
+                  <span className="text-[11px] font-normal text-muted-foreground flex items-center gap-0.5">
+                    <Clock3 className="w-3 h-3" />
+                    {totalDuration}
+                  </span>
+                )}
+                {traceExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </div>
             </button>
             {traceExpanded && (
               <div className="p-3 border-t border-border space-y-2">
@@ -637,7 +661,7 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
           {span.duration_ms !== undefined && span.duration_ms !== null && (
             <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
               <Clock3 className="w-3 h-3" />
-              {span.duration_ms}ms
+              {formatDuration(span.duration_ms)}
             </span>
           )}
           {expanded ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
