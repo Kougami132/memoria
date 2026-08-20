@@ -1,0 +1,168 @@
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+.ruff_cache
+.venv
+venv
+ENV
+data/
+.env
+.git
+.github
+.trellis
+.ace-tool
+.codex
+web/node_modules
+web/data
+memoria/static
+tests
+*** Add File: Dockerfile
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# Stage 2: Application runtime
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DB_PATH=/app/data/memoria.db \
+    CHROMA_PATH=/app/data/chroma \
+    UPLOAD_DIR=/app/data/uploads \
+    LOG_PATH=/app/data/memoria.log
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY memoria/ ./memoria/
+COPY --from=frontend-builder /app/memoria/static ./memoria/static
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir .
+
+RUN mkdir -p /app/data
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+CMD ["memoria", "serve", "--host", "0.0.0.0", "--port", "8000"]
+*** Add File: .github/workflows/docker-build.yml
+name: Docker Build and Publish
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+*** Update File: README.md
+@@ -38,2 +38,42 @@
+ ```
+ 
++## Docker 部署
++
++### 使用 Docker Compose（推荐）
++
++在项目根目录下或宿主机创建 `docker-compose.yml`：
++
++```yaml
++version: "3.8"
++
++services:
++  memoria:
++    image: ghcr.io/<your-github-username>/memoria:latest
++    # 或本地构建:
++    # build:
++    #   context: .
++    #   dockerfile: Dockerfile
++    container_name: memoria
++    restart: unless-stopped
++    ports:
++      - "8000:8000"
++    volumes:
++      - ./data:/app/data
++    env_file:
++      - .env
++    environment:
++      - DB_PATH=/app/data/memoria.db
++      - CHROMA_PATH=/app/data/chroma
++      - UPLOAD_DIR=/app/data/uploads
++      - LOG_PATH=/app/data/memoria.log
++```
++
++启动服务：
++
++```bash
++# 启动容器
++docker compose up -d
++
++# 查看日志
++docker compose logs -f
++```
++
+ ## 配置

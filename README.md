@@ -40,6 +40,47 @@ memoria serve --host 0.0.0.0 --port 8080 --log-file ./data/memoria.log
 cd web && npm install && npm run build
 ```
 
+## Docker 部署
+
+### 使用 Docker Compose（推荐）
+
+在项目根目录下或宿主机创建 `docker-compose.yml`：
+
+```yaml
+version: "3.8"
+
+services:
+  memoria:
+    image: ghcr.io/<your-github-username>/memoria:latest
+    # 或本地源码构建:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: memoria
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/app/data/memoria.db
+      - CHROMA_PATH=/app/data/chroma
+      - UPLOAD_DIR=/app/data/uploads
+      - LOG_PATH=/app/data/memoria.log
+```
+
+启动服务：
+
+```bash
+# 启动容器
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
 ## 配置
 
 编辑 `.env`（参考 `.env.example`）：
