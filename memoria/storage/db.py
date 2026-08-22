@@ -37,6 +37,29 @@ class BotKBLink(Base):
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), primary_key=True)
 
 
+class HostRow(Base):
+    __tablename__ = "hosts"
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    host = Column(String, nullable=False)
+    port = Column(Integer, nullable=False, default=22)
+    username = Column(String, nullable=False, default="root")
+    auth_type = Column(String, nullable=False, default="password")
+    credential = Column(Text, nullable=True, default="")
+    description = Column(String, default="")
+    tags = Column(Text, default="[]")
+    os_info = Column(String, default="")
+    status = Column(String, default="unknown")
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+
+class BotHostLink(Base):
+    __tablename__ = "bot_host_links"
+    bot_id = Column(String, ForeignKey("bots.id"), primary_key=True)
+    host_id = Column(String, ForeignKey("hosts.id"), primary_key=True)
+
+
 class DocumentRow(Base):
     __tablename__ = "documents"
     id = Column(String, primary_key=True)
@@ -286,13 +309,16 @@ class DB:
 
     def _bot_dict(self, s: Session, row: BotRow) -> dict:
         links = s.query(BotKBLink).filter(BotKBLink.bot_id == row.id).all()
+        host_links = s.query(BotHostLink).filter(BotHostLink.bot_id == row.id).all()
         return {
             "id": row.id, "name": row.name, "system_prompt": row.system_prompt,
             "model_override": row.model_override, "created_at": row.created_at,
             "kb_ids": [lk.kb_id for lk in links],
+            "host_ids": [lk.host_id for lk in host_links],
         }
 
     def create_bot(self, name: str, system_prompt: str = "", kb_ids: list[str] | None = None,
+                   host_ids: list[str] | None = None,
                    model_override: str | None = None) -> dict:
         with self._s() as s:
             row = BotRow(id=_uid(), name=name, system_prompt=system_prompt,
@@ -300,6 +326,8 @@ class DB:
             s.add(row)
             for kb_id in (kb_ids or []):
                 s.add(BotKBLink(bot_id=row.id, kb_id=kb_id))
+            for host_id in (host_ids or []):
+                s.add(BotHostLink(bot_id=row.id, host_id=host_id))
             s.flush()
             return self._bot_dict(s, row)
 
@@ -315,7 +343,8 @@ class DB:
             return [self._bot_dict(s, r) for r in s.query(BotRow).all()]
 
     def update_bot(self, bot_id: str, name: str | None = None, system_prompt: str | None = None,
-                   kb_ids: list[str] | None = None, model_override: str | None = None) -> dict | None:
+                   kb_ids: list[str] | None = None, host_ids: list[str] | None = None,
+                   model_override: str | None = None) -> dict | None:
         with self._s() as s:
             row = s.get(BotRow, bot_id)
             if row is None:
@@ -330,6 +359,10 @@ class DB:
                 s.query(BotKBLink).filter(BotKBLink.bot_id == bot_id).delete()
                 for kb_id in kb_ids:
                     s.add(BotKBLink(bot_id=bot_id, kb_id=kb_id))
+            if host_ids is not None:
+                s.query(BotHostLink).filter(BotHostLink.bot_id == bot_id).delete()
+                for host_id in host_ids:
+                    s.add(BotHostLink(bot_id=bot_id, host_id=host_id))
             s.flush()
             return self._bot_dict(s, row)
 
@@ -341,9 +374,133 @@ class DB:
                 s.query(MessageRow).filter(MessageRow.session_id.in_(session_ids)).delete(synchronize_session=False)
             s.query(SessionRow).filter(SessionRow.bot_id == bot_id).delete()
             s.query(BotKBLink).filter(BotKBLink.bot_id == bot_id).delete()
+            s.query(BotHostLink).filter(BotHostLink.bot_id == bot_id).delete()
             row = s.get(BotRow, bot_id)
             if row:
                 s.delete(row)
+
+    # ------------------------------------------------------------------
+    # Host Management
+    # ------------------------------------------------------------------
+
+    def _host_dict(self, row: HostRow) -> dict:
+        try:
+            tags = json.loads(row.tags) if row.tags else []
+        except Exception:
+            tags = []
+        return {
+            "id": row.id,
+            "name": row.name,
+            "host": row.host,
+            "port": row.port,
+            "username": row.username,
+            "auth_type": row.auth_type,
+            "credential": row.credential or "",
+            "description": row.description or "",
+            "tags": tags,
+            "os_info": row.os_info or "",
+            "status": row.status or "unknown",
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def create_host(
+        self,
+        name: str,
+        host: str,
+        port: int = 22,
+        username: str = "root",
+        auth_type: str = "password",
+        credential: str = "",
+        description: str = "",
+        tags: list[str] | None = None,
+        host_id: str | None = None,
+    ) -> dict:
+        hid = host_id or _uid()
+        now = _now()
+        tags_json = json.dumps(tags or [], ensure_ascii=False)
+        with self._s() as s:
+            row = HostRow(
+                id=hid,
+                name=name,
+                host=host,
+                port=port,
+                username=username,
+                auth_type=auth_type,
+                credential=credential,
+                description=description,
+                tags=tags_json,
+                os_info="",
+                status="unknown",
+                created_at=now,
+                updated_at=now,
+            )
+            s.add(row)
+            s.flush()
+            return self._host_dict(row)
+
+    def get_host(self, host_id: str) -> dict | None:
+        with self._s() as s:
+            row = s.get(HostRow, host_id)
+            if row is None:
+                return None
+            return self._host_dict(row)
+
+    def list_hosts(self) -> list[dict]:
+        with self._s() as s:
+            rows = s.query(HostRow).order_by(desc(HostRow.created_at)).all()
+            return [self._host_dict(r) for r in rows]
+
+    def update_host(
+        self,
+        host_id: str,
+        name: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        username: str | None = None,
+        auth_type: str | None = None,
+        credential: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+        os_info: str | None = None,
+        status: str | None = None,
+    ) -> dict | None:
+        with self._s() as s:
+            row = s.get(HostRow, host_id)
+            if row is None:
+                return None
+            if name is not None:
+                row.name = name
+            if host is not None:
+                row.host = host
+            if port is not None:
+                row.port = port
+            if username is not None:
+                row.username = username
+            if auth_type is not None:
+                row.auth_type = auth_type
+            if credential is not None:
+                row.credential = credential
+            if description is not None:
+                row.description = description
+            if tags is not None:
+                row.tags = json.dumps(tags, ensure_ascii=False)
+            if os_info is not None:
+                row.os_info = os_info
+            if status is not None:
+                row.status = status
+            row.updated_at = _now()
+            s.flush()
+            return self._host_dict(row)
+
+    def delete_host(self, host_id: str) -> bool:
+        with self._s() as s:
+            row = s.get(HostRow, host_id)
+            if row is None:
+                return False
+            s.query(BotHostLink).filter(BotHostLink.host_id == host_id).delete()
+            s.delete(row)
+            return True
 
     # ── Documents ────────────────────────────────────────────────────────────
 

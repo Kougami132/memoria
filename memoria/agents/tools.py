@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from memoria.agents.state import SourceCollector
-from typing import TYPE_CHECKING
+from memoria.connectors.host.tools import AgentHostTools, HostAccessError, HOST_TOOL_METADATA
 
 if TYPE_CHECKING:
     from memoria.core.pipeline import Pipeline
     from memoria.storage.db import DB
-
+    from memoria.connectors.registry import ConnectorRegistry
 
 
 TOOL_METADATA: dict[str, dict[str, str]] = {
@@ -20,6 +21,7 @@ TOOL_METADATA: dict[str, dict[str, str]] = {
         "label": "检索知识库内容",
         "description": "在指定知识库中执行向量与关键字混合检索，返回高相关文本片段",
     },
+    **HOST_TOOL_METADATA,
 }
 
 
@@ -83,3 +85,53 @@ class AgentKnowledgeTools:
                 "source": source["source"],
             })
         return results
+
+
+@dataclass
+class AgentTools:
+    """Unified tool container aggregating Knowledge, Host, and other pluggable tools."""
+    knowledge: AgentKnowledgeTools
+    host: AgentHostTools
+
+    @classmethod
+    def create(
+        cls,
+        db: "DB",
+        pipeline: "Pipeline",
+        allowed_kb_ids: list[str],
+        allowed_host_ids: list[str],
+        collector: SourceCollector,
+        registry: "ConnectorRegistry | None" = None,
+        max_top_k: int = 8,
+    ) -> "AgentTools":
+        kt = AgentKnowledgeTools(
+            db=db,
+            pipeline=pipeline,
+            allowed_kb_ids=allowed_kb_ids,
+            collector=collector,
+            max_top_k=max_top_k,
+        )
+        ht = AgentHostTools(
+            db=db,
+            allowed_host_ids=allowed_host_ids,
+            collector=collector,
+            registry=registry,
+        )
+        return cls(knowledge=kt, host=ht)
+
+    # Delegate knowledge base tools
+    def list_knowledge_bases(self) -> list[dict]:
+        return self.knowledge.list_knowledge_bases()
+
+    def search_knowledge_base(self, kb_id: str, query: str, top_k: int = 5) -> list[dict]:
+        return self.knowledge.search_knowledge_base(kb_id, query, top_k)
+
+    # Delegate host tools
+    def list_hosts(self) -> list[dict]:
+        return self.host.list_hosts()
+
+    def get_host_info(self, host_id: str) -> dict:
+        return self.host.get_host_info(host_id)
+
+    def run_host_command(self, host_id: str, command: str) -> dict:
+        return self.host.run_host_command(host_id, command)

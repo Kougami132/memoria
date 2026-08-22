@@ -1,3 +1,4 @@
+from memoria.connectors.registry import ConnectorRegistry
 import logging
 import os
 from functools import lru_cache
@@ -55,3 +56,22 @@ def reset_pipeline() -> None:
     global _pipeline, _agentic_engine
     _pipeline = None
     _agentic_engine = None
+
+_registry: ConnectorRegistry | None = None
+
+
+def get_registry() -> ConnectorRegistry:
+    global _registry
+    if _registry is None:
+        from memoria.connectors.registry import ConnectorRegistry
+        from memoria.connectors.host.connector import HostConnector
+        from memoria.connectors.host.models import HostConfig
+        _registry = ConnectorRegistry()
+        db = get_db()
+        # Preload registered hosts
+        for host in db.list_hosts():
+            try:
+                _registry.register(HostConnector(HostConfig(**host)))
+            except Exception as e:
+                logger.warning("Failed to preload host connector %s: %s", host.get("id"), e)
+    return _registry

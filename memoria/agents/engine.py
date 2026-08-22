@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from memoria.agents.state import SourceCollector
-from memoria.agents.tools import AgentKnowledgeTools
+from memoria.agents.tools import AgentKnowledgeTools, AgentTools
 from memoria.storage.db import DB
 
 if TYPE_CHECKING:
@@ -310,7 +310,7 @@ def _get_agent_tools_schema() -> list[dict]:
     ]
 
 
-def _execute_agent_tool(name: str, args: dict, tools: AgentKnowledgeTools) -> Any:
+def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
     if name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
     elif name == "search_knowledge_base":
@@ -318,6 +318,15 @@ def _execute_agent_tool(name: str, args: dict, tools: AgentKnowledgeTools) -> An
         query = str(args.get("query") or "")
         top_k = int(args.get("top_k") or 5)
         return tools.search_knowledge_base(kb_id, query, top_k)
+    elif name == "list_hosts":
+        return tools.list_hosts()
+    elif name == "get_host_info":
+        host_id = str(args.get("host_id") or "")
+        return tools.get_host_info(host_id)
+    elif name == "run_host_command":
+        host_id = str(args.get("host_id") or "")
+        command = str(args.get("command") or "")
+        return tools.run_host_command(host_id, command)
     else:
         raise ValueError(f"Unknown agent tool: {name}")
 
