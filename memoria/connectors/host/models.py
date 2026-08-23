@@ -11,9 +11,10 @@ class HostConfig(BaseModel):
     port: int = 22
     username: str = "root"
     auth_type: str = "password"  # "password" or "key"
-    credential: str = ""  # password or private key
+    credential: str = ""  # password or private key (decrypted in-memory)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    safe_mode: bool = False  # If True, only allow read-only/inspection commands
     status: str = "unknown"
     os_info: str = ""
     created_at: str = ""

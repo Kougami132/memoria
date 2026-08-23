@@ -22,6 +22,8 @@ import {
   Cpu,
   Database,
   Search,
+  Server,
+  Terminal,
   MessageSquarePlus,
 } from 'lucide-react'
 import * as api from '@/api'
@@ -64,6 +66,9 @@ const mdComponents: Components = {
 const TOOL_CN_MAP: Record<string, string> = {
   list_knowledge_bases: '查询可用知识库',
   search_knowledge_base: '检索知识库内容',
+  list_hosts: '查询可用远程主机',
+  get_host_info: '获取主机运行状态',
+  run_host_command: '远程执行受控命令',
 }
 
 function getToolDisplayName(name?: string, type?: string): string {
@@ -78,6 +83,9 @@ function getToolIcon(name?: string, type?: string) {
   if (type === 'generation') return <Cpu className="w-3.5 h-3.5 text-purple-500" />
   if (name === 'list_knowledge_bases') return <Database className="w-3.5 h-3.5 text-blue-500" />
   if (name === 'search_knowledge_base') return <Search className="w-3.5 h-3.5 text-amber-500" />
+  if (name === 'list_hosts') return <Server className="w-3.5 h-3.5 text-indigo-500" />
+  if (name === 'get_host_info') return <Activity className="w-3.5 h-3.5 text-emerald-500" />
+  if (name === 'run_host_command') return <Terminal className="w-3.5 h-3.5 text-sky-500" />
   return <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
 }
 

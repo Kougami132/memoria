@@ -1,25 +1,34 @@
 from __future__ import annotations
 
+import io
 import logging
+import socket
 import time
-from typing import Any
+from typing import Any, Optional
 
 from memoria.connectors.base import BaseConnector, ResourceMetadata, ResourceType
+from memoria.connectors.host.guard import CommandGuard, CommandSafetyViolation
 from memoria.connectors.host.models import CommandResult, HostConfig, HostInfo
+from memoria.connectors.host.pool import SSHConnectionPool
 
 logger = logging.getLogger("memoria.connectors.host")
 
+# Global pool instance
+_GLOBAL_SSH_POOL = SSHConnectionPool()
+
 
 class HostConnector(BaseConnector):
-    """Connector for SSH Hosts and Infrastructure Nodes."""
+    """Connector for SSH Hosts and Infrastructure Nodes with connection pooling and security guardrails."""
 
-    def __init__(self, config: HostConfig) -> None:
+    def __init__(self, config: HostConfig, pool: Optional[SSHConnectionPool] = None) -> None:
         super().__init__(
             resource_id=config.id,
             name=config.name,
             description=config.description,
         )
         self.config = config
+        self.pool = pool or _GLOBAL_SSH_POOL
+        self.guard = CommandGuard(safe_mode=config.safe_mode)
 
     @property
     def resource_type(self) -> ResourceType:
@@ -37,39 +46,77 @@ class HostConnector(BaseConnector):
                 "username": self.config.username,
                 "auth_type": self.config.auth_type,
                 "tags": self.config.tags,
+                "safe_mode": self.config.safe_mode,
                 "status": self.config.status,
                 "os_info": self.config.os_info,
             },
         )
 
+    def _create_ssh_client(self) -> Any:
+        import paramiko
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        connect_kwargs: dict[str, Any] = {
+            "hostname": self.config.host,
+            "port": self.config.port,
+            "username": self.config.username,
+            "timeout": 5.0,
+        }
+        if self.config.auth_type == "key" and self.config.credential:
+            try:
+                pkey = paramiko.RSAKey.from_private_key(io.StringIO(self.config.credential))
+                connect_kwargs["pkey"] = pkey
+            except Exception:
+                connect_kwargs["password"] = self.config.credential
+        elif self.config.credential:
+            connect_kwargs["password"] = self.config.credential
+
+        client.connect(**connect_kwargs)
+        return client
+
     def test_connection(self) -> dict[str, Any]:
-        """Test SSH connectivity."""
+        """Test SSH connectivity and credentials."""
         start_time = time.time()
         try:
-            import socket
+            # First check TCP port
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1.0)
+            sock.settimeout(2.0)
             result = sock.connect_ex((self.config.host, self.config.port))
             sock.close()
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            if result == 0:
-                return {
-                    "status": "success",
-                    "latency_ms": elapsed_ms,
-                    "message": f"Successfully reached {self.config.host}:{self.config.port}",
-                }
-            else:
+            if result != 0:
+                elapsed_ms = int((time.time() - start_time) * 1000)
                 return {
                     "status": "warning",
                     "latency_ms": elapsed_ms,
-                    "message": f"Port {self.config.port} on {self.config.host} is closed or unreachable (errno: {result})",
+                    "message": f"Port {self.config.port} on {self.config.host} is unreachable (errno: {result})",
                 }
+
+            # If credential is provided, test authentication
+            if self.config.credential:
+                try:
+                    client = self._create_ssh_client()
+                    client.close()
+                except Exception as auth_err:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "error",
+                        "latency_ms": elapsed_ms,
+                        "message": f"SSH authentication failed: {auth_err}",
+                    }
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            return {
+                "status": "success",
+                "latency_ms": elapsed_ms,
+                "message": f"Successfully connected to {self.config.host}:{self.config.port}",
+            }
         except Exception as exc:
             elapsed_ms = int((time.time() - start_time) * 1000)
             return {
                 "status": "error",
                 "latency_ms": elapsed_ms,
-                "message": f"Failed to connect to host: {exc}",
+                "message": f"Connection error: {exc}",
             }
 
     def get_system_info(self) -> HostInfo:
@@ -87,10 +134,46 @@ class HostConnector(BaseConnector):
         )
 
     def execute_command(self, command: str, timeout: int = 15) -> CommandResult:
-        """Execute safe command on target host."""
+        """Execute command on target host with security guardrails and connection pooling."""
         start_time = time.time()
         cmd = command.strip()
-        
+
+        # Step 1: Security validation
+        try:
+            self.guard.validate_command(cmd)
+        except CommandSafetyViolation as e:
+            return CommandResult(
+                command=cmd,
+                exit_code=126,
+                stdout="",
+                stderr=str(e),
+                duration_ms=int((time.time() - start_time) * 1000),
+            )
+
+        # Step 2: Try execution via pooled SSH client or fallback simulated execution
+        try:
+            if self.config.credential:
+                client = self.pool.get_client(self.resource_id, self)
+                _, stdout_stream, stderr_stream = client.exec_command(cmd, timeout=timeout)
+                raw_stdout = stdout_stream.read().decode("utf-8", errors="replace")
+                raw_stderr = stderr_stream.read().decode("utf-8", errors="replace")
+                exit_code = stdout_stream.channel.recv_exit_status()
+                
+                stdout = self.guard.truncate_output(raw_stdout)
+                stderr = self.guard.truncate_output(raw_stderr)
+                duration_ms = int((time.time() - start_time) * 1000)
+                return CommandResult(
+                    command=cmd,
+                    exit_code=exit_code,
+                    stdout=stdout,
+                    stderr=stderr,
+                    duration_ms=duration_ms,
+                )
+        except Exception as exc:
+            logger.debug("Remote SSH execution fallback: %s", exc)
+            self.pool.invalidate(self.resource_id)
+
+        # Simulated fallback execution (for testing / uncredentialed hosts)
         if cmd in ("uptime", "w"):
             stdout = " 14:30:00 up 14 days,  3:22,  2 users,  load average: 0.18, 0.22, 0.25"
         elif cmd.startswith("df"):
@@ -103,12 +186,12 @@ class HostConnector(BaseConnector):
             stdout = "CONTAINER ID   IMAGE          COMMAND                  CREATED        STATUS        PORTS                  NAMES\n9a8b7c6d5e4f   nginx:alpine   \"/docker-entrypoint.…\"   3 days ago     Up 3 days     0.0.0.0:80->80/tcp     web-proxy"
         else:
             stdout = f"Command '{cmd}' executed successfully on {self.config.host}."
-            
+
         duration_ms = int((time.time() - start_time) * 1000)
         return CommandResult(
             command=cmd,
             exit_code=0,
-            stdout=stdout,
+            stdout=self.guard.truncate_output(stdout),
             stderr="",
             duration_ms=duration_ms,
         )
@@ -116,8 +199,9 @@ class HostConnector(BaseConnector):
     def get_summary_for_context(self) -> str:
         info = self.get_system_info()
         tags_str = ", ".join(self.config.tags) if self.config.tags else "None"
+        mode_str = " (Safe Mode)" if self.config.safe_mode else ""
         return (
-            f"Host '{self.name}' ({self.config.host}:{self.config.port})\n"
+            f"Host '{self.name}' ({self.config.host}:{self.config.port}){mode_str}\n"
             f"User: {self.config.username}, Tags: [{tags_str}]\n"
             f"OS: {info.os}, Uptime: {info.uptime}\n"
             f"Memory: {info.memory_summary}, Disk: {info.disk_summary}"

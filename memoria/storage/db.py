@@ -1,4 +1,5 @@
 from __future__ import annotations
+from memoria.connectors.crypto import decrypt_secret, encrypt_secret
 
 import json
 import uuid
@@ -48,6 +49,7 @@ class HostRow(Base):
     credential = Column(Text, nullable=True, default="")
     description = Column(String, default="")
     tags = Column(Text, default="[]")
+    safe_mode = Column(Integer, nullable=False, default=0)
     os_info = Column(String, default="")
     status = Column(String, default="unknown")
     created_at = Column(String, nullable=False)
@@ -207,6 +209,10 @@ class DB:
                 conn.commit()
             if "webdav_path" not in vault_cols:
                 conn.execute(text("ALTER TABLE vaults ADD COLUMN webdav_path TEXT DEFAULT '/'"))
+                conn.commit()
+            host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(hosts)"))]
+            if "safe_mode" not in host_cols:
+                conn.execute(text("ALTER TABLE hosts ADD COLUMN safe_mode INTEGER DEFAULT 0"))
                 conn.commit()
             session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
             session_cols = [r[1] for r in session_info]
@@ -383,11 +389,14 @@ class DB:
     # Host Management
     # ------------------------------------------------------------------
 
-    def _host_dict(self, row: HostRow) -> dict:
+    def _host_dict(self, row: HostRow, decrypt: bool = True) -> dict:
         try:
             tags = json.loads(row.tags) if row.tags else []
         except Exception:
             tags = []
+        cred = row.credential or ""
+        if cred and decrypt:
+            cred = decrypt_secret(cred) or ""
         return {
             "id": row.id,
             "name": row.name,
@@ -395,9 +404,10 @@ class DB:
             "port": row.port,
             "username": row.username,
             "auth_type": row.auth_type,
-            "credential": row.credential or "",
+            "credential": cred,
             "description": row.description or "",
             "tags": tags,
+            "safe_mode": bool(row.safe_mode),
             "os_info": row.os_info or "",
             "status": row.status or "unknown",
             "created_at": row.created_at,
@@ -414,11 +424,13 @@ class DB:
         credential: str = "",
         description: str = "",
         tags: list[str] | None = None,
+        safe_mode: bool = False,
         host_id: str | None = None,
     ) -> dict:
         hid = host_id or _uid()
         now = _now()
         tags_json = json.dumps(tags or [], ensure_ascii=False)
+        encrypted_cred = encrypt_secret(credential) if credential else ""
         with self._s() as s:
             row = HostRow(
                 id=hid,
@@ -427,9 +439,10 @@ class DB:
                 port=port,
                 username=username,
                 auth_type=auth_type,
-                credential=credential,
+                credential=encrypted_cred,
                 description=description,
                 tags=tags_json,
+                safe_mode=1 if safe_mode else 0,
                 os_info="",
                 status="unknown",
                 created_at=now,
@@ -437,19 +450,19 @@ class DB:
             )
             s.add(row)
             s.flush()
-            return self._host_dict(row)
+            return self._host_dict(row, decrypt=True)
 
-    def get_host(self, host_id: str) -> dict | None:
+    def get_host(self, host_id: str, decrypt: bool = True) -> dict | None:
         with self._s() as s:
             row = s.get(HostRow, host_id)
             if row is None:
                 return None
-            return self._host_dict(row)
+            return self._host_dict(row, decrypt=decrypt)
 
-    def list_hosts(self) -> list[dict]:
+    def list_hosts(self, decrypt: bool = False) -> list[dict]:
         with self._s() as s:
             rows = s.query(HostRow).order_by(desc(HostRow.created_at)).all()
-            return [self._host_dict(r) for r in rows]
+            return [self._host_dict(r, decrypt=decrypt) for r in rows]
 
     def update_host(
         self,
@@ -462,6 +475,7 @@ class DB:
         credential: str | None = None,
         description: str | None = None,
         tags: list[str] | None = None,
+        safe_mode: bool | None = None,
         os_info: str | None = None,
         status: str | None = None,
     ) -> dict | None:
@@ -480,18 +494,20 @@ class DB:
             if auth_type is not None:
                 row.auth_type = auth_type
             if credential is not None:
-                row.credential = credential
+                row.credential = encrypt_secret(credential) if credential else ""
             if description is not None:
                 row.description = description
             if tags is not None:
                 row.tags = json.dumps(tags, ensure_ascii=False)
+            if safe_mode is not None:
+                row.safe_mode = 1 if safe_mode else 0
             if os_info is not None:
                 row.os_info = os_info
             if status is not None:
                 row.status = status
             row.updated_at = _now()
             s.flush()
-            return self._host_dict(row)
+            return self._host_dict(row, decrypt=True)
 
     def delete_host(self, host_id: str) -> bool:
         with self._s() as s:

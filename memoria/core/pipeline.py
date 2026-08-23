@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -83,6 +84,107 @@ class Pipeline:
         self.db.add_message(session_id, "user", query)
         self.db.add_message(session_id, "assistant", answer, sources=sources)
 
+    def _build_host_tools_schema(self, bound_host_ids: list[str]) -> list[dict]:
+        if not bound_host_ids:
+            return []
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_host_info",
+                    "description": "获取指定主机的运行状态、系统硬件信息及负载概况。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_id": {
+                                "type": "string",
+                                "description": "目标主机ID",
+                            },
+                        },
+                        "required": ["host_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_host_command",
+                    "description": "在指定远程主机上执行排查/监控或系统状态查询命令（如 uptime, df -h, free -m, top -b -n 1, ps aux, docker ps 等）。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_id": {
+                                "type": "string",
+                                "description": "目标主机ID",
+                            },
+                            "command": {
+                                "type": "string",
+                                "description": "要在远程主机上执行的 shell 命令",
+                            },
+                        },
+                        "required": ["host_id", "command"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        ]
+
+    def _execute_host_tool(self, tool_name: str, args: dict, bot: dict) -> dict:
+        bound_host_ids = bot.get("host_ids") or []
+        host_id = str(args.get("host_id") or "")
+        if host_id not in bound_host_ids:
+            return {"error": f"主机 {host_id} 未绑定到当前助手或无权访问"}
+        try:
+            from memoria.server.deps import get_registry
+            from memoria.connectors.base import ResourceType
+            registry = get_registry()
+        except Exception:
+            registry = None
+
+        if tool_name == "get_host_info":
+            h = self.db.get_host(host_id)
+            if not h:
+                return {"error": f"主机 {host_id} 不存在"}
+            if registry:
+                conn = registry.get(ResourceType.HOST, host_id)
+                if conn:
+                    try:
+                        return conn.get_system_info().model_dump()
+                    except Exception as e:
+                        return {"error": f"获取主机系统信息失败: {e}"}
+            return {
+                "host_id": h["id"],
+                "name": h["name"],
+                "hostname": h["host"],
+                "port": h["port"],
+                "os": h.get("os_info") or "Linux",
+                "status": h.get("status") or "active",
+            }
+        elif tool_name == "run_host_command":
+            cmd = str(args.get("command") or "")
+            if not cmd:
+                return {"error": "命令不能为空"}
+            h = self.db.get_host(host_id)
+            if not h:
+                return {"error": f"主机 {host_id} 不存在"}
+            if registry:
+                conn = registry.get(ResourceType.HOST, host_id)
+                if conn:
+                    try:
+                        return conn.execute_command(cmd).model_dump()
+                    except Exception as e:
+                        return {"error": f"执行主机命令失败: {e}"}
+            try:
+                from memoria.connectors.host.connector import HostConnector
+                from memoria.connectors.host.models import HostConfig
+                conn = HostConnector(HostConfig(**h))
+                return conn.execute_command(cmd).model_dump()
+            except Exception as e:
+                return {"error": f"执行主机命令异常: {e}"}
+        else:
+            return {"error": f"未知工具: {tool_name}"}
+
     def prepare_query(self, bot_id: str, query: str, session_id: str | None = None) -> dict:
         if not query or not query.strip():
             raise ValueError("Query must not be empty")
@@ -126,11 +228,43 @@ class Pipeline:
         history = self.db.get_messages(session_id, limit=10)
         logger.debug("[RAG] session=%s history_msgs=%d", session_id, len(history))
 
+        # Check bound hosts if any
+        host_context_parts: list[str] = []
+        bound_host_ids = bot.get("host_ids") or []
+        if bound_host_ids:
+            try:
+                from memoria.server.deps import get_registry
+                from memoria.connectors.base import ResourceType
+                registry = get_registry()
+                for hid in bound_host_ids:
+                    h_info = self.db.get_host(hid)
+                    if not h_info:
+                        continue
+                    conn = registry.get(ResourceType.HOST, hid)
+                    if conn:
+                        status_str = "在线" if h_info.get("status") == "active" else "离线/未检测"
+                        sys_desc = f"- 主机名称: {h_info['name']} (IP: {h_info['host']}:{h_info['port']}, 用户: {h_info['username']}, 状态: {status_str}, ID: {h_info['id']})"
+                        if h_info.get("os_info"):
+                            sys_desc += f", 系统: {h_info['os_info']}"
+                        if h_info.get("description"):
+                            sys_desc += f", 说明: {h_info['description']}"
+                        host_context_parts.append(sys_desc)
+            except Exception as e:
+                logger.warning("[RAG] failed to build host context: %s", e)
+
+        tools_schema = self._build_host_tools_schema(bound_host_ids)
+
         # Build prompt
         context_text = "\n\n".join(c["text"] for c in context_chunks)
         system_content = bot["system_prompt"] or self._default_system_prompt
+        
+        if host_context_parts:
+            host_text = "\n".join(host_context_parts)
+            system_content += f"\n\n关联主机信息：\n当前助手已关联以下服务器/主机节点，当用户询问服务器状态、运行指标或需要执行排查命令时，请调用相应工具（如 get_host_info / run_host_command）进行实时查询或结合这些信息作答：\n{host_text}"
+
         if context_text:
             system_content += f"\n\n参考资料：\n{context_text}"
+
         system_content += (
             "\n\n输出格式（必须遵守）：\n"
             "### 思路摘要\n"
@@ -151,19 +285,55 @@ class Pipeline:
             "session_id": session_id,
             "messages": messages,
             "sources": sources,
+            "bot": bot,
+            "tools_schema": tools_schema,
         }
 
     def query(self, bot_id: str, query: str, session_id: str | None = None) -> dict:
         prepared = self.prepare_query(bot_id, query, session_id)
-        result = self._llm.call(prepared["messages"])
-        answer = result["content"]
+        messages = list(prepared["messages"])
+        tools_schema = prepared.get("tools_schema")
+        bot = prepared.get("bot") or {}
+
+        max_tool_turns = 4
+        turn = 0
+        while turn < max_tool_turns:
+            turn += 1
+            result = self._llm.call(messages, tools=tools_schema if tools_schema else None)
+            tool_calls = result.get("tool_calls") if isinstance(result, dict) else None
+            if not tool_calls:
+                answer = result.get("content", "") if isinstance(result, dict) else str(result)
+                break
+            
+            messages.append({
+                "role": "assistant",
+                "content": result.get("content") or "",
+                "tool_calls": tool_calls,
+            })
+            for tc in tool_calls:
+                func_name = tc.get("function", {}).get("name", "")
+                try:
+                    func_args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+                except Exception:
+                    func_args = {}
+                tool_res = self._execute_host_tool(func_name, func_args, bot)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "name": func_name,
+                    "content": json.dumps(tool_res, ensure_ascii=False),
+                })
+        else:
+            result = self._llm.call(messages)
+            answer = result.get("content", "") if isinstance(result, dict) else str(result)
+
         logger.debug("[RAG] answer=%r", answer[:200])
         self._persist_response(prepared["session_id"], prepared["query"], answer, prepared["sources"])
 
         return {
             "answer": answer,
             "session_id": prepared["session_id"],
-            "sources": prepared["sources"],
+            "sources": prepared.get("sources", []),
         }
 
     def query_stream(self, prepared: dict) -> Iterator[dict]:
@@ -172,11 +342,51 @@ class Pipeline:
             "session_id": prepared["session_id"],
             "sources": prepared["sources"],
         }
+        tools_schema = prepared.get("tools_schema")
+        bot = prepared.get("bot") or {}
+        messages = list(prepared["messages"])
+
+        if tools_schema:
+            max_tool_turns = 3
+            turn = 0
+            while turn < max_tool_turns:
+                turn += 1
+                check_res = self._llm.call(messages, tools=tools_schema)
+                tool_calls = check_res.get("tool_calls") if isinstance(check_res, dict) else None
+                if not tool_calls:
+                    break
+                
+                yield {"type": "status", "message": "正在调用关联主机执行排查与状态检测…"}
+                messages.append({
+                    "role": "assistant",
+                    "content": check_res.get("content") or "",
+                    "tool_calls": tool_calls,
+                })
+                for tc in tool_calls:
+                    func_name = tc.get("function", {}).get("name", "")
+                    try:
+                        func_args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+                    except Exception:
+                        func_args = {}
+                    tool_res = self._execute_host_tool(func_name, func_args, bot)
+                    if func_name == "run_host_command":
+                        cmd = func_args.get("command", "")
+                        yield {"type": "status", "message": f"主机执行命令: {cmd}"}
+                    elif func_name == "get_host_info":
+                        yield {"type": "status", "message": "获取主机系统负载与资源状态完成"}
+                        
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
+                        "name": func_name,
+                        "content": json.dumps(tool_res, ensure_ascii=False),
+                    })
+
         yield {"type": "status", "message": "正在请求模型并流式生成…"}
 
         answer_parts: list[str] = []
         try:
-            for delta in self._llm.call(prepared["messages"], stream=True):
+            for delta in self._llm.call(messages, stream=True):
                 if not delta:
                     continue
                 answer_parts.append(delta)

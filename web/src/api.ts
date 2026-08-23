@@ -13,9 +13,10 @@ export interface UploadResult { doc_id: string; chunk_count: number; doc: Doc }
 export interface Bot {
   id: string; name: string; system_prompt: string;
   model_override: string | null; kb_ids: string[]; created_at: string
+  host_ids?: string[]
 }
-export interface BotCreate { name: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
-export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; model_override?: string }
+export interface BotCreate { name: string; system_prompt?: string; kb_ids?: string[]; host_ids?: string[]; model_override?: string }
+export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; host_ids?: string[]; model_override?: string }
 export interface Session { id: string; bot_id: string | null; session_type?: 'bot' | 'agentic'; title: string; created_at: string }
 export interface Message {
   id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]; trace?: AgentTrace | null
@@ -188,6 +189,46 @@ export async function* streamAgentChat(
     yield JSON.parse(buffer.trim()) as AgentStreamEvent
   }
 }
+
+export async function* streamBotChat(
+  botId: string,
+  message: string,
+  sessionId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<AgentStreamEvent> {
+  const res = await fetch(`${BASE}/chat/${botId}/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId }),
+    signal,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Bot stream request failed')
+  }
+  if (!res.body) throw new Error('ReadableStream not supported')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (trimmed) {
+        yield JSON.parse(trimmed) as AgentStreamEvent
+      }
+    }
+  }
+  if (buffer.trim()) {
+    yield JSON.parse(buffer.trim()) as AgentStreamEvent
+  }
+}
 export const listAgentSessions = () => req<Session[]>('/agent-sessions')
 export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)
 export const updateAgentSession = (id: string, data: { title: string }) =>
@@ -292,3 +333,39 @@ export const browseWebDAVVaultPath = (data: {
 export const testWebDAVVault = (data: {
   webdav_url: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
 }) => req<WebDAVTestResult>('/vaults/test-webdav', { method: 'POST', ...json(data) })
+export interface Host {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  auth_type: 'password' | 'key'
+  credential_set: boolean
+  description: string
+  tags: string[]
+  safe_mode: boolean
+  status: 'active' | 'inactive' | 'error'
+  os_info?: string
+  created_at: string
+  updated_at: string
+}
+export interface HostCreate {
+  name: string
+  host: string
+  port?: number
+  username: string
+  auth_type?: 'password' | 'key'
+  credential?: string
+  description?: string
+  tags?: string[]
+  safe_mode?: boolean
+}
+export interface HostUpdate extends Partial<HostCreate> {}
+export interface TestHostResult { ok: boolean; message?: string; os_info?: string; latency_ms?: number }
+
+export const listHosts = () => req<Host[]>('/hosts')
+export const getHost = (id: string) => req<Host>(`/hosts/${id}`)
+export const createHost = (data: HostCreate) => req<Host>('/hosts', { method: 'POST', ...json(data) })
+export const updateHost = (id: string, data: HostUpdate) => req<Host>(`/hosts/${id}`, { method: 'PUT', ...json(data) })
+export const deleteHost = (id: string) => req<void>(`/hosts/${id}`, { method: 'DELETE' })
+export const testHostConnection = (id: string) => req<TestHostResult>(`/hosts/${id}/test`, { method: 'POST' })

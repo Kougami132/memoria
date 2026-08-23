@@ -6,6 +6,7 @@ import {
   MessageSquare, 
   Sparkles, 
   Settings, 
+  Server,
   PanelLeftClose, 
   PanelLeft,
   Sun,
@@ -17,6 +18,7 @@ const navLinks = [
   { to: '/chat', label: '常规对话', icon: MessageSquare },
   { to: '/agentic-chat', label: 'AI Agent', icon: Sparkles },
   { to: '/knowledge-bases', label: '知识库', icon: Database },
+  { to: '/hosts', label: '主机管理', icon: Server },
   { to: '/bots', label: 'Bots 助手', icon: Bot },
   { to: '/settings', label: '系统设置', icon: Settings },
 ]

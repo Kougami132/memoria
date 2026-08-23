@@ -12,10 +12,11 @@ import * as api from '@/api'
 import type { Bot as BotType } from '@/api'
 
 function BotForm({
-  initial, kbs, onSubmit, onCancel, isPending, defaultPrompt,
+  initial, kbs, hosts = [], onSubmit, onCancel, isPending, defaultPrompt,
 }: {
   initial?: BotType
   kbs: api.KB[]
+  hosts?: api.Host[]
   onSubmit: (data: api.BotCreate) => void
   onCancel?: () => void
   isPending: boolean
@@ -24,9 +25,16 @@ function BotForm({
   const [name, setName] = useState(initial?.name ?? '')
   const [prompt, setPrompt] = useState(initial?.system_prompt ?? defaultPrompt)
   const [selectedKBs, setSelectedKBs] = useState<Set<string>>(new Set(initial?.kb_ids ?? []))
+  const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set(initial?.host_ids ?? []))
   const [modelOverride, setModelOverride] = useState(initial?.model_override ?? '')
 
   const toggleKB = (id: string) => setSelectedKBs(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  const toggleHost = (id: string) => setSelectedHosts(prev => {
     const next = new Set(prev)
     next.has(id) ? next.delete(id) : next.add(id)
     return next
@@ -77,6 +85,34 @@ function BotForm({
           </div>
         </div>
       )}
+
+      {hosts.length > 0 && (
+        <div className="space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">关联 SSH 主机</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {hosts.map(h => (
+              <label
+                key={h.id}
+                className={`flex items-center gap-2.5 rounded-xl border p-2.5 cursor-pointer transition-colors ${
+                  selectedHosts.has(h.id)
+                    ? 'border-foreground/30 bg-accent'
+                    : 'border-border hover:bg-accent/40'
+                }`}
+              >
+                <Checkbox
+                  id={h.id}
+                  checked={selectedHosts.has(h.id)}
+                  onCheckedChange={() => toggleHost(h.id)}
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">{h.name}</span>
+                  <span className="text-[11px] text-muted-foreground font-mono">{h.username}@{h.host}</span>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           指定模型 <span className="normal-case font-normal text-muted-foreground">（可选，留空使用全局默认模型）</span>
@@ -94,6 +130,7 @@ function BotForm({
             name,
             system_prompt: prompt,
             kb_ids: [...selectedKBs],
+            host_ids: [...selectedHosts],
             model_override: modelOverride || undefined,
           })}
           disabled={!name.trim() || isPending}
@@ -117,6 +154,7 @@ export default function Bots() {
   const qc = useQueryClient()
   const { data: bots = [] } = useQuery({ queryKey: ['bots'], queryFn: api.listBots })
   const { data: kbs = [] } = useQuery({ queryKey: ['kbs'], queryFn: api.listKBs })
+  const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: api.listHosts })
   const { data: settings, isPending: settingsPending } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
   const defaultPrompt = settings?.system_prompt ?? ''
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -158,6 +196,7 @@ export default function Bots() {
             <h3 className="font-semibold text-base mb-4">创建新助手</h3>
             <BotForm
               kbs={kbs}
+              hosts={hosts}
               onSubmit={data => createBot.mutate(data)}
               onCancel={() => setShowCreate(false)}
               isPending={createBot.isPending}
@@ -227,13 +266,21 @@ export default function Bots() {
                 )}
               </div>
 
-              {bot.kb_ids.length > 0 && (
+              {((bot.kb_ids && bot.kb_ids.length > 0) || (bot.host_ids && bot.host_ids.length > 0)) && (
                 <div className="flex flex-wrap gap-1.5 pt-2 border-t border-border/40">
-                  {bot.kb_ids.map(id => {
+                  {bot.kb_ids?.map(id => {
                     const kb = kbs.find(k => k.id === id)
                     return kb ? (
                       <Badge key={id} variant="secondary" className="text-[11px] font-normal px-2 py-0.5 rounded-md">
-                        {kb.name}
+                        📚 {kb.name}
+                      </Badge>
+                    ) : null
+                  })}
+                  {bot.host_ids?.map(id => {
+                    const h = hosts.find(hostItem => hostItem.id === id)
+                    return h ? (
+                      <Badge key={id} variant="outline" className="text-[11px] font-normal px-2 py-0.5 rounded-md bg-accent/40">
+                        🖥️ {h.name}
                       </Badge>
                     ) : null
                   })}
@@ -245,6 +292,7 @@ export default function Bots() {
                   <BotForm
                     initial={bot}
                     kbs={kbs}
+                    hosts={hosts}
                     onSubmit={data => updateBot.mutate({ id: bot.id, data })}
                     onCancel={() => setEditingId(null)}
                     isPending={updateBot.isPending}

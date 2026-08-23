@@ -68,8 +68,8 @@ def get_registry() -> ConnectorRegistry:
         from memoria.connectors.host.models import HostConfig
         _registry = ConnectorRegistry()
         db = get_db()
-        # Preload registered hosts
-        for host in db.list_hosts():
+        # Preload registered hosts with decrypted credentials
+        for host in db.list_hosts(decrypt=True):
             try:
                 _registry.register(HostConnector(HostConfig(**host)))
             except Exception as e:

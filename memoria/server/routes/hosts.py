@@ -26,6 +26,7 @@ class HostCreate(BaseModel):
     credential: str = Field(default="")
     description: str = Field(default="")
     tags: list[str] = Field(default_factory=list)
+    safe_mode: bool = Field(default=False)
 
 
 class HostUpdate(BaseModel):
@@ -37,6 +38,7 @@ class HostUpdate(BaseModel):
     credential: str | None = None
     description: str | None = None
     tags: list[str] | None = None
+    safe_mode: bool | None = None
     os_info: str | None = None
     status: str | None = None
 
@@ -48,17 +50,28 @@ class HostOut(BaseModel):
     port: int
     username: str
     auth_type: str
+    credential_set: bool = False
     description: str
     tags: list[str]
+    safe_mode: bool = False
     os_info: str
     status: str
     created_at: str
     updated_at: str
 
 
+def _to_host_out(h: dict[str, Any]) -> dict[str, Any]:
+    out = dict(h)
+    out["credential_set"] = bool(h.get("credential"))
+    if "credential" in out:
+        del out["credential"]
+    return out
+
+
 @router.get("", response_model=list[HostOut])
 def list_hosts(db: DB = Depends(get_db)) -> list[dict[str, Any]]:
-    return db.list_hosts()
+    hosts = db.list_hosts(decrypt=False)
+    return [_to_host_out(h) for h in hosts]
 
 
 @router.post("", response_model=HostOut, status_code=201)
@@ -76,20 +89,21 @@ def create_host(
         credential=payload.credential,
         description=payload.description,
         tags=payload.tags,
+        safe_mode=payload.safe_mode,
     )
-    # Register connector in runtime registry
+    # Register connector in runtime registry with decrypted credential
     config = HostConfig(**host_dict)
     connector = HostConnector(config)
     registry.register(connector)
-    return host_dict
+    return _to_host_out(host_dict)
 
 
 @router.get("/{host_id}", response_model=HostOut)
 def get_host(host_id: str, db: DB = Depends(get_db)) -> dict[str, Any]:
-    host = db.get_host(host_id)
+    host = db.get_host(host_id, decrypt=False)
     if not host:
         raise HTTPException(status_code=404, detail="Host not found")
-    return host
+    return _to_host_out(host)
 
 
 @router.put("/{host_id}", response_model=HostOut)
@@ -99,6 +113,7 @@ def update_host(
     db: DB = Depends(get_db),
     registry: ConnectorRegistry = Depends(get_registry),
 ) -> dict[str, Any]:
+    # If credential was not provided or empty string, do not overwrite if None
     host = db.update_host(
         host_id=host_id,
         name=payload.name,
@@ -109,6 +124,7 @@ def update_host(
         credential=payload.credential,
         description=payload.description,
         tags=payload.tags,
+        safe_mode=payload.safe_mode,
         os_info=payload.os_info,
         status=payload.status,
     )
@@ -119,7 +135,7 @@ def update_host(
     config = HostConfig(**host)
     connector = HostConnector(config)
     registry.register(connector)
-    return host
+    return _to_host_out(host)
 
 
 @router.delete("/{host_id}", status_code=204)
@@ -140,17 +156,16 @@ def test_host_connection(
     db: DB = Depends(get_db),
     registry: ConnectorRegistry = Depends(get_registry),
 ) -> dict[str, Any]:
-    host = db.get_host(host_id)
+    host = db.get_host(host_id, decrypt=True)
     if not host:
         raise HTTPException(status_code=404, detail="Host not found")
     
-    conn = registry.get(ResourceType.HOST, host_id)
-    if not conn:
-        config = HostConfig(**host)
-        conn = HostConnector(config)
-        registry.register(conn)
+    config = HostConfig(**host)
+    conn = HostConnector(config)
+    registry.register(conn)
         
     result = conn.test_connection()
-    new_status = "online" if result.get("status") == "success" else "offline"
+    result["ok"] = (result.get("status") == "success")
+    new_status = "active" if result.get("status") == "success" else "error"
     db.update_host(host_id, status=new_status)
     return result

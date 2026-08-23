@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from memoria.agents.state import SourceCollector
-from memoria.agents.tools import AgentKnowledgeTools, AgentTools
+from memoria.agents.tools import AgentTools, TOOL_METADATA
 from memoria.storage.db import DB
 
 if TYPE_CHECKING:
@@ -42,9 +42,10 @@ class AgentRunner(Protocol):
         self,
         message: str,
         instructions: str,
-        tools: AgentKnowledgeTools,
+        tools: Any,
         model_name: str,
         session_id: str | None = None,
+        tools_schema: list[dict] | None = None,
     ) -> AgentRunnerOutput | str:
         ...
 
@@ -266,8 +267,10 @@ def _ensure_local_trace_processor(set_trace_processors: Any) -> None:
 
 
 
-def _get_agent_tools_schema() -> list[dict]:
-    return [
+def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) -> list[dict]:
+    schemas = []
+    if include_kb:
+        schemas.extend([
         {
             "type": "function",
             "function": {
@@ -307,7 +310,54 @@ def _get_agent_tools_schema() -> list[dict]:
                 },
             },
         },
-    ]
+        ])
+    if include_host:
+        schemas.extend([
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_hosts",
+                    "description": "查询当前允许访问的所有远程主机与服务器列表及基本状态。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_host_info",
+                    "description": "获取指定远程主机的系统配置与运行状态详情（如操作系统、CPU负载、内存及磁盘信息）。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_id": {"type": "string", "description": "要查询的主机ID"},
+                        },
+                        "required": ["host_id"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_host_command",
+                    "description": "在指定的主机上执行安全的只读/状态查询指令（如 uptime, df -h, free -m, ps, docker ps 等）。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_id": {"type": "string", "description": "要执行命令的主机ID"},
+                            "command": {"type": "string", "description": "要执行的Shell命令"},
+                        },
+                        "required": ["host_id", "command"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        ])
+    return schemas
 
 
 def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
@@ -345,9 +395,10 @@ class OpenAIAgentsRunner:
         self,
         message: str,
         instructions: str,
-        tools: AgentKnowledgeTools,
+        tools: Any,
         model_name: str,
         session_id: str | None = None,
+        tools_schema: list[dict] | None = None,
     ) -> AgentRunnerOutput:
         try:
             from openai import AsyncOpenAI
@@ -362,15 +413,46 @@ class OpenAIAgentsRunner:
         _ensure_local_trace_processor(set_trace_processors)
         trace_id = gen_trace_id()
 
-        @function_tool
-        def list_knowledge_bases() -> list[dict]:
-            """List knowledge bases this agent is allowed to use."""
-            return tools.list_knowledge_bases()
+        agent_tools = []
+        if tools_schema is None:
+            tools_schema = _get_agent_tools_schema()
 
-        @function_tool
-        def search_knowledge_base(kb_id: str, query: str, top_k: int = 5) -> list[dict]:
-            """Search one allowed Memoria knowledge base and return matching chunks."""
-            return tools.search_knowledge_base(kb_id, query, top_k)
+        tool_names = {t["function"]["name"] for t in tools_schema}
+
+        if "list_knowledge_bases" in tool_names:
+            @function_tool
+            def list_knowledge_bases() -> list[dict]:
+                """List knowledge bases this agent is allowed to use."""
+                return tools.list_knowledge_bases()
+            agent_tools.append(list_knowledge_bases)
+
+        if "search_knowledge_base" in tool_names:
+            @function_tool
+            def search_knowledge_base(kb_id: str, query: str, top_k: int = 5) -> list[dict]:
+                """Search one allowed Memoria knowledge base and return matching chunks."""
+                return tools.search_knowledge_base(kb_id, query, top_k)
+            agent_tools.append(search_knowledge_base)
+
+        if "list_hosts" in tool_names:
+            @function_tool
+            def list_hosts() -> list[dict]:
+                """List hosts this agent is allowed to inspect."""
+                return tools.list_hosts()
+            agent_tools.append(list_hosts)
+
+        if "get_host_info" in tool_names:
+            @function_tool
+            def get_host_info(host_id: str) -> dict:
+                """Get detailed runtime info and status for a host."""
+                return tools.get_host_info(host_id)
+            agent_tools.append(get_host_info)
+
+        if "run_host_command" in tool_names:
+            @function_tool
+            def run_host_command(host_id: str, command: str) -> dict:
+                """Run a safe status inspection command on a host."""
+                return tools.run_host_command(host_id, command)
+            agent_tools.append(run_host_command)
 
         client = AsyncOpenAI(base_url=self._base_url, api_key=self._api_key)
         model = OpenAIChatCompletionsModel(model=model_name, openai_client=client)
@@ -378,7 +460,7 @@ class OpenAIAgentsRunner:
             name="Memoria AI Agent",
             instructions=instructions,
             model=model,
-            tools=[list_knowledge_bases, search_knowledge_base],
+            tools=agent_tools,
         )
         run_config = RunConfig(
             tracing_disabled=False,
@@ -409,8 +491,9 @@ class OpenAIAgentsRunner:
         self,
         message: str,
         instructions: str,
-        tools: AgentKnowledgeTools,
+        tools: Any,
         model_name: str,
+        tools_schema: list[dict] | None = None,
         session_id: str | None = None,
         max_turns: int = 6,
     ) -> Iterator[dict[str, Any]]:
@@ -423,7 +506,8 @@ class OpenAIAgentsRunner:
         trace_id = f"trace-{uuid.uuid4().hex[:12]}"
         spans: list[dict[str, Any]] = []
 
-        tools_schema = _get_agent_tools_schema()
+        if tools_schema is None:
+            tools_schema = _get_agent_tools_schema()
         agent_span_id = f"span-agent-{uuid.uuid4().hex[:8]}"
         agent_span = {
             "id": agent_span_id,
@@ -484,13 +568,15 @@ class OpenAIAgentsRunner:
                         "span": dict(gen_span),
                     })
 
-                    stream = await client.chat.completions.create(
-                        model=model_name,
-                        messages=messages,
-                        tools=tools_schema,
-                        stream_options={"include_usage": True},
-                        stream=True,
-                    )
+                    create_kwargs: dict[str, Any] = {
+                        "model": model_name,
+                        "messages": messages,
+                        "stream_options": {"include_usage": True},
+                        "stream": True,
+                    }
+                    if tools_schema:
+                        create_kwargs["tools"] = tools_schema
+                    stream = await client.chat.completions.create(**create_kwargs)
 
                     current_content = ""
                     current_thought = ""
@@ -734,12 +820,18 @@ class MockAgentRunner:
         tools: AgentKnowledgeTools,
         model_name: str,
         session_id: str | None = None,
+        tools_schema: list[dict] | None = None,
     ) -> AgentRunnerOutput:
         for kb in tools.list_knowledge_bases():
             tools.search_knowledge_base(kb["id"], message, top_k=3)
+        if hasattr(tools, "list_hosts"):
+            for host in tools.list_hosts():
+                tools.get_host_info(host["id"])
+                break
         return AgentRunnerOutput(answer="[mock agentic response]")
 
 
+@dataclass
 @dataclass
 class AgenticRagEngine:
     db: DB
@@ -748,36 +840,72 @@ class AgenticRagEngine:
     max_sources: int = 20
     history_limit: int = 12
 
-    def run(self, message: str, session_id: str | None = None) -> dict:
+    def run(
+        self,
+        message: str,
+        session_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> dict:
         if not message or not message.strip():
             raise ValueError("Query must not be empty")
 
-        if session_id is not None:
-            sess = self.db.get_agentic_session(session_id)
-            if sess is None:
-                raise ValueError(f"agentic session {session_id} not found")
-        else:
-            sess = self.db.create_agentic_session(message)
-            session_id = sess["id"]
-
         from memoria.config import get_effective_settings
-
         effective = get_effective_settings(self.db)
-        allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
+
+        bot = None
+        if bot_id is not None:
+            bot = self.db.get_bot(bot_id)
+            if bot is None:
+                raise ValueError(f"Bot {bot_id} not found")
+            allowed_kb_ids = bot.get("kb_ids") or []
+            allowed_host_ids = bot.get("host_ids") or []
+            if session_id is not None:
+                sess = self.db.get_bot_session(session_id, bot_id)
+                if sess is None:
+                    raise ValueError(f"session {session_id} not found for bot {bot_id}")
+            else:
+                sess = self.db.create_session(bot_id, title=message)
+                session_id = sess["id"]
+            system_prompt = bot.get("system_prompt") or effective.get("system_prompt") or ""
+            instructions = self._instructions(effective, custom_system_prompt=system_prompt, is_bot=True)
+        else:
+            allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
+            allowed_host_ids = [h["id"] for h in self.db.list_hosts()]
+            if session_id is not None:
+                sess = self.db.get_agentic_session(session_id)
+                if sess is None:
+                    raise ValueError(f"agentic session {session_id} not found")
+            else:
+                sess = self.db.create_agentic_session(message)
+                session_id = sess["id"]
+            instructions = self._instructions(effective, is_bot=False)
+
         collector = SourceCollector(max_sources=self.max_sources)
-        tools = AgentKnowledgeTools(
+        tools = AgentTools.create(
             db=self.db,
             pipeline=self.pipeline,
             allowed_kb_ids=allowed_kb_ids,
+            allowed_host_ids=allowed_host_ids,
             collector=collector,
         )
+        tools_schema = _get_agent_tools_schema(
+            include_kb=bool(allowed_kb_ids),
+            include_host=bool(allowed_host_ids),
+        )
+
         history = self.db.get_messages(session_id, limit=self.history_limit)
         prompt = self._build_prompt(message, history)
 
         runner = self.runner or self._default_runner(effective)
-        instructions = self._instructions(effective)
-        logger.debug("agentic chat: session=%s allowed_kbs=%s history=%s", session_id, allowed_kb_ids, len(history))
-        runner_output = runner.run(prompt, instructions, tools, effective["llm_model"], session_id=session_id)
+        logger.debug("agent/bot chat: session=%s bot=%s allowed_kbs=%s allowed_hosts=%s", session_id, bot_id, allowed_kb_ids, allowed_host_ids)
+        runner_output = runner.run(
+            prompt,
+            instructions,
+            tools,
+            effective["llm_model"],
+            session_id=session_id,
+            tools_schema=tools_schema,
+        )
         if isinstance(runner_output, AgentRunnerOutput):
             answer = runner_output.answer
             trace = runner_output.trace
@@ -799,34 +927,62 @@ class AgenticRagEngine:
             "trace": stored_trace,
         }
 
-    def run_stream(self, message: str, session_id: str | None = None) -> Iterator[dict[str, Any]]:
+    def run_stream(
+        self,
+        message: str,
+        session_id: str | None = None,
+        bot_id: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
         if not message or not message.strip():
             raise ValueError("Query must not be empty")
 
-        if session_id is not None:
-            sess = self.db.get_agentic_session(session_id)
-            if sess is None:
-                raise ValueError(f"agentic session {session_id} not found")
-        else:
-            sess = self.db.create_agentic_session(message)
-            session_id = sess["id"]
-
         from memoria.config import get_effective_settings
-
         effective = get_effective_settings(self.db)
-        allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
+
+        bot = None
+        if bot_id is not None:
+            bot = self.db.get_bot(bot_id)
+            if bot is None:
+                raise ValueError(f"Bot {bot_id} not found")
+            allowed_kb_ids = bot.get("kb_ids") or []
+            allowed_host_ids = bot.get("host_ids") or []
+            if session_id is not None:
+                sess = self.db.get_bot_session(session_id, bot_id)
+                if sess is None:
+                    raise ValueError(f"session {session_id} not found for bot {bot_id}")
+            else:
+                sess = self.db.create_session(bot_id, title=message)
+                session_id = sess["id"]
+            system_prompt = bot.get("system_prompt") or effective.get("system_prompt") or ""
+            instructions = self._instructions(effective, custom_system_prompt=system_prompt, is_bot=True)
+        else:
+            allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
+            allowed_host_ids = [h["id"] for h in self.db.list_hosts()]
+            if session_id is not None:
+                sess = self.db.get_agentic_session(session_id)
+                if sess is None:
+                    raise ValueError(f"agentic session {session_id} not found")
+            else:
+                sess = self.db.create_agentic_session(message)
+                session_id = sess["id"]
+            instructions = self._instructions(effective, is_bot=False)
+
         collector = SourceCollector(max_sources=self.max_sources)
-        tools = AgentKnowledgeTools(
+        tools = AgentTools.create(
             db=self.db,
             pipeline=self.pipeline,
             allowed_kb_ids=allowed_kb_ids,
+            allowed_host_ids=allowed_host_ids,
             collector=collector,
+        )
+        tools_schema = _get_agent_tools_schema(
+            include_kb=bool(allowed_kb_ids),
+            include_host=bool(allowed_host_ids),
         )
         history = self.db.get_messages(session_id, limit=self.history_limit)
         prompt = self._build_prompt(message, history)
 
         runner = self.runner or self._default_runner(effective)
-        instructions = self._instructions(effective)
 
         self.db.add_message(session_id, "user", message)
 
@@ -839,14 +995,28 @@ class AgenticRagEngine:
         final_trace = None
 
         if hasattr(runner, "run_stream"):
-            for event in runner.run_stream(prompt, instructions, tools, effective["llm_model"], session_id=session_id):
+            for event in runner.run_stream(
+                prompt,
+                instructions,
+                tools,
+                effective["llm_model"],
+                session_id=session_id,
+                tools_schema=tools_schema,
+            ):
                 if event.get("type") == "done":
                     final_answer = event.get("answer") or ""
                     final_trace = event.get("trace")
                 else:
                     yield event
         else:
-            runner_output = runner.run(prompt, instructions, tools, effective["llm_model"], session_id=session_id)
+            runner_output = runner.run(
+                prompt,
+                instructions,
+                tools,
+                effective["llm_model"],
+                session_id=session_id,
+                tools_schema=tools_schema,
+            )
             if isinstance(runner_output, AgentRunnerOutput):
                 final_answer = runner_output.answer
                 final_trace = runner_output.trace
@@ -890,14 +1060,24 @@ class AgenticRagEngine:
             return MockAgentRunner()
         return OpenAIAgentsRunner(effective["openai_base_url"], effective["openai_api_key"])
 
-    def _instructions(self, effective: dict) -> str:
-        base_prompt = effective.get("system_prompt") or ""
-        return (
-            f"{base_prompt}\n\n"
-            "You are Memoria's independent AI Agent assistant. You can access every knowledge "
-            "base available in the system. When the user asks about stored knowledge, first inspect "
-            "available knowledge bases with list_knowledge_bases, then search the most relevant ones "
-            "with search_knowledge_base. Use retrieved evidence when available. If the retrieved "
-            "sources are insufficient, say so clearly. Do not invent citations; the backend will "
-            "attach structured sources collected from tool execution."
-        )
+    def _instructions(
+        self,
+        effective: dict,
+        custom_system_prompt: str | None = None,
+        is_bot: bool = False,
+    ) -> str:
+        base_prompt = custom_system_prompt if (custom_system_prompt is not None and custom_system_prompt != "") else (effective.get("system_prompt") or "")
+        if is_bot:
+            role_desc = (
+                "You are an AI assistant in Memoria configured for this specific bot. "
+                "You have access to tools specifically configured for this bot (such as bound knowledge bases and host servers). "
+                "When the user asks questions or issues commands, select and use the available tools as appropriate."
+            )
+        else:
+            role_desc = (
+                "You are Memoria's independent AI Agent assistant. You can access every knowledge base "
+                "and host server available in the system. When the user asks questions or issues tasks, "
+                "freely inspect and utilize all available tools to accomplish the goal."
+            )
+        return f"{base_prompt}\n\n{role_desc}".strip()
+
