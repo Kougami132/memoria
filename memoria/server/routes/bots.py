@@ -14,6 +14,7 @@ class BotCreate(BaseModel):
     system_prompt: str = ""
     kb_ids: list[str] = []
     host_ids: list[str] = []
+    host_security_modes: Optional[dict[str, str]] = None
     model_override: Optional[str] = None
 
 
@@ -22,6 +23,7 @@ class BotUpdate(BaseModel):
     system_prompt: Optional[str] = None
     kb_ids: Optional[list[str]] = None
     host_ids: Optional[list[str]] = None
+    host_security_modes: Optional[dict[str, str]] = None
     model_override: Optional[str] = None
 
 
@@ -32,6 +34,7 @@ def create_bot(body: BotCreate, db: DB = Depends(get_db)):
         system_prompt=body.system_prompt,
         kb_ids=body.kb_ids,
         host_ids=body.host_ids,
+        host_security_modes=body.host_security_modes,
         model_override=body.model_override,
     )
 
@@ -57,6 +60,7 @@ def update_bot(bot_id: str, body: BotUpdate, db: DB = Depends(get_db)):
         system_prompt=body.system_prompt,
         kb_ids=body.kb_ids,
         host_ids=body.host_ids,
+        host_security_modes=body.host_security_modes,
         model_override=body.model_override,
     )
     if bot is None:

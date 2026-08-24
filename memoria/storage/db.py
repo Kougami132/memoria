@@ -50,6 +50,7 @@ class HostRow(Base):
     description = Column(String, default="")
     tags = Column(Text, default="[]")
     safe_mode = Column(Integer, nullable=False, default=0)
+    security_mode = Column(String, nullable=False, default="read_only")
     os_info = Column(String, default="")
     status = Column(String, default="unknown")
     created_at = Column(String, nullable=False)
@@ -60,6 +61,7 @@ class BotHostLink(Base):
     __tablename__ = "bot_host_links"
     bot_id = Column(String, ForeignKey("bots.id"), primary_key=True)
     host_id = Column(String, ForeignKey("hosts.id"), primary_key=True)
+    security_mode = Column(String, nullable=True, default=None)
 
 
 class DocumentRow(Base):
@@ -213,6 +215,12 @@ class DB:
             host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(hosts)"))]
             if "safe_mode" not in host_cols:
                 conn.execute(text("ALTER TABLE hosts ADD COLUMN safe_mode INTEGER DEFAULT 0"))
+            if "security_mode" not in host_cols:
+                conn.execute(text("ALTER TABLE hosts ADD COLUMN security_mode TEXT DEFAULT 'read_only'"))
+                conn.commit()
+            bot_host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bot_host_links)"))]
+            if "security_mode" not in bot_host_cols:
+                conn.execute(text("ALTER TABLE bot_host_links ADD COLUMN security_mode TEXT DEFAULT NULL"))
                 conn.commit()
             session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
             session_cols = [r[1] for r in session_info]
@@ -316,15 +324,22 @@ class DB:
     def _bot_dict(self, s: Session, row: BotRow) -> dict:
         links = s.query(BotKBLink).filter(BotKBLink.bot_id == row.id).all()
         host_links = s.query(BotHostLink).filter(BotHostLink.bot_id == row.id).all()
+        host_security_modes = {
+            lk.host_id: lk.security_mode
+            for lk in host_links
+            if lk.security_mode is not None
+        }
         return {
             "id": row.id, "name": row.name, "system_prompt": row.system_prompt,
             "model_override": row.model_override, "created_at": row.created_at,
             "kb_ids": [lk.kb_id for lk in links],
             "host_ids": [lk.host_id for lk in host_links],
+            "host_security_modes": host_security_modes,
         }
 
     def create_bot(self, name: str, system_prompt: str = "", kb_ids: list[str] | None = None,
                    host_ids: list[str] | None = None,
+                   host_security_modes: dict[str, str] | None = None,
                    model_override: str | None = None) -> dict:
         with self._s() as s:
             row = BotRow(id=_uid(), name=name, system_prompt=system_prompt,
@@ -333,7 +348,8 @@ class DB:
             for kb_id in (kb_ids or []):
                 s.add(BotKBLink(bot_id=row.id, kb_id=kb_id))
             for host_id in (host_ids or []):
-                s.add(BotHostLink(bot_id=row.id, host_id=host_id))
+                mode = (host_security_modes or {}).get(host_id) if host_security_modes else None
+                s.add(BotHostLink(bot_id=row.id, host_id=host_id, security_mode=mode))
             s.flush()
             return self._bot_dict(s, row)
 
@@ -350,6 +366,7 @@ class DB:
 
     def update_bot(self, bot_id: str, name: str | None = None, system_prompt: str | None = None,
                    kb_ids: list[str] | None = None, host_ids: list[str] | None = None,
+                   host_security_modes: dict[str, str] | None = None,
                    model_override: str | None = None) -> dict | None:
         with self._s() as s:
             row = s.get(BotRow, bot_id)
@@ -368,7 +385,12 @@ class DB:
             if host_ids is not None:
                 s.query(BotHostLink).filter(BotHostLink.bot_id == bot_id).delete()
                 for host_id in host_ids:
-                    s.add(BotHostLink(bot_id=bot_id, host_id=host_id))
+                    mode = (host_security_modes or {}).get(host_id) if host_security_modes else None
+                    s.add(BotHostLink(bot_id=bot_id, host_id=host_id, security_mode=mode))
+            elif host_security_modes is not None:
+                for lk in s.query(BotHostLink).filter(BotHostLink.bot_id == bot_id).all():
+                    if lk.host_id in host_security_modes:
+                        lk.security_mode = host_security_modes[lk.host_id]
             s.flush()
             return self._bot_dict(s, row)
 
@@ -408,6 +430,7 @@ class DB:
             "description": row.description or "",
             "tags": tags,
             "safe_mode": bool(row.safe_mode),
+            "security_mode": getattr(row, "security_mode", None) or ("read_only" if row.safe_mode else "unrestricted"),
             "os_info": row.os_info or "",
             "status": row.status or "unknown",
             "created_at": row.created_at,
@@ -425,6 +448,7 @@ class DB:
         description: str = "",
         tags: list[str] | None = None,
         safe_mode: bool = False,
+        security_mode: str | None = None,
         host_id: str | None = None,
     ) -> dict:
         hid = host_id or _uid()
@@ -443,6 +467,7 @@ class DB:
                 description=description,
                 tags=tags_json,
                 safe_mode=1 if safe_mode else 0,
+                security_mode=security_mode or ("read_only" if safe_mode else "ask_confirmation"),
                 os_info="",
                 status="unknown",
                 created_at=now,
@@ -476,6 +501,7 @@ class DB:
         description: str | None = None,
         tags: list[str] | None = None,
         safe_mode: bool | None = None,
+        security_mode: str | None = None,
         os_info: str | None = None,
         status: str | None = None,
     ) -> dict | None:
@@ -501,6 +527,9 @@ class DB:
                 row.tags = json.dumps(tags, ensure_ascii=False)
             if safe_mode is not None:
                 row.safe_mode = 1 if safe_mode else 0
+            if security_mode is not None:
+                row.security_mode = security_mode
+                row.safe_mode = 1 if security_mode == "read_only" else 0
             if os_info is not None:
                 row.os_info = os_info
             if status is not None:

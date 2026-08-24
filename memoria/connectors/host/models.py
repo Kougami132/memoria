@@ -14,7 +14,8 @@ class HostConfig(BaseModel):
     credential: str = ""  # password or private key (decrypted in-memory)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    safe_mode: bool = False  # If True, only allow read-only/inspection commands
+    safe_mode: bool = False  # Backward compat: True means read_only
+    security_mode: str = "read_only"  # "read_only", "ask_confirmation", "unrestricted"
     status: str = "unknown"
     os_info: str = ""
     created_at: str = ""

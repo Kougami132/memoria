@@ -20,7 +20,12 @@ _GLOBAL_SSH_POOL = SSHConnectionPool()
 class HostConnector(BaseConnector):
     """Connector for SSH Hosts and Infrastructure Nodes with connection pooling and security guardrails."""
 
-    def __init__(self, config: HostConfig, pool: Optional[SSHConnectionPool] = None) -> None:
+    def __init__(
+        self,
+        config: HostConfig,
+        pool: Optional[SSHConnectionPool] = None,
+        dangerous_patterns: Optional[list[str]] = None,
+    ) -> None:
         super().__init__(
             resource_id=config.id,
             name=config.name,
@@ -28,7 +33,11 @@ class HostConnector(BaseConnector):
         )
         self.config = config
         self.pool = pool or _GLOBAL_SSH_POOL
-        self.guard = CommandGuard(safe_mode=config.safe_mode)
+        sec_mode = getattr(config, "security_mode", None) or ("read_only" if config.safe_mode else "ask_confirmation")
+        self.guard = CommandGuard(
+            security_mode=sec_mode,
+            dangerous_patterns=dangerous_patterns,
+        )
 
     @property
     def resource_type(self) -> ResourceType:
@@ -47,6 +56,7 @@ class HostConnector(BaseConnector):
                 "auth_type": self.config.auth_type,
                 "tags": self.config.tags,
                 "safe_mode": self.config.safe_mode,
+                "security_mode": getattr(self.config, "security_mode", "read_only" if self.config.safe_mode else "ask_confirmation"),
                 "status": self.config.status,
                 "os_info": self.config.os_info,
             },
@@ -133,15 +143,15 @@ class HostConnector(BaseConnector):
             status="online",
         )
 
-    def execute_command(self, command: str, timeout: int = 15) -> CommandResult:
+    def execute_command(self, command: str, timeout: int = 15, approved: bool = False) -> CommandResult:
         """Execute command on target host with security guardrails and connection pooling."""
         start_time = time.time()
         cmd = command.strip()
 
         # Step 1: Security validation
         try:
-            self.guard.validate_command(cmd)
-        except CommandSafetyViolation as e:
+            self.guard.validate_command(cmd, approved=approved)
+        except Exception as e:
             return CommandResult(
                 command=cmd,
                 exit_code=126,

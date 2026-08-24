@@ -27,6 +27,7 @@ class HostCreate(BaseModel):
     description: str = Field(default="")
     tags: list[str] = Field(default_factory=list)
     safe_mode: bool = Field(default=False)
+    security_mode: str | None = Field(default=None)  # "read_only", "ask_confirmation", "unrestricted"
 
 
 class HostUpdate(BaseModel):
@@ -39,6 +40,7 @@ class HostUpdate(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     safe_mode: bool | None = None
+    security_mode: str | None = None
     os_info: str | None = None
     status: str | None = None
 
@@ -54,6 +56,7 @@ class HostOut(BaseModel):
     description: str
     tags: list[str]
     safe_mode: bool = False
+    security_mode: str = "read_only"
     os_info: str
     status: str
     created_at: str
@@ -80,6 +83,7 @@ def create_host(
     db: DB = Depends(get_db),
     registry: ConnectorRegistry = Depends(get_registry),
 ) -> dict[str, Any]:
+    sec_mode = payload.security_mode or ("read_only" if payload.safe_mode else "ask_confirmation")
     host_dict = db.create_host(
         name=payload.name,
         host=payload.host,
@@ -89,7 +93,8 @@ def create_host(
         credential=payload.credential,
         description=payload.description,
         tags=payload.tags,
-        safe_mode=payload.safe_mode,
+        safe_mode=(sec_mode == "read_only"),
+        security_mode=sec_mode,
     )
     # Register connector in runtime registry with decrypted credential
     config = HostConfig(**host_dict)
@@ -114,6 +119,10 @@ def update_host(
     registry: ConnectorRegistry = Depends(get_registry),
 ) -> dict[str, Any]:
     # If credential was not provided or empty string, do not overwrite if None
+    sec_mode = payload.security_mode
+    if sec_mode is None and payload.safe_mode is not None:
+        sec_mode = "read_only" if payload.safe_mode else "unrestricted"
+
     host = db.update_host(
         host_id=host_id,
         name=payload.name,
@@ -124,7 +133,8 @@ def update_host(
         credential=payload.credential,
         description=payload.description,
         tags=payload.tags,
-        safe_mode=payload.safe_mode,
+        safe_mode=(sec_mode == "read_only") if sec_mode is not None else payload.safe_mode,
+        security_mode=sec_mode,
         os_info=payload.os_info,
         status=payload.status,
     )
@@ -169,3 +179,40 @@ def test_host_connection(
     new_status = "active" if result.get("status") == "success" else "error"
     db.update_host(host_id, status=new_status)
     return result
+
+
+class ApprovalRespondRequest(BaseModel):
+    approved: bool
+
+
+@router.post("/approvals/{approval_id}/respond")
+def respond_approval(
+    approval_id: str,
+    body: ApprovalRespondRequest,
+) -> dict[str, Any]:
+    from memoria.connectors.host.approval import global_host_approval_manager
+    approval = global_host_approval_manager.respond(approval_id, approved=body.approved)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found or expired")
+    return {
+        "id": approval.id,
+        "status": approval.status,
+        "command": approval.command,
+        "host_id": approval.host_id,
+    }
+
+
+@router.get("/approvals/{approval_id}")
+def get_approval(approval_id: str) -> dict[str, Any]:
+    from memoria.connectors.host.approval import global_host_approval_manager
+    approval = global_host_approval_manager.get_approval(approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    return {
+        "id": approval.id,
+        "host_id": approval.host_id,
+        "host_name": approval.host_name,
+        "command": approval.command,
+        "status": approval.status,
+        "created_at": approval.created_at,
+    }

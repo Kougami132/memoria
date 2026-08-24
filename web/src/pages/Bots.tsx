@@ -11,6 +11,12 @@ import { Bot, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import * as api from '@/api'
 import type { Bot as BotType } from '@/api'
 
+const SECURITY_MODE_LABELS: Record<string, string> = {
+  read_only: '只读安全',
+  ask_confirmation: '审批确认',
+  unrestricted: '自由执行',
+}
+
 function BotForm({
   initial, kbs, hosts = [], onSubmit, onCancel, isPending, defaultPrompt,
 }: {
@@ -26,6 +32,9 @@ function BotForm({
   const [prompt, setPrompt] = useState(initial?.system_prompt ?? defaultPrompt)
   const [selectedKBs, setSelectedKBs] = useState<Set<string>>(new Set(initial?.kb_ids ?? []))
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set(initial?.host_ids ?? []))
+  const [hostSecurityModes, setHostSecurityModes] = useState<Record<string, api.HostSecurityMode>>(
+    initial?.host_security_modes ?? {}
+  )
   const [modelOverride, setModelOverride] = useState(initial?.model_override ?? '')
 
   const toggleKB = (id: string) => setSelectedKBs(prev => {
@@ -39,6 +48,18 @@ function BotForm({
     next.has(id) ? next.delete(id) : next.add(id)
     return next
   })
+
+  const setHostMode = (hostId: string, mode: string) => {
+    setHostSecurityModes(prev => {
+      const next = { ...prev }
+      if (!mode || mode === 'inherit') {
+        delete next[hostId]
+      } else {
+        next[hostId] = mode as api.HostSecurityMode
+      }
+      return next
+    })
+  }
 
   return (
     <div className="space-y-4">
@@ -64,7 +85,7 @@ function BotForm({
       {kbs.length > 0 && (
         <div className="space-y-1.5">
           <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">关联知识库</Label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {kbs.map(kb => (
               <label
                 key={kb.id}
@@ -79,7 +100,7 @@ function BotForm({
                   checked={selectedKBs.has(kb.id)}
                   onCheckedChange={() => toggleKB(kb.id)}
                 />
-                <span className="text-sm font-medium">{kb.name}</span>
+                <span className="text-sm font-medium truncate">{kb.name}</span>
               </label>
             ))}
           </div>
@@ -88,28 +109,62 @@ function BotForm({
 
       {hosts.length > 0 && (
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">关联 SSH 主机</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {hosts.map(h => (
-              <label
-                key={h.id}
-                className={`flex items-center gap-2.5 rounded-xl border p-2.5 cursor-pointer transition-colors ${
-                  selectedHosts.has(h.id)
-                    ? 'border-foreground/30 bg-accent'
-                    : 'border-border hover:bg-accent/40'
-                }`}
-              >
-                <Checkbox
-                  id={h.id}
-                  checked={selectedHosts.has(h.id)}
-                  onCheckedChange={() => toggleHost(h.id)}
-                />
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium">{h.name}</span>
-                  <span className="text-[11px] text-muted-foreground font-mono">{h.username}@{h.host}</span>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">关联 SSH 主机与执行模式</Label>
+            <span className="text-[11px] text-muted-foreground">勾选主机后可覆盖其安全模式</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {hosts.map(h => {
+              const isSelected = selectedHosts.has(h.id)
+              const defaultMode = h.security_mode || (h.safe_mode ? 'read_only' : 'ask_confirmation')
+              const currentMode = hostSecurityModes[h.id] || 'inherit'
+              return (
+                <div
+                  key={h.id}
+                  className={`flex flex-col justify-between gap-2 rounded-xl border p-2.5 transition-colors ${
+                    isSelected
+                      ? 'border-foreground/30 bg-accent/40'
+                      : 'border-border opacity-70 hover:opacity-100 hover:bg-accent/20'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <label className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
+                      <Checkbox
+                        id={h.id}
+                        checked={isSelected}
+                        onCheckedChange={() => toggleHost(h.id)}
+                      />
+                      <div className="flex flex-col min-w-0 truncate">
+                        <span className="text-sm font-medium truncate">{h.name}</span>
+                        <span className="text-[11px] text-muted-foreground font-mono truncate">{h.username}@{h.host}</span>
+                      </div>
+                    </label>
+
+                    {!isSelected && (
+                      <span className="text-[10px] text-muted-foreground shrink-0 bg-muted/60 px-1.5 py-0.5 rounded font-mono">
+                        {SECURITY_MODE_LABELS[defaultMode] || defaultMode}
+                      </span>
+                    )}
+                  </div>
+
+                  {isSelected && (
+                    <div className="flex items-center gap-1.5 pt-1.5 border-t border-border/50 text-xs">
+                      <span className="text-muted-foreground shrink-0 text-[11px]">模式:</span>
+                      <select
+                        value={currentMode}
+                        onChange={e => setHostMode(h.id, e.target.value)}
+                        className="text-xs bg-background border border-border rounded-lg px-2 py-1 text-foreground focus:outline-hidden w-full min-w-0 truncate"
+                      >
+                        <option value="inherit">继承默认 ({SECURITY_MODE_LABELS[defaultMode] || defaultMode})</option>
+                        <option value="read_only">🛡️ 只读安全模式</option>
+                        <option value="ask_confirmation">🔔 审批确认模式</option>
+                        <option value="unrestricted">⚡ 自由执行模式</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
-              </label>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -131,6 +186,7 @@ function BotForm({
             system_prompt: prompt,
             kb_ids: [...selectedKBs],
             host_ids: [...selectedHosts],
+            host_security_modes: hostSecurityModes,
             model_override: modelOverride || undefined,
           })}
           disabled={!name.trim() || isPending}
@@ -221,7 +277,7 @@ export default function Bots() {
           {bots.map(bot => (
             <div 
               key={bot.id} 
-              className="group rounded-2xl border border-border bg-card hover:border-foreground/20 transition-all p-5 flex flex-col justify-between shadow-xs space-y-4"
+              className={`group rounded-2xl border border-border bg-card hover:border-foreground/20 transition-all p-5 flex flex-col justify-between shadow-xs space-y-4 ${editingId === bot.id ? "md:col-span-2 ring-1 ring-border" : ""}`}
             >
               <div>
                 <div className="flex items-start justify-between gap-3">
@@ -278,9 +334,11 @@ export default function Bots() {
                   })}
                   {bot.host_ids?.map(id => {
                     const h = hosts.find(hostItem => hostItem.id === id)
+                    const overrideMode = bot.host_security_modes?.[id]
+                    const modeText = overrideMode ? ` (${SECURITY_MODE_LABELS[overrideMode] || overrideMode})` : ''
                     return h ? (
                       <Badge key={id} variant="outline" className="text-[11px] font-normal px-2 py-0.5 rounded-md bg-accent/40">
-                        🖥️ {h.name}
+                        🖥️ {h.name}{modeText}
                       </Badge>
                     ) : null
                   })}

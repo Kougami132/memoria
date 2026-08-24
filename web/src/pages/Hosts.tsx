@@ -6,7 +6,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Server,
   Plus,
@@ -44,7 +43,8 @@ function HostForm({
   const [credential, setCredential] = useState('')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [tagsInput, setTagsInput] = useState(initial?.tags?.join(', ') ?? '')
-  const [safeMode, setSafeMode] = useState(initial?.safe_mode ?? true)
+  const initialSecMode = initial?.security_mode || (initial?.safe_mode ? 'read_only' : 'ask_confirmation')
+  const [securityMode, setSecurityMode] = useState<'read_only' | 'ask_confirmation' | 'unrestricted'>(initialSecMode)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -63,7 +63,8 @@ function HostForm({
       auth_type: authType,
       description: description.trim(),
       tags,
-      safe_mode: safeMode,
+      safe_mode: securityMode === 'read_only',
+      security_mode: securityMode,
     }
 
     if (credential.trim()) {
@@ -215,22 +216,62 @@ function HostForm({
         />
       </div>
 
-      {/* Safe Mode Toggle */}
-      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-border/80 bg-accent/30">
-        <Checkbox
-          id="safe-mode"
-          checked={safeMode}
-          onCheckedChange={checked => setSafeMode(!!checked)}
-          className="mt-0.5"
-        />
-        <div className="space-y-1 leading-none cursor-pointer" onClick={() => setSafeMode(!safeMode)}>
-          <label htmlFor="safe-mode" className="text-sm font-semibold text-foreground cursor-pointer flex items-center gap-1.5">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            启用安全只读保护 (Safe Mode - 强烈推荐)
-          </label>
-          <p className="text-xs text-muted-foreground leading-normal">
-            开启后，常规对话与 Agent 仅能执行只读检测命令（如 top, ps, df, uptime, docker ps, free, cat 日志等），严禁任何 rm, kill, reboot, iptables, dd 等破坏性操作。
-          </p>
+      {/* Host Security Mode Selector */}
+      <div className="space-y-2 pt-1">
+        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          主机操作安全控制策略
+        </Label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+          <div
+            onClick={() => setSecurityMode('read_only')}
+            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+              securityMode === 'read_only'
+                ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
+                : 'border-border/80 bg-accent/20 hover:border-border'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 font-medium text-sm text-emerald-600 dark:text-emerald-400">
+              <ShieldCheck className="w-4 h-4" />
+              <span>只读安全模式</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1 leading-normal">
+              仅允许执行预置安全查询命令（如 df, ps, uptime），写操作直接拦截。
+            </p>
+          </div>
+
+          <div
+            onClick={() => setSecurityMode('ask_confirmation')}
+            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+              securityMode === 'ask_confirmation'
+                ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20'
+                : 'border-border/80 bg-accent/20 hover:border-border'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 font-medium text-sm text-blue-600 dark:text-blue-400">
+              <Activity className="w-4 h-4" />
+              <span>审批确认模式 (推荐)</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1 leading-normal">
+              安全查询自动执行，写与变更操作需您在界面点击确认允许后方可运行。
+            </p>
+          </div>
+
+          <div
+            onClick={() => setSecurityMode('unrestricted')}
+            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+              securityMode === 'unrestricted'
+                ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/20'
+                : 'border-border/80 bg-accent/20 hover:border-border'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 font-medium text-sm text-amber-600 dark:text-amber-400">
+              <ShieldAlert className="w-4 h-4" />
+              <span>自由执行模式</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1 leading-normal">
+              允许自动执行指令（仅受系统全局危险黑名单拦截保护）。
+            </p>
+          </div>
         </div>
       </div>
 
@@ -361,15 +402,20 @@ export default function Hosts() {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold text-base text-foreground">{hostItem.name}</h3>
-                        {hostItem.safe_mode ? (
+                        {hostItem.security_mode === 'read_only' || (hostItem.safe_mode && !hostItem.security_mode) ? (
                           <Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-1 py-0.5">
                             <ShieldCheck className="w-3 h-3" />
-                            只读安全模式
+                            只读模式
+                          </Badge>
+                        ) : hostItem.security_mode === 'ask_confirmation' ? (
+                          <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 gap-1 py-0.5">
+                            <Activity className="w-3 h-3" />
+                            审批确认模式
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 gap-1 py-0.5">
                             <ShieldAlert className="w-3 h-3" />
-                            全权模式
+                            自由执行模式
                           </Badge>
                         )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${

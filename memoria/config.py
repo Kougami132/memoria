@@ -1,3 +1,15 @@
+import json
+
+DEFAULT_HOST_DANGEROUS_PATTERNS = [
+    r"\brm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)\s+(?:/|/\*|\.\.|\./\.\.)(?:\s|$)",
+    r"\brm\s+-[a-zA-Z]*\s+(?:/|/\*)(?:\s|$)",
+    r"\bmkfs(?:\.\w+)?\b",
+    r"\bfdisk\b",
+    r"\bdd\s+if=.*of=/dev/[a-z0-9]+",
+    r"\b(?:reboot|shutdown|poweroff|init\s+0|init\s+6)\b",
+    r">\s*/dev/(?:sd[a-z]|nvme[0-9]|hd[a-z])",
+]
+
 from pydantic_settings import BaseSettings
 
 DEFAULT_SYSTEM_PROMPT = """你是一个专业的智能助手，请始终用用户所使用的语言回复。
@@ -42,6 +54,7 @@ def get_effective_settings(db) -> dict:
         "chunk_size": str(settings.chunk_size),
         "chunk_overlap": str(settings.chunk_overlap),
         "vault_sync_interval_minutes": "15",
+        "host_dangerous_patterns": json.dumps(DEFAULT_HOST_DANGEROUS_PATTERNS),
     }
     fields.update({k: v for k, v in overrides.items() if k in fields})
     url = fields["openai_base_url"].rstrip("/")

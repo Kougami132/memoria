@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional
 
@@ -31,6 +32,7 @@ class SettingsUpdate(BaseModel):
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
     vault_sync_interval_minutes: Optional[int] = None
+    host_dangerous_patterns: Optional[list[str]] = None
 
 
 @router.get("")
@@ -53,6 +55,7 @@ def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get
         "chunk_size": str(body.chunk_size) if body.chunk_size is not None else None,
         "chunk_overlap": str(body.chunk_overlap) if body.chunk_overlap is not None else None,
         "vault_sync_interval_minutes": str(body.vault_sync_interval_minutes) if body.vault_sync_interval_minutes is not None else None,
+        "host_dangerous_patterns": json.dumps(body.host_dangerous_patterns) if body.host_dangerous_patterns is not None else None,
     }
     changed = False
     for key, value in mapping.items():

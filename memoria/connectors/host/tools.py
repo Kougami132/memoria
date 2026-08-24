@@ -35,6 +35,7 @@ class AgentHostTools:
     allowed_host_ids: list[str]
     collector: "SourceCollector"
     registry: "ConnectorRegistry | None" = None
+    host_security_modes: "dict[str, str] | None" = None
 
     def __post_init__(self) -> None:
         self._allowed = set(self.allowed_host_ids)
@@ -89,21 +90,34 @@ class AgentHostTools:
             "status": h.get("status") or "online",
         }
 
-    def run_host_command(self, host_id: str, command: str) -> dict[str, Any]:
-        """Execute safe inspection command on an allowed host."""
+    def run_host_command(self, host_id: str, command: str, approved: bool = False) -> dict[str, Any]:
+        """Execute command on an allowed host."""
         self._ensure_allowed(host_id)
         h = self.db.get_host(host_id)
         assert h is not None
+
+        # Load dynamic dangerous patterns from DB if available
+        import json
+        from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
+        raw_patterns = self.db.get_setting("host_dangerous_patterns")
+        dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
 
         if self.registry:
             from memoria.connectors.base import ResourceType
             conn = self.registry.get(ResourceType.HOST, host_id)
             if conn:
-                res = conn.execute_command(command)  # type: ignore[attr-defined]
+                if hasattr(conn, "guard"):
+                    conn.guard.dangerous_patterns = dangerous_patterns
+                res = conn.execute_command(command, approved=approved)  # type: ignore[attr-defined]
                 return res.model_dump()
+
+        # Apply bot-level security mode override if configured
+        sec_mode = (self.host_security_modes or {}).get(host_id) or h.get("security_mode") or ("read_only" if h.get("safe_mode") else "ask_confirmation")
+        host_dict = dict(h)
+        host_dict["security_mode"] = sec_mode
 
         from memoria.connectors.host.connector import HostConnector
         from memoria.connectors.host.models import HostConfig
-        conn = HostConnector(HostConfig(**h))
-        res = conn.execute_command(command)
+        conn = HostConnector(HostConfig(**host_dict), dangerous_patterns=dangerous_patterns)
+        res = conn.execute_command(command, approved=approved)
         return res.model_dump()

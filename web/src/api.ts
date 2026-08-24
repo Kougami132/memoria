@@ -14,9 +14,24 @@ export interface Bot {
   id: string; name: string; system_prompt: string;
   model_override: string | null; kb_ids: string[]; created_at: string
   host_ids?: string[]
+  host_security_modes?: Record<string, HostSecurityMode>
 }
-export interface BotCreate { name: string; system_prompt?: string; kb_ids?: string[]; host_ids?: string[]; model_override?: string }
-export interface BotUpdate { name?: string; system_prompt?: string; kb_ids?: string[]; host_ids?: string[]; model_override?: string }
+export interface BotCreate {
+  name: string
+  system_prompt?: string
+  kb_ids?: string[]
+  host_ids?: string[]
+  host_security_modes?: Record<string, HostSecurityMode>
+  model_override?: string
+}
+export interface BotUpdate {
+  name?: string
+  system_prompt?: string
+  kb_ids?: string[]
+  host_ids?: string[]
+  host_security_modes?: Record<string, HostSecurityMode>
+  model_override?: string
+}
 export interface Session { id: string; bot_id: string | null; session_type?: 'bot' | 'agentic'; title: string; created_at: string }
 export interface Message {
   id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]; trace?: AgentTrace | null
@@ -94,6 +109,7 @@ export interface Settings {
   openai_base_url: string; openai_api_key: string; embedding_model: string;
   llm_model: string; system_prompt: string; top_k: string; chunk_size: string; chunk_overlap: string;
   vault_sync_interval_minutes: string
+  host_dangerous_patterns?: string
 }
 export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; embedding_model?: string;
@@ -139,7 +155,7 @@ export const agentChat = (message: string, sessionId?: string) =>
   })
 
 export interface AgentStreamEvent {
-  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'done' | 'error'
+  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'done' | 'error'
   phase?: 'start' | 'end'
   session_id?: string
   span?: AgentTraceSpan
@@ -149,6 +165,10 @@ export interface AgentStreamEvent {
   sources?: AgentSource[]
   used_kbs?: string[]
   trace?: AgentTrace | null
+  approval_id?: string
+  host_id?: string
+  host_name?: string
+  command?: string
 }
 
 export async function* streamAgentChat(
@@ -333,6 +353,8 @@ export const browseWebDAVVaultPath = (data: {
 export const testWebDAVVault = (data: {
   webdav_url: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
 }) => req<WebDAVTestResult>('/vaults/test-webdav', { method: 'POST', ...json(data) })
+export type HostSecurityMode = 'read_only' | 'ask_confirmation' | 'unrestricted'
+
 export interface Host {
   id: string
   name: string
@@ -344,6 +366,7 @@ export interface Host {
   description: string
   tags: string[]
   safe_mode: boolean
+  security_mode?: HostSecurityMode
   status: 'active' | 'inactive' | 'error'
   os_info?: string
   created_at: string
@@ -359,6 +382,7 @@ export interface HostCreate {
   description?: string
   tags?: string[]
   safe_mode?: boolean
+  security_mode?: HostSecurityMode
 }
 export interface HostUpdate extends Partial<HostCreate> {}
 export interface TestHostResult { ok: boolean; message?: string; os_info?: string; latency_ms?: number }
@@ -369,3 +393,16 @@ export const createHost = (data: HostCreate) => req<Host>('/hosts', { method: 'P
 export const updateHost = (id: string, data: HostUpdate) => req<Host>(`/hosts/${id}`, { method: 'PUT', ...json(data) })
 export const deleteHost = (id: string) => req<void>(`/hosts/${id}`, { method: 'DELETE' })
 export const testHostConnection = (id: string) => req<TestHostResult>(`/hosts/${id}/test`, { method: 'POST' })
+
+export interface ApprovalRespondResult {
+  id: string
+  status: 'approved' | 'rejected'
+  command: string
+  host_id: string
+}
+
+export const respondHostApproval = (approvalId: string, approved: boolean) =>
+  req<ApprovalRespondResult>(`/hosts/approvals/${approvalId}/respond`, {
+    method: 'POST',
+    ...json({ approved }),
+  })

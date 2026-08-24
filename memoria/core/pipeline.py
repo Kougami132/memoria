@@ -168,17 +168,26 @@ class Pipeline:
             h = self.db.get_host(host_id)
             if not h:
                 return {"error": f"主机 {host_id} 不存在"}
+            
+            # Load dynamic dangerous patterns from DB
+            import json
+            from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
+            raw_patterns = self.db.get_setting("host_dangerous_patterns")
+            dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
+
             if registry:
                 conn = registry.get(ResourceType.HOST, host_id)
                 if conn:
                     try:
+                        if hasattr(conn, "guard"):
+                            conn.guard.dangerous_patterns = dangerous_patterns
                         return conn.execute_command(cmd).model_dump()
                     except Exception as e:
                         return {"error": f"执行主机命令失败: {e}"}
             try:
                 from memoria.connectors.host.connector import HostConnector
                 from memoria.connectors.host.models import HostConfig
-                conn = HostConnector(HostConfig(**h))
+                conn = HostConnector(HostConfig(**h), dangerous_patterns=dangerous_patterns)
                 return conn.execute_command(cmd).model_dump()
             except Exception as e:
                 return {"error": f"执行主机命令异常: {e}"}

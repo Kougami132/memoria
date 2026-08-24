@@ -103,6 +103,7 @@ class AgentTools:
         collector: SourceCollector,
         registry: "ConnectorRegistry | None" = None,
         max_top_k: int = 8,
+        host_security_modes: dict[str, str] | None = None,
     ) -> "AgentTools":
         kt = AgentKnowledgeTools(
             db=db,
@@ -116,6 +117,7 @@ class AgentTools:
             allowed_host_ids=allowed_host_ids,
             collector=collector,
             registry=registry,
+            host_security_modes=host_security_modes,
         )
         return cls(knowledge=kt, host=ht)
 
@@ -133,5 +135,5 @@ class AgentTools:
     def get_host_info(self, host_id: str) -> dict:
         return self.host.get_host_info(host_id)
 
-    def run_host_command(self, host_id: str, command: str) -> dict:
-        return self.host.run_host_command(host_id, command)
+    def run_host_command(self, host_id: str, command: str, approved: bool = False) -> dict:
+        return self.host.run_host_command(host_id, command, approved=approved)

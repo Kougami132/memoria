@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
@@ -5,6 +6,7 @@ import type { Components } from 'react-markdown'
 import { Badge } from '@/components/ui/badge'
 import {
   Activity,
+  Check,
   AlertCircle,
   Bot,
   BookOpen,
@@ -236,6 +238,16 @@ export function AgenticChat() {
               return { ...prev, traces: updatedTraces }
             })
           }
+        } else if (event.type === 'approval_required') {
+          setStreamState((prev) => prev ? {
+            ...prev,
+            pendingApproval: {
+              approval_id: event.approval_id,
+              host_id: event.host_id,
+              host_name: event.host_name || event.host_id,
+              command: event.command,
+            },
+          } : null)
         } else if (event.type === 'answer_delta') {
           setStreamState((prev) => prev ? {
             ...prev,
@@ -278,6 +290,17 @@ export function AgenticChat() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
+    }
+  }
+
+  const handleRespondApproval = async (approved: boolean) => {
+    if (!streamState?.pendingApproval) return
+    const approvalId = streamState.pendingApproval.approval_id
+    try {
+      await api.respondHostApproval(approvalId, approved)
+      setStreamState(prev => prev ? { ...prev, pendingApproval: null } : null)
+    } catch (err) {
+      console.error('Failed to respond to approval:', err)
     }
   }
 
@@ -618,6 +641,43 @@ function StreamingMessageItem({ state }: { state: StreamingAssistantState }) {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Interactive Host Command Approval Card */}
+        {state.pendingApproval && (
+          <div className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
+                <Terminal className="w-4 h-4 text-blue-500" />
+                <span>主机操作执行审批请求</span>
+              </div>
+              <span className="text-xs text-blue-600/80 dark:text-blue-400/80">等待您的许可</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              助手请求在主机 <strong className="text-foreground">{state.pendingApproval.host_name}</strong> 上执行如下受控命令：
+            </p>
+            <div className="bg-background/80 dark:bg-muted/60 p-2.5 rounded-lg border border-border font-mono text-xs text-foreground select-all break-all">
+              {state.pendingApproval.command}
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onRespondApproval?.(false)}
+                className="rounded-lg h-8 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+              >
+                拒绝执行
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => onRespondApproval?.(true)}
+                className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
+              >
+                <Check className="w-3.5 h-3.5" />
+                允许执行
+              </Button>
+            </div>
           </div>
         )}
 

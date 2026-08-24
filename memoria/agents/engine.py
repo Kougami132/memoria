@@ -360,6 +360,73 @@ def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) 
     return schemas
 
 
+async def _execute_agent_tool_async(
+    name: str,
+    args: dict,
+    tools: Any,
+    event_queue: Any = None,
+    session_id: str | None = None,
+) -> Any:
+    if name == "list_knowledge_bases":
+        return tools.list_knowledge_bases()
+    elif name == "search_knowledge_base":
+        kb_id = str(args.get("kb_id") or "")
+        query = str(args.get("query") or "")
+        top_k = int(args.get("top_k") or 5)
+        return tools.search_knowledge_base(kb_id, query, top_k)
+    elif name == "list_hosts":
+        return tools.list_hosts()
+    elif name == "get_host_info":
+        host_id = str(args.get("host_id") or "")
+        return tools.get_host_info(host_id)
+    elif name == "run_host_command":
+        host_id = str(args.get("host_id") or "")
+        command = str(args.get("command") or "")
+        
+        # Check if approval is required before execution
+        h = getattr(tools, "db", None) and tools.db.get_host(host_id)
+        host_sec_modes = getattr(tools, "host", None) and getattr(tools.host, "host_security_modes", None)
+        override_mode = (host_sec_modes or {}).get(host_id) if host_sec_modes else None
+        sec_mode = override_mode or (h.get("security_mode") if h else "ask_confirmation") or ("read_only" if (h and h.get("safe_mode")) else "ask_confirmation")
+        
+        from memoria.connectors.host.guard import CommandGuard
+        import json
+        from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
+        raw_patterns = tools.db.get_setting("host_dangerous_patterns") if getattr(tools, "db", None) else None
+        dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
+        guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
+        
+        # If not safe and ask_confirmation mode, trigger approval flow
+        if sec_mode == "ask_confirmation" and not guard.is_safe_command(command):
+            from memoria.connectors.host.approval import global_host_approval_manager
+            host_name = h.get("name") if h else host_id
+            approval = global_host_approval_manager.create_approval(
+                host_id=host_id,
+                host_name=host_name,
+                command=command,
+                session_id=session_id,
+            )
+            if event_queue:
+                event_queue.put({
+                    "type": "approval_required",
+                    "approval_id": approval.id,
+                    "host_id": host_id,
+                    "host_name": host_name,
+                    "command": command,
+                })
+            # Wait for decision
+            approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=300.0)
+            if not approved:
+                return {
+                    "error": f"Command execution rejected by user or timed out: '{command}'",
+                    "status": "rejected",
+                }
+            return tools.run_host_command(host_id, command, approved=True)
+            
+        return tools.run_host_command(host_id, command)
+    else:
+        raise ValueError(f"Unknown agent tool: {name}")
+
 def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
     if name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
@@ -715,7 +782,13 @@ class OpenAIAgentsRunner:
                         tool_error = None
                         tool_result = None
                         try:
-                            tool_result = _execute_agent_tool(tool_name, args, tools)
+                            tool_result = await _execute_agent_tool_async(
+                                tool_name,
+                                args,
+                                tools,
+                                event_queue=event_queue,
+                                session_id=session_id,
+                            )
                         except Exception as e:
                             tool_error = str(e)
                             tool_result = {"error": str(e)}
@@ -868,9 +941,11 @@ class AgenticRagEngine:
                 session_id = sess["id"]
             system_prompt = bot.get("system_prompt") or effective.get("system_prompt") or ""
             instructions = self._instructions(effective, custom_system_prompt=system_prompt, is_bot=True)
+            host_security_modes = bot.get("host_security_modes") or {}
         else:
             allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
             allowed_host_ids = [h["id"] for h in self.db.list_hosts()]
+            host_security_modes = {}
             if session_id is not None:
                 sess = self.db.get_agentic_session(session_id)
                 if sess is None:
@@ -887,6 +962,7 @@ class AgenticRagEngine:
             allowed_kb_ids=allowed_kb_ids,
             allowed_host_ids=allowed_host_ids,
             collector=collector,
+            host_security_modes=host_security_modes,
         )
         tools_schema = _get_agent_tools_schema(
             include_kb=bool(allowed_kb_ids),
@@ -955,9 +1031,11 @@ class AgenticRagEngine:
                 session_id = sess["id"]
             system_prompt = bot.get("system_prompt") or effective.get("system_prompt") or ""
             instructions = self._instructions(effective, custom_system_prompt=system_prompt, is_bot=True)
+            host_security_modes = bot.get("host_security_modes") or {}
         else:
             allowed_kb_ids = [kb["id"] for kb in self.db.list_kbs()]
             allowed_host_ids = [h["id"] for h in self.db.list_hosts()]
+            host_security_modes = {}
             if session_id is not None:
                 sess = self.db.get_agentic_session(session_id)
                 if sess is None:
@@ -974,6 +1052,7 @@ class AgenticRagEngine:
             allowed_kb_ids=allowed_kb_ids,
             allowed_host_ids=allowed_host_ids,
             collector=collector,
+            host_security_modes=host_security_modes,
         )
         tools_schema = _get_agent_tools_schema(
             include_kb=bool(allowed_kb_ids),

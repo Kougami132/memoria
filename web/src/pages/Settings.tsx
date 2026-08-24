@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download } from 'lucide-react'
+import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download, ShieldAlert } from 'lucide-react'
 import * as api from '@/api'
 import type { SettingsUpdate } from '@/api'
 
@@ -368,6 +368,25 @@ export default function Settings() {
               className="rounded-xl border-border bg-background"
             />
           </div>
+        </CardContent>
+      </Card>
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
+        <CardHeader className="pb-4">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-destructive" />
+            <CardTitle className="text-base font-semibold">主机危险命令黑名单</CardTitle>
+          </div>
+          <CardDescription>每行一个正则表达式。命中黑名单的命令在任何模式下均被严格禁止执行，即使人工审批也无法放行</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1.5">
+          <Textarea
+            placeholder="\\brm\\s+-.*\\s+/\n\\bmkfs\\b\n\\bfdisk\\b\n\\bdd\\s+if=.*of=/dev/\n\\b(?:reboot|shutdown|poweroff)\\b"
+            value={form.host_dangerous_patterns ?? ''}
+            onChange={set('host_dangerous_patterns')}
+            rows={6}
+            className="rounded-xl border-border bg-background font-mono text-xs leading-relaxed"
+          />
+          <p className="text-[11px] text-muted-foreground">支持标准正则表达式，用于严格拦截 rm -rf /、mkfs、dd、reboot 等毁灭性系统指令。</p>
         </CardContent>
       </Card>
     </div>
