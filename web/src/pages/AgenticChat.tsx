@@ -97,12 +97,20 @@ function formatDuration(ms?: number | null): string | null {
   return s < 0.1 ? `${s.toFixed(2)}s` : `${s.toFixed(1)}s`
 }
 
+interface HostApprovalPrompt {
+  approval_id: string
+  host_id: string
+  host_name: string
+  command: string
+}
+
 interface StreamingAssistantState {
   thought: string
   thoughtExpanded: boolean
   traces: AgentTraceSpan[]
   answer: string
   isStreaming: boolean
+  pendingApproval?: HostApprovalPrompt | null
   error?: string
 }
 
@@ -242,10 +250,10 @@ export function AgenticChat() {
           setStreamState((prev) => prev ? {
             ...prev,
             pendingApproval: {
-              approval_id: event.approval_id,
-              host_id: event.host_id,
-              host_name: event.host_name || event.host_id,
-              command: event.command,
+              approval_id: event.approval_id || "",
+              host_id: event.host_id || "",
+              host_name: event.host_name || event.host_id || "",
+              command: event.command || "",
             },
           } : null)
         } else if (event.type === 'answer_delta') {
@@ -425,7 +433,7 @@ export function AgenticChat() {
               ))}
 
               {/* Streaming message */}
-              {streamState && <StreamingMessageItem state={streamState} />}
+              {streamState && <StreamingMessageItem state={streamState} onRespondApproval={handleRespondApproval} />}
             </>
           )}
           <div ref={messagesEndRef} />
@@ -569,7 +577,13 @@ function ChatMessageItem({ msg }: { msg: Message }) {
   )
 }
 
-function StreamingMessageItem({ state }: { state: StreamingAssistantState }) {
+function StreamingMessageItem({
+  state,
+  onRespondApproval,
+}: {
+  state: StreamingAssistantState
+  onRespondApproval?: (approved: boolean) => void
+}) {
   const [thoughtExpanded, setThoughtExpanded] = useState(true)
   const [traceExpanded, setTraceExpanded] = useState(true)
   const streamDurationMs = state.traces?.reduce((acc, s) => acc + (s.duration_ms || 0), 0)

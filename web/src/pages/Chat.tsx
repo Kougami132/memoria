@@ -263,10 +263,10 @@ export function Chat() {
           setStreamState((prev) => (prev ? {
             ...prev,
             pendingApproval: {
-              approval_id: event.approval_id,
-              host_id: event.host_id,
-              host_name: event.host_name || event.host_id,
-              command: event.command,
+              approval_id: event.approval_id || "",
+              host_id: event.host_id || "",
+              host_name: event.host_name || event.host_id || "",
+              command: event.command || "",
             },
           } : null))
         } else if (event.type === 'answer_delta') {

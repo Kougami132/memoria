@@ -15,6 +15,7 @@ class HostCommandApproval:
     created_at: float = field(default_factory=time.time)
     status: str = "pending"  # "pending", "approved", "rejected", "timeout"
     event: asyncio.Event = field(default_factory=asyncio.Event)
+    loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 class HostApprovalManager:
@@ -31,6 +32,10 @@ class HostApprovalManager:
         command: str,
         session_id: Optional[str] = None,
     ) -> HostCommandApproval:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
         approval_id = f"appr_{uuid.uuid4().hex[:12]}"
         approval = HostCommandApproval(
             id=approval_id,
@@ -38,6 +43,7 @@ class HostApprovalManager:
             host_name=host_name,
             command=command,
             session_id=session_id,
+            loop=loop,
         )
         self._approvals[approval_id] = approval
         return approval
@@ -50,7 +56,10 @@ class HostApprovalManager:
         if not approval or approval.status != "pending":
             return approval
         approval.status = "approved" if approved else "rejected"
-        approval.event.set()
+        if approval.loop and not approval.loop.is_closed():
+            approval.loop.call_soon_threadsafe(approval.event.set)
+        else:
+            approval.event.set()
         return approval
 
     async def wait_for_decision(self, approval_id: str, timeout: Optional[float] = None) -> bool:
