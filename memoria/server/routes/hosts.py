@@ -189,11 +189,14 @@ class ApprovalRespondRequest(BaseModel):
 def respond_approval(
     approval_id: str,
     body: ApprovalRespondRequest,
+    db: DB = Depends(get_db),
 ) -> dict[str, Any]:
     from memoria.connectors.host.approval import global_host_approval_manager
     approval = global_host_approval_manager.respond(approval_id, approved=body.approved)
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found or expired")
+    new_status = "approved" if body.approved else "rejected"
+    db.update_approval_message_status(approval_id, new_status)
     return {
         "id": approval.id,
         "status": approval.status,

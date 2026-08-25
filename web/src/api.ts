@@ -34,7 +34,7 @@ export interface BotUpdate {
 }
 export interface Session { id: string; bot_id: string | null; session_type?: 'bot' | 'agentic'; title: string; created_at: string }
 export interface Message {
-  id: string; session_id: string; role: 'user' | 'assistant'; content: string; created_at: string; sources: Source[]; trace?: AgentTrace | null
+  id: string; session_id: string; role: 'user' | 'assistant'; content: string; status?: string; metadata?: Record<string, any>; created_at: string; sources: Source[]; trace?: AgentTrace | null
 }
 export interface Source {
   text: string

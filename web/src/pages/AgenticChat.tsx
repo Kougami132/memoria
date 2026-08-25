@@ -124,6 +124,7 @@ export function AgenticChat() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const hasInitializedRef = useRef(false)
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
     queryKey: ['agent-sessions'],
@@ -137,28 +138,79 @@ export function AgenticChat() {
     return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
   }, [])
 
-  // Load messages for current session
+  // Restore active session from localStorage or sessions list on initial load
+  useEffect(() => {
+    if (!hasInitializedRef.current && sessions.length > 0) {
+      hasInitializedRef.current = true
+      const saved = localStorage.getItem('memoria:active_agent_session')
+      if (saved && sessions.some(s => s.id === saved)) {
+        setActiveSessionId(saved)
+      } else {
+        setActiveSessionId(sessions[0].id)
+      }
+    }
+  }, [sessions])
+
+  // Save active session to localStorage
+  useEffect(() => {
+    if (activeSessionId) {
+      localStorage.setItem('memoria:active_agent_session', activeSessionId)
+    }
+  }, [activeSessionId])
+
+  // Load messages for current session & poll if background task is streaming
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([])
       return
     }
-    api.getAgentMessages(activeSessionId)
-      .then((msgs) => {
+    let isMounted = true
+    let pollTimer: any = null
+
+    const fetchAndCheckStatus = async () => {
+      try {
+        const msgs = await api.getAgentMessages(activeSessionId)
+        if (!isMounted) return
         setMessages(msgs)
-      })
-      .catch((err) => {
+
+        const lastMsg = msgs[msgs.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'streaming') {
+          pollTimer = setTimeout(fetchAndCheckStatus, 1500)
+        }
+      } catch (err) {
         console.error('Failed to fetch agent messages:', err)
-      })
+      }
+    }
+
+    fetchAndCheckStatus()
+
+    return () => {
+      isMounted = false
+      if (pollTimer) clearTimeout(pollTimer)
+    }
   }, [activeSessionId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamState])
 
+  // Prevent accidental navigation/refresh during streaming or pending approval
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (streamState?.isStreaming || streamState?.pendingApproval) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [streamState])
+
   const handleCreateSession = async () => {
     setActiveSessionId(null)
     setMessages([])
+    setStreamState(null)
+    localStorage.removeItem('memoria:active_agent_session')
   }
 
   const handleDeleteSession = async (id: string) => {
@@ -167,7 +219,13 @@ export function AgenticChat() {
       await refetchSessions()
       if (activeSessionId === id) {
         const remaining = sessions.filter((s) => s.id !== id)
-        setActiveSessionId(remaining.length > 0 ? remaining[0].id : null)
+        const nextId = remaining.length > 0 ? remaining[0].id : null
+        setActiveSessionId(nextId)
+        if (nextId) {
+          localStorage.setItem('memoria:active_agent_session', nextId)
+        } else {
+          localStorage.removeItem('memoria:active_agent_session')
+        }
       }
     } catch (e) {
       console.error(e)
@@ -192,7 +250,7 @@ export function AgenticChat() {
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     const text = input.trim()
-    if (!text || streamState?.isStreaming) return
+    if (!text || isResponding) return
 
     const userMsg: Message = {
       id: 'temp-' + Date.now(),
@@ -297,7 +355,9 @@ export function AgenticChat() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      if (!isResponding) {
+        handleSend()
+      }
     }
   }
 
@@ -311,6 +371,25 @@ export function AgenticChat() {
       console.error('Failed to respond to approval:', err)
     }
   }
+
+  const handleRespondHistoricalApproval = async (approvalId: string, approved: boolean) => {
+    try {
+      await api.respondHostApproval(approvalId, approved)
+      setMessages(prev => prev.map(m => {
+        if (m.metadata?.approval_id === approvalId) {
+          return { ...m, status: approved ? 'approved' : 'rejected' }
+        }
+        return m
+      }))
+    } catch (err) {
+      console.error('Failed to respond to approval:', err)
+    }
+  }
+
+  const isResponding = Boolean(
+    streamState?.isStreaming ||
+    messages.some((m) => m.status === 'streaming')
+  )
 
   return (
     <div className="flex h-full bg-background">
@@ -428,8 +507,8 @@ export function AgenticChat() {
             </div>
           ) : (
             <>
-              {messages.map((msg) => (
-                <ChatMessageItem key={msg.id} msg={msg} />
+              {(streamState ? messages.filter((m) => m.status !== 'streaming') : messages).map((msg) => (
+                <ChatMessageItem key={msg.id} msg={msg} onRespondApproval={handleRespondHistoricalApproval} />
               ))}
 
               {/* Streaming message */}
@@ -447,15 +526,15 @@ export function AgenticChat() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="给 AI Agent 发送消息... (Enter 发送，Shift + Enter 换行)"
+                placeholder={isResponding ? "助手正在响应中..." : "给 AI Agent 发送消息... (Enter 发送，Shift + Enter 换行)"}
                 rows={3}
-                disabled={streamState?.isStreaming}
+                disabled={isResponding}
                 className="w-full resize-none bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
               />
               <div className="flex items-center justify-end px-3 py-1.5 border-t border-border/50 bg-background/50 rounded-b-xl">
                 <button
                   type="submit"
-                  disabled={!input.trim() || streamState?.isStreaming}
+                  disabled={!input.trim() || isResponding}
                   className="inline-flex items-center justify-center p-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <ArrowUp className="w-4 h-4" />
@@ -469,7 +548,13 @@ export function AgenticChat() {
   )
 }
 
-function ChatMessageItem({ msg }: { msg: Message }) {
+function ChatMessageItem({
+  msg,
+  onRespondApproval,
+}: {
+  msg: Message
+  onRespondApproval?: (approvalId: string, approved: boolean) => void
+}) {
   const isUser = msg.role === 'user'
   const [traceExpanded, setTraceExpanded] = useState(false)
   const [thoughtExpanded, setThoughtExpanded] = useState(false)
@@ -556,9 +641,66 @@ function ChatMessageItem({ msg }: { msg: Message }) {
             )}
 
             {/* Answer Content */}
-            <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
-              <ReactMarkdown components={mdComponents}>{msg.content}</ReactMarkdown>
-            </div>
+            {msg.status === 'pending_approval' && msg.metadata?.approval_id ? (
+              <div className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
+                    <Terminal className="w-4 h-4 text-blue-500" />
+                    <span>主机操作执行审批请求</span>
+                  </div>
+                  <Badge variant="outline" className="text-xs border-blue-400 text-blue-600 dark:text-blue-400">待审批</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  助手请求在主机 <strong className="text-foreground">{msg.metadata?.host_name || msg.metadata?.host_id}</strong> 上执行如下受控命令：
+                </p>
+                <div className="bg-background/80 dark:bg-muted/60 p-2.5 rounded-lg border border-border font-mono text-xs text-foreground select-all break-all">
+                  {msg.metadata?.command}
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onRespondApproval?.(msg.metadata!.approval_id, false)}
+                    className="rounded-lg h-8 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                  >
+                    拒绝执行
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => onRespondApproval?.(msg.metadata!.approval_id, true)}
+                    className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    允许执行
+                  </Button>
+                </div>
+              </div>
+            ) : msg.status === 'streaming' && !msg.content ? (
+              <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
+                <Sparkles className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-xs">助手正在思考与响应中，请稍候...</span>
+              </div>
+            ) : (
+              (msg.content || !msg.metadata?.approval_id) && (
+                <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
+                  <ReactMarkdown components={mdComponents}>{msg.content}</ReactMarkdown>
+                </div>
+              )
+            )}
+
+            {msg.status === 'approved' && !msg.content && msg.metadata?.approval_id && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5 px-1">
+                <Check className="w-3.5 h-3.5 text-green-500" />
+                <span>已批准在主机 {msg.metadata?.host_name || msg.metadata?.host_id} 执行命令: <code className="font-mono">{msg.metadata?.command}</code></span>
+              </div>
+            )}
+
+            {msg.status === 'rejected' && !msg.content && msg.metadata?.approval_id && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5 px-1">
+                <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+                <span>已拒绝在主机 {msg.metadata?.host_name || msg.metadata?.host_id} 执行命令: <code className="font-mono">{msg.metadata?.command}</code></span>
+              </div>
+            )}
 
             {/* Sources & Citations */}
             {msg.sources && msg.sources.length > 0 && (

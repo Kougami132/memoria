@@ -20,6 +20,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _log_trace(event_type: str, message: str, **kwargs):
+    extra_str = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
+    log_line = f"[AGENT TRACE] [{event_type}] {message}"
+    if extra_str:
+        log_line += f" | {extra_str}"
+    logger.info(log_line)
+    print(log_line, flush=True)
+
+
 class AgenticSdkUnavailable(RuntimeError):
     """Raised when the optional OpenAI Agents SDK is unavailable or unsupported."""
 
@@ -366,6 +375,8 @@ async def _execute_agent_tool_async(
     tools: Any,
     event_queue: Any = None,
     session_id: str | None = None,
+    message_id: str | None = None,
+    db: Any = None,
 ) -> Any:
     if name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
@@ -406,6 +417,19 @@ async def _execute_agent_tool_async(
                 command=command,
                 session_id=session_id,
             )
+            _log_trace("APPROVAL_REQ", f"Host command waiting for user approval: host={host_name}({host_id}) cmd={command!r} approval_id={approval.id}")
+            if message_id and db:
+                db.update_message_status(
+                    message_id=message_id,
+                    status="pending_approval",
+                    metadata={
+                        "approval_id": approval.id,
+                        "host_id": host_id,
+                        "host_name": host_name,
+                        "command": command,
+                        "approval_status": "pending",
+                    },
+                )
             if event_queue:
                 event_queue.put({
                     "type": "approval_required",
@@ -416,6 +440,19 @@ async def _execute_agent_tool_async(
                 })
             # Wait for decision
             approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=300.0)
+            _log_trace("APPROVAL_DEC", f"User decision for approval_id={approval.id}: approved={approved}")
+            if message_id and db:
+                db.update_message_status(
+                    message_id=message_id,
+                    status="streaming",
+                    metadata={
+                        "approval_id": approval.id,
+                        "host_id": host_id,
+                        "host_name": host_name,
+                        "command": command,
+                        "approval_status": "approved" if approved else "rejected",
+                    },
+                )
             if not approved:
                 return {
                     "error": f"Command execution rejected by user or timed out: '{command}'",
@@ -562,6 +599,9 @@ class OpenAIAgentsRunner:
         model_name: str,
         tools_schema: list[dict] | None = None,
         session_id: str | None = None,
+        message_id: str | None = None,
+        db: Any = None,
+        collector: Any = None,
         max_turns: int = 6,
     ) -> Iterator[dict[str, Any]]:
         import queue
@@ -612,6 +652,7 @@ class OpenAIAgentsRunner:
 
                 while turn < max_turns:
                     turn += 1
+                    _log_trace("GEN_TURN", f"Starting generation turn {turn}/{max_turns}", model=model_name)
                     gen_span_id = f"span-gen-{turn}-{uuid.uuid4().hex[:6]}"
                     gen_start = time.time()
                     gen_span = {
@@ -782,12 +823,15 @@ class OpenAIAgentsRunner:
                         tool_error = None
                         tool_result = None
                         try:
+                            _log_trace("TOOL_CALL", f"Calling tool {tool_name}", args=str(args)[:120])
                             tool_result = await _execute_agent_tool_async(
                                 tool_name,
                                 args,
                                 tools,
                                 event_queue=event_queue,
                                 session_id=session_id,
+                                message_id=message_id,
+                                db=db,
                             )
                         except Exception as e:
                             tool_error = str(e)
@@ -797,6 +841,7 @@ class OpenAIAgentsRunner:
                         tool_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
                         tool_span["duration_ms"] = max(0, round((tool_end - tool_start) * 1000))
                         tool_span["data"]["output"] = tool_result
+                        _log_trace("TOOL_RESULT", f"Tool {tool_name} returned", duration_ms=tool_span["duration_ms"], error=tool_error)
                         if tool_error:
                             tool_span["error"] = tool_error
 
@@ -859,6 +904,18 @@ class OpenAIAgentsRunner:
                     },
                 }
 
+                if message_id and db:
+                    sources = collector.list_sources() if collector else []
+                    db.update_message_status(
+                        message_id=message_id,
+                        status="done",
+                        content=final_answer,
+                        sources=sources,
+                    )
+                    if final_trace:
+                        db.add_message_trace(session_id, message_id, final_trace)
+                    _log_trace("PERSIST_DONE", f"Directly persisted final answer to DB for message {message_id}", session_id=session_id)
+
                 event_queue.put({
                     "type": "done",
                     "answer": final_answer,
@@ -866,6 +923,12 @@ class OpenAIAgentsRunner:
                 })
             except Exception as e:
                 logger.exception("Streaming agent error: %s", e)
+                if message_id and db:
+                    db.update_message_status(
+                        message_id=message_id,
+                        status="error",
+                        content=final_answer or f"Agent execution error: {e}",
+                    )
                 event_queue.put({"type": "error", "detail": str(e)})
             finally:
                 event_queue.put(None)
@@ -904,7 +967,6 @@ class MockAgentRunner:
         return AgentRunnerOutput(answer="[mock agentic response]")
 
 
-@dataclass
 @dataclass
 class AgenticRagEngine:
     db: DB
@@ -1065,57 +1127,91 @@ class AgenticRagEngine:
 
         self.db.add_message(session_id, "user", message)
 
+        assistant_message = self.db.add_message(
+            session_id=session_id,
+            role="assistant",
+            content="",
+            status="streaming",
+        )
+        message_id = assistant_message["id"]
+
         yield {
             "type": "init",
             "session_id": session_id,
+            "message_id": message_id,
         }
 
         final_answer = ""
         final_trace = None
+        message_persisted = False
+        completed = False
 
-        if hasattr(runner, "run_stream"):
-            for event in runner.run_stream(
-                prompt,
-                instructions,
-                tools,
-                effective["llm_model"],
-                session_id=session_id,
-                tools_schema=tools_schema,
-            ):
-                if event.get("type") == "done":
-                    final_answer = event.get("answer") or ""
-                    final_trace = event.get("trace")
-                else:
+        try:
+            if hasattr(runner, "run_stream"):
+                for event in runner.run_stream(
+                    prompt,
+                    instructions,
+                    tools,
+                    effective["llm_model"],
+                    session_id=session_id,
+                    message_id=message_id,
+                    db=self.db,
+                    collector=collector,
+                    tools_schema=tools_schema,
+                ):
+                    event_type = event.get("type")
+                    if event_type == "answer_delta":
+                        final_answer += str(event.get("delta") or "")
+                    elif event_type == "done":
+                        if event.get("answer") is not None:
+                            final_answer = event.get("answer") or ""
+                        final_trace = event.get("trace")
                     yield event
-        else:
-            runner_output = runner.run(
-                prompt,
-                instructions,
-                tools,
-                effective["llm_model"],
-                session_id=session_id,
-                tools_schema=tools_schema,
-            )
-            if isinstance(runner_output, AgentRunnerOutput):
-                final_answer = runner_output.answer
-                final_trace = runner_output.trace
+                completed = True
             else:
-                final_answer = str(runner_output)
-            yield {"type": "answer_delta", "delta": final_answer}
+                runner_output = runner.run(
+                    prompt,
+                    instructions,
+                    tools,
+                    effective["llm_model"],
+                    session_id=session_id,
+                    tools_schema=tools_schema,
+                )
+                if isinstance(runner_output, AgentRunnerOutput):
+                    final_answer = runner_output.answer
+                    final_trace = runner_output.trace
+                else:
+                    final_answer = str(runner_output)
+                yield {"type": "answer_delta", "delta": final_answer}
+                completed = True
+        finally:
+            # Only update fallback status for synchronous runners (non-streaming)
+            # Asynchronous streaming runners manage DB status directly in their worker thread
+            if message_id and not hasattr(runner, "run_stream"):
+                curr_msg = self.db.get_message_trace(message_id)
+                sources = collector.list_sources()
+                status = "done" if completed else "interrupted"
+                self.db.update_message_status(
+                    message_id=message_id,
+                    status=status,
+                    content=final_answer if final_answer else None,
+                    sources=sources if sources else None,
+                )
+                if final_trace and not curr_msg:
+                    self.db.add_message_trace(session_id, message_id, final_trace)
 
         sources = collector.list_sources()
         used_kbs = collector.used_kbs()
-
-        assistant_message = self.db.add_message(session_id, "assistant", final_answer, sources=sources)
-        stored_trace = self.db.add_message_trace(session_id, assistant_message["id"], final_trace) if final_trace else None
+        stored_trace = self.db.get_message_trace(message_id) if (final_trace and message_id) else None
 
         yield {
             "type": "done",
             "session_id": session_id,
+            "message_id": message_id,
             "answer": final_answer,
             "sources": sources,
             "used_kbs": used_kbs,
-            "trace": stored_trace,
+            "trace": stored_trace or final_trace,
         }
 
     def _build_prompt(self, message: str, history: list[dict]) -> str:

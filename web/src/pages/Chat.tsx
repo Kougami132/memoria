@@ -127,6 +127,7 @@ export function Chat() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const hasInitializedRef = useRef<string | null>(null)
 
   // Auto-select first bot if none selected
   useEffect(() => {
@@ -148,30 +149,82 @@ export function Chat() {
     return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
   }, [])
 
-  // Load messages for current session
+  // Restore active session when botId sessions first load
+  useEffect(() => {
+    if (botId && sessions.length > 0 && hasInitializedRef.current !== botId) {
+      hasInitializedRef.current = botId
+      const saved = localStorage.getItem(`memoria:active_bot_session_${botId}`)
+      if (saved && sessions.some(s => s.id === saved)) {
+        setActiveSessionId(saved)
+      } else {
+        setActiveSessionId(sessions[0].id)
+      }
+    }
+  }, [sessions, botId])
+
+  // Save active session to localStorage
+  useEffect(() => {
+    if (botId && activeSessionId) {
+      localStorage.setItem(`memoria:active_bot_session_${botId}`, activeSessionId)
+    }
+  }, [activeSessionId, botId])
+
+  // Load messages for current session & poll if background task is streaming
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([])
       return
     }
-    api.getMessages(activeSessionId)
-      .then((msgs) => {
+    let isMounted = true
+    let pollTimer: any = null
+
+    const fetchAndCheckStatus = async () => {
+      try {
+        const msgs = await api.getMessages(activeSessionId)
+        if (!isMounted) return
         setMessages(msgs)
-      })
-      .catch((err) => {
+
+        const lastMsg = msgs[msgs.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'streaming') {
+          pollTimer = setTimeout(fetchAndCheckStatus, 1500)
+        }
+      } catch (err) {
         console.error('Failed to fetch bot messages:', err)
-        setMessages([])
-      })
+        if (isMounted) setMessages([])
+      }
+    }
+
+    fetchAndCheckStatus()
+
+    return () => {
+      isMounted = false
+      if (pollTimer) clearTimeout(pollTimer)
+    }
   }, [activeSessionId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamState])
 
+  // Prevent accidental navigation/refresh during streaming or pending approval
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (streamState?.isStreaming || streamState?.pendingApproval) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [streamState])
+
   const handleCreateSession = async () => {
     setActiveSessionId(null)
     setMessages([])
     setStreamState(null)
+    if (botId) {
+      localStorage.removeItem(`memoria:active_bot_session_${botId}`)
+    }
   }
 
   const handleDeleteSession = async (id: string) => {
@@ -180,7 +233,15 @@ export function Chat() {
       await refetchSessions()
       if (activeSessionId === id) {
         const remaining = sessions.filter((s) => s.id !== id)
-        setActiveSessionId(remaining.length > 0 ? remaining[0].id : null)
+        const nextId = remaining.length > 0 ? remaining[0].id : null
+        setActiveSessionId(nextId)
+        if (botId) {
+          if (nextId) {
+            localStorage.setItem(`memoria:active_bot_session_${botId}`, nextId)
+          } else {
+            localStorage.removeItem(`memoria:active_bot_session_${botId}`)
+          }
+        }
       }
     } catch (e) {
       console.error(e)
@@ -205,7 +266,7 @@ export function Chat() {
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     const text = input.trim()
-    if (!text || !botId || streamState?.isStreaming) return
+    if (!text || !botId || isResponding) return
 
     const userMsg: Message = {
       id: 'temp-' + Date.now(),
@@ -308,7 +369,9 @@ export function Chat() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      if (!isResponding) {
+        handleSend()
+      }
     }
   }
 
@@ -323,7 +386,25 @@ export function Chat() {
     }
   }
 
+  const handleRespondHistoricalApproval = async (approvalId: string, approved: boolean) => {
+    try {
+      await api.respondHostApproval(approvalId, approved)
+      setMessages(prev => prev.map(m => {
+        if (m.metadata?.approval_id === approvalId) {
+          return { ...m, status: approved ? 'approved' : 'rejected' }
+        }
+        return m
+      }))
+    } catch (err) {
+      console.error('Failed to respond to approval:', err)
+    }
+  }
+
   const currentBot = bots.find((b) => b.id === botId)
+  const isResponding = Boolean(
+    streamState?.isStreaming ||
+    messages.some((m) => m.status === 'streaming')
+  )
 
   return (
     <div className="flex h-full w-full">
@@ -490,8 +571,8 @@ export function Chat() {
               </div>
             )}
 
-            {messages.map((m) => (
-              <ChatMessageItem key={m.id} msg={m} />
+            {(streamState ? messages.filter((m) => m.status !== 'streaming') : messages).map((m) => (
+              <ChatMessageItem key={m.id} msg={m} onRespondApproval={handleRespondHistoricalApproval} />
             ))}
 
             {/* In-Flight Streaming State */}
@@ -507,12 +588,12 @@ export function Chat() {
             <div className="relative flex flex-col rounded-3xl border border-border bg-[#f4f4f4] dark:bg-[#2f2f2f] shadow-sm focus-within:border-foreground/40 transition-colors p-2.5">
               <textarea
                 rows={1}
-                placeholder={botId ? '给 Memoria 发送消息…' : '请先选择助手模型…'}
+                placeholder={isResponding ? '助手正在响应中…' : botId ? '给 Memoria 发送消息…' : '请先选择助手模型…'}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={Boolean(streamState?.isStreaming) || !botId}
-                className="w-full bg-transparent resize-none border-0 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden px-2.5 pt-1.5 pb-2 min-h-[28px] max-h-[200px]"
+                disabled={isResponding || !botId}
+                className="w-full bg-transparent resize-none border-0 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden px-2.5 pt-1.5 pb-2 min-h-[28px] max-h-[200px] disabled:opacity-50"
               />
               <div className="flex items-center justify-between pt-1 px-1">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -521,9 +602,9 @@ export function Chat() {
                 </div>
                 <button
                   onClick={() => handleSend()}
-                  disabled={!input.trim() || Boolean(streamState?.isStreaming) || !botId}
+                  disabled={!input.trim() || isResponding || !botId}
                   className={`p-2 rounded-full transition-all ${
-                    input.trim() && !streamState?.isStreaming && botId
+                    input.trim() && !isResponding && botId
                       ? 'bg-foreground text-background hover:opacity-90 shadow-xs'
                       : 'bg-muted-foreground/20 text-muted-foreground cursor-not-allowed'
                   }`}
@@ -544,7 +625,13 @@ export function Chat() {
 }
 
 
-function ChatMessageItem({ msg }: { msg: Message }) {
+function ChatMessageItem({
+  msg,
+  onRespondApproval,
+}: {
+  msg: Message
+  onRespondApproval?: (approvalId: string, approved: boolean) => void
+}) {
   const isUser = msg.role === 'user'
   const [traceExpanded, setTraceExpanded] = useState(false)
   const [thoughtExpanded, setThoughtExpanded] = useState(false)
@@ -631,9 +718,66 @@ function ChatMessageItem({ msg }: { msg: Message }) {
             )}
 
             {/* Answer Content */}
-            <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
-              <ReactMarkdown components={mdComponents}>{msg.content}</ReactMarkdown>
-            </div>
+            {msg.status === 'pending_approval' && msg.metadata?.approval_id ? (
+              <div className="rounded-xl border-2 border-blue-500/30 bg-blue-50/50 dark:bg-blue-950/20 p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
+                    <Terminal className="w-4 h-4 text-blue-500" />
+                    <span>主机操作执行审批请求</span>
+                  </div>
+                  <Badge variant="outline" className="text-xs border-blue-400 text-blue-600 dark:text-blue-400">待审批</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  助手请求在主机 <strong className="text-foreground">{msg.metadata?.host_name || msg.metadata?.host_id}</strong> 上执行如下受控命令：
+                </p>
+                <div className="bg-background/80 dark:bg-muted/60 p-2.5 rounded-lg border border-border font-mono text-xs text-foreground select-all break-all">
+                  {msg.metadata?.command}
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onRespondApproval?.(msg.metadata!.approval_id, false)}
+                    className="rounded-lg h-8 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                  >
+                    拒绝执行
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => onRespondApproval?.(msg.metadata!.approval_id, true)}
+                    className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    允许执行
+                  </Button>
+                </div>
+              </div>
+            ) : msg.status === 'streaming' && !msg.content ? (
+              <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
+                <Sparkles className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-xs">助手正在思考与响应中，请稍候...</span>
+              </div>
+            ) : (
+              (msg.content || !msg.metadata?.approval_id) && (
+                <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
+                  <ReactMarkdown components={mdComponents}>{msg.content}</ReactMarkdown>
+                </div>
+              )
+            )}
+
+            {msg.status === 'approved' && !msg.content && msg.metadata?.approval_id && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5 px-1">
+                <Check className="w-3.5 h-3.5 text-green-500" />
+                <span>已批准在主机 {msg.metadata?.host_name || msg.metadata?.host_id} 执行命令: <code className="font-mono">{msg.metadata?.command}</code></span>
+              </div>
+            )}
+
+            {msg.status === 'rejected' && !msg.content && msg.metadata?.approval_id && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5 px-1">
+                <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+                <span>已拒绝在主机 {msg.metadata?.host_name || msg.metadata?.host_id} 执行命令: <code className="font-mono">{msg.metadata?.command}</code></span>
+              </div>
+            )}
 
             {/* Sources & Citations */}
             {msg.sources && msg.sources.length > 0 && (

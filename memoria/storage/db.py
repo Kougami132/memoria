@@ -117,6 +117,8 @@ class MessageRow(Base):
     session_id = Column(String, ForeignKey("sessions.id"), nullable=False)
     role = Column(String, nullable=False)
     content = Column(String, nullable=False)
+    status = Column(String, nullable=True, default="done")
+    message_metadata = Column("metadata", Text, nullable=True)
     sources = Column(Text, nullable=True)
     created_at = Column(String, nullable=False)
 
@@ -197,6 +199,12 @@ class DB:
             msg_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(messages)"))]
             if "sources" not in msg_cols:
                 conn.execute(text("ALTER TABLE messages ADD COLUMN sources TEXT"))
+                conn.commit()
+            if "status" not in msg_cols:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'done'"))
+                conn.commit()
+            if "metadata" not in msg_cols:
+                conn.execute(text("ALTER TABLE messages ADD COLUMN metadata TEXT"))
                 conn.commit()
             doc_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
             if "source" not in doc_cols:
@@ -679,9 +687,17 @@ class DB:
         }
 
     def _msg_dict(self, r: MessageRow, trace: dict | None = None) -> dict:
+        meta = None
+        if getattr(r, "message_metadata", None):
+            try:
+                meta = json.loads(r.message_metadata)
+            except Exception:
+                meta = None
         return {
             "id": r.id, "session_id": r.session_id, "role": r.role,
             "content": r.content, "created_at": r.created_at,
+            "status": getattr(r, "status", None) or "done",
+            "metadata": meta,
             "sources": json.loads(r.sources) if r.sources else [],
             "trace": trace,
         }
@@ -695,12 +711,26 @@ class DB:
                     .all())
             return [self._msg_dict(r) for r in reversed(rows)]
 
-    def add_message(self, session_id: str, role: str, content: str, sources: list | None = None) -> dict:
+    def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        sources: list | None = None,
+        status: str = "done",
+        metadata: dict | None = None,
+    ) -> dict:
         with self._s() as s:
-            row = MessageRow(id=_uid(), session_id=session_id, role=role,
-                             content=content,
-                             sources=json.dumps(sources, ensure_ascii=False) if sources else None,
-                             created_at=_now())
+            row = MessageRow(
+                id=_uid(),
+                session_id=session_id,
+                role=role,
+                content=content,
+                status=status,
+                message_metadata=json.dumps(metadata, ensure_ascii=False) if metadata else None,
+                sources=json.dumps(sources, ensure_ascii=False) if sources else None,
+                created_at=_now(),
+            )
             s.add(row)
             s.flush()
             return self._msg_dict(row)
@@ -722,6 +752,45 @@ class DB:
             s.add(row)
             s.flush()
             return self._trace_dict(row)
+
+    def update_message_status(
+        self,
+        message_id: str,
+        status: str,
+        metadata: dict | None = None,
+        content: str | None = None,
+        sources: list | None = None,
+    ) -> dict | None:
+        with self._s() as s:
+            row = s.query(MessageRow).filter(MessageRow.id == message_id).first()
+            if not row:
+                return None
+            row.status = status
+            if metadata is not None:
+                row.message_metadata = json.dumps(metadata, ensure_ascii=False)
+            if content is not None:
+                row.content = content
+            if sources is not None:
+                row.sources = json.dumps(sources, ensure_ascii=False)
+            s.flush()
+            return self._msg_dict(row)
+
+    def update_approval_message_status(self, approval_id: str, status: str) -> bool:
+        with self._s() as s:
+            rows = s.query(MessageRow).filter(MessageRow.status == "pending_approval").all()
+            updated = False
+            for r in rows:
+                if r.message_metadata:
+                    try:
+                        meta = json.loads(r.message_metadata)
+                        if meta.get("approval_id") == approval_id:
+                            r.status = status
+                            meta["approval_status"] = status
+                            r.message_metadata = json.dumps(meta, ensure_ascii=False)
+                            updated = True
+                    except Exception:
+                        pass
+            return updated
 
     # -- Runtime Settings ---------------------------------------------------
 
