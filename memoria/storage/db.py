@@ -856,6 +856,23 @@ class DB:
                    .first())
             return self._trace_dict(row) if row else None
 
+    def truncate_messages_from(self, session_id: str, message_id: str, inclusive: bool = True) -> int:
+        with self._s() as s:
+            rows = (s.query(MessageRow)
+                    .filter(MessageRow.session_id == session_id)
+                    .order_by(MessageRow.created_at)
+                    .all())
+            ids = [r.id for r in rows]
+            if message_id not in ids:
+                return 0
+            idx = ids.index(message_id)
+            target_ids = ids[idx:] if inclusive else ids[idx + 1:]
+            if not target_ids:
+                return 0
+            s.query(MessageTraceRow).filter(MessageTraceRow.message_id.in_(target_ids)).delete(synchronize_session=False)
+            deleted_count = s.query(MessageRow).filter(MessageRow.id.in_(target_ids)).delete(synchronize_session=False)
+            return deleted_count
+
     def delete_session(self, session_id: str) -> None:
         with self._s() as s:
             s.query(MessageTraceRow).filter(MessageTraceRow.session_id == session_id).delete(synchronize_session=False)

@@ -158,6 +158,8 @@ export interface AgentStreamEvent {
   type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'done' | 'error'
   phase?: 'start' | 'end'
   session_id?: string
+  message_id?: string
+  user_message_id?: string
   span?: AgentTraceSpan
   delta?: string
   detail?: string
@@ -254,6 +256,10 @@ export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-se
 export const updateAgentSession = (id: string, data: { title: string }) =>
   req<Session>(`/agent-sessions/${id}`, { method: 'PATCH', ...json(data) })
 export const deleteAgentSession = (id: string) => req<void>(`/agent-sessions/${id}`, { method: 'DELETE' })
+export const truncateAgentSession = (id: string, data: { message_id: string; inclusive?: boolean }) =>
+  req<{ session_id: string; deleted_count: number }>(`/agent-sessions/${id}/truncate`, { method: 'POST', ...json(data) })
+export const abortAgentSession = (id: string, data?: { rollback?: boolean; message_id?: string }) =>
+  req<{ session_id: string; aborted: boolean }>(`/agent-sessions/${id}/abort`, { method: 'POST', ...(data ? json(data) : {}) })
 
 export async function chatStream(
   botId: string,
@@ -304,6 +310,10 @@ export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${se
 export const updateSession = (id: string, data: { title: string }) =>
   req<Session>(`/sessions/${id}`, { method: 'PATCH', ...json(data) })
 export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { method: 'DELETE' })
+export const truncateSession = (id: string, data: { message_id: string; inclusive?: boolean }) =>
+  req<{ session_id: string; deleted_count: number }>(`/sessions/${id}/truncate`, { method: 'POST', ...json(data) })
+export const abortSession = (id: string, data?: { rollback?: boolean; message_id?: string }) =>
+  req<{ session_id: string; aborted: boolean }>(`/sessions/${id}/abort`, { method: 'POST', ...(data ? json(data) : {}) })
 
 export const getSettings = () => req<Settings>('/settings')
 export const updateSettings = (data: SettingsUpdate) =>

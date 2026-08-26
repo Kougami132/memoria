@@ -19,6 +19,41 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+class _ActiveRunRegistry:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._runs: dict[str, threading.Event] = {}
+        self._cancelled_session_ids: set[str] = set()
+
+    def register(self, session_id: str, cancel_event: threading.Event) -> None:
+        with self._lock:
+            self._runs[session_id] = cancel_event
+            self._cancelled_session_ids.discard(session_id)
+
+    def unregister(self, session_id: str) -> None:
+        with self._lock:
+            self._runs.pop(session_id, None)
+            self._cancelled_session_ids.discard(session_id)
+
+    def cancel(self, session_id: str) -> bool:
+        with self._lock:
+            self._cancelled_session_ids.add(session_id)
+            event = self._runs.get(session_id)
+            if event:
+                event.set()
+                return True
+            return False
+
+    def is_active(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._runs
+
+    def is_cancelled(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._cancelled_session_ids
+
+_ACTIVE_RUN_REGISTRY = _ActiveRunRegistry()
+
 
 def _log_trace(event_type: str, message: str, **kwargs):
     extra_str = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
@@ -600,6 +635,7 @@ class OpenAIAgentsRunner:
         tools_schema: list[dict] | None = None,
         session_id: str | None = None,
         message_id: str | None = None,
+        cancel_event: threading.Event | None = None,
         db: Any = None,
         collector: Any = None,
         max_turns: int = 6,
@@ -611,6 +647,8 @@ class OpenAIAgentsRunner:
 
         event_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
         trace_id = f"trace-{uuid.uuid4().hex[:12]}"
+        if cancel_event is None:
+            cancel_event = threading.Event()
         spans: list[dict[str, Any]] = []
 
         if tools_schema is None:
@@ -649,8 +687,13 @@ class OpenAIAgentsRunner:
                 turn = 0
                 final_answer = ""
                 collected_thought = ""
+                was_cancelled = False
 
                 while turn < max_turns:
+                    if cancel_event.is_set():
+                        was_cancelled = True
+                        _log_trace("CANCELLED", "Agent run cancelled before turn", turn=turn, session_id=session_id)
+                        break
                     turn += 1
                     _log_trace("GEN_TURN", f"Starting generation turn {turn}/{max_turns}", model=model_name)
                     gen_span_id = f"span-gen-{turn}-{uuid.uuid4().hex[:6]}"
@@ -692,6 +735,10 @@ class OpenAIAgentsRunner:
                     gen_usage = None
 
                     async for chunk in stream:
+                        if cancel_event.is_set():
+                            was_cancelled = True
+                            _log_trace("CANCELLED", "Agent run cancelled during LLM stream", session_id=session_id)
+                            break
                         if getattr(chunk, "usage", None):
                             u = chunk.usage
                             gen_usage = {
@@ -767,6 +814,9 @@ class OpenAIAgentsRunner:
                         "span": dict(gen_span),
                     })
 
+                    if was_cancelled:
+                        break
+
                     if not tool_calls_acc:
                         final_answer = current_content
                         break
@@ -789,6 +839,11 @@ class OpenAIAgentsRunner:
                     messages.append(assistant_msg)
 
                     for tc in tool_calls_acc.values():
+                        if cancel_event.is_set():
+                            was_cancelled = True
+                            _log_trace("CANCELLED", "Agent run cancelled before tool execution", session_id=session_id)
+                            break
+
                         tool_name = tc["name"]
                         raw_args = tc["arguments"]
                         args = _safe_parse_json_or_literal(raw_args) or {}
@@ -857,6 +912,9 @@ class OpenAIAgentsRunner:
                             "content": json.dumps(tool_result, ensure_ascii=False) if not isinstance(tool_result, str) else tool_result,
                         })
 
+                    if was_cancelled:
+                        break
+
                 agent_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
                 total_duration = sum(s.get("duration_ms", 0) or 0 for s in spans)
                 agent_span["duration_ms"] = total_duration
@@ -906,15 +964,28 @@ class OpenAIAgentsRunner:
 
                 if message_id and db:
                     sources = collector.list_sources() if collector else []
-                    db.update_message_status(
-                        message_id=message_id,
-                        status="done",
-                        content=final_answer,
-                        sources=sources,
-                    )
-                    if final_trace:
-                        db.add_message_trace(session_id, message_id, final_trace)
-                    _log_trace("PERSIST_DONE", f"Directly persisted final answer to DB for message {message_id}", session_id=session_id)
+                    if session_id and _ACTIVE_RUN_REGISTRY.is_cancelled(session_id):
+                        was_cancelled = True
+                    if was_cancelled:
+                        db.update_message_status(
+                            message_id=message_id,
+                            status="interrupted",
+                            content=final_answer or (current_content if 'current_content' in locals() else None),
+                            sources=sources,
+                        )
+                        if final_trace:
+                            db.add_message_trace(session_id, message_id, final_trace)
+                        _log_trace("PERSIST_INTERRUPTED", f"Directly persisted interrupted status to DB for message {message_id}", session_id=session_id)
+                    else:
+                        db.update_message_status(
+                            message_id=message_id,
+                            status="done",
+                            content=final_answer,
+                            sources=sources,
+                        )
+                        if final_trace:
+                            db.add_message_trace(session_id, message_id, final_trace)
+                        _log_trace("PERSIST_DONE", f"Directly persisted final answer to DB for message {message_id}", session_id=session_id)
 
                 event_queue.put({
                     "type": "done",
@@ -934,16 +1005,23 @@ class OpenAIAgentsRunner:
                 event_queue.put(None)
 
         def _thread_target():
-            asyncio.run(_async_worker())
+            try:
+                asyncio.run(_async_worker())
+            finally:
+                if session_id:
+                    _ACTIVE_RUN_REGISTRY.unregister(session_id)
 
         worker_thread = threading.Thread(target=_thread_target, daemon=True)
         worker_thread.start()
 
-        while True:
-            event = event_queue.get()
-            if event is None:
-                break
-            yield event
+        try:
+            while True:
+                event = event_queue.get()
+                if event is None:
+                    break
+                yield event
+        finally:
+            pass
 
 
 class MockAgentRunner:
@@ -974,6 +1052,12 @@ class AgenticRagEngine:
     runner: AgentRunner | None = None
     max_sources: int = 20
     history_limit: int = 12
+
+    def cancel_run(self, session_id: str) -> bool:
+        return _ACTIVE_RUN_REGISTRY.cancel(session_id)
+
+    def is_run_active(self, session_id: str) -> bool:
+        return _ACTIVE_RUN_REGISTRY.is_active(session_id)
 
     def run(
         self,
@@ -1070,6 +1154,7 @@ class AgenticRagEngine:
         message: str,
         session_id: str | None = None,
         bot_id: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> Iterator[dict[str, Any]]:
         if not message or not message.strip():
             raise ValueError("Query must not be empty")
@@ -1125,20 +1210,26 @@ class AgenticRagEngine:
 
         runner = self.runner or self._default_runner(effective)
 
-        self.db.add_message(session_id, "user", message)
+        if cancel_event is None:
+            cancel_event = threading.Event()
+        if session_id:
+           _ACTIVE_RUN_REGISTRY.register(session_id, cancel_event)
+
+        user_message = self.db.add_message(session_id, "user", message)
 
         assistant_message = self.db.add_message(
-            session_id=session_id,
-            role="assistant",
-            content="",
-            status="streaming",
+           session_id=session_id,
+           role="assistant",
+           content="",
+           status="streaming",
         )
         message_id = assistant_message["id"]
 
         yield {
-            "type": "init",
-            "session_id": session_id,
-            "message_id": message_id,
+           "type": "init",
+           "session_id": session_id,
+           "message_id": message_id,
+            "user_message_id": user_message["id"],
         }
 
         final_answer = ""
@@ -1155,6 +1246,7 @@ class AgenticRagEngine:
                     effective["llm_model"],
                     session_id=session_id,
                     message_id=message_id,
+                    cancel_event=cancel_event,
                     db=self.db,
                     collector=collector,
                     tools_schema=tools_schema,
@@ -1185,20 +1277,24 @@ class AgenticRagEngine:
                 yield {"type": "answer_delta", "delta": final_answer}
                 completed = True
         finally:
-            # Only update fallback status for synchronous runners (non-streaming)
-            # Asynchronous streaming runners manage DB status directly in their worker thread
-            if message_id and not hasattr(runner, "run_stream"):
-                curr_msg = self.db.get_message_trace(message_id)
-                sources = collector.list_sources()
-                status = "done" if completed else "interrupted"
-                self.db.update_message_status(
-                    message_id=message_id,
-                    status=status,
-                    content=final_answer if final_answer else None,
-                    sources=sources if sources else None,
-                )
-                if final_trace and not curr_msg:
-                    self.db.add_message_trace(session_id, message_id, final_trace)
+            # For OpenAIAgentsRunner, the background worker thread manages its own DB persistence
+            # and handles unregistration in its thread target.
+            # For other runners (synchronous or generator-based like in tests), handle cleanup here.
+            if not isinstance(runner, OpenAIAgentsRunner):
+                if session_id:
+                    _ACTIVE_RUN_REGISTRY.unregister(session_id)
+                if message_id:
+                    curr_msg = self.db.get_message_trace(message_id)
+                    sources = collector.list_sources() if collector else []
+                    status = "done" if completed else "interrupted"
+                    self.db.update_message_status(
+                        message_id=message_id,
+                        status=status,
+                        content=final_answer if final_answer else None,
+                        sources=sources if sources else None,
+                    )
+                    if final_trace and not curr_msg:
+                        self.db.add_message_trace(session_id, message_id, final_trace)
 
         sources = collector.list_sources()
         used_kbs = collector.used_kbs()
@@ -1255,4 +1351,3 @@ class AgenticRagEngine:
                 "freely inspect and utilize all available tools to accomplish the goal."
             )
         return f"{base_prompt}\n\n{role_desc}".strip()
-

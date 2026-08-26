@@ -135,3 +135,64 @@ def test_engine_run_stream_persists_on_interruption(db):
     assert messages[0]["role"] == "user"
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "Partial "
+
+
+def test_engine_run_stream_does_not_cancel_on_disconnect(db):
+    import time
+    import threading
+    from memoria.agents.engine import OpenAIAgentsRunner, _ACTIVE_RUN_REGISTRY
+
+    finished_event = threading.Event()
+
+    class SimulatedBackgroundRunner(OpenAIAgentsRunner):
+        def __init__(self):
+            super().__init__(base_url="http://mock", api_key="mock")
+
+        def run_stream(
+            self,
+            prompt,
+            instructions,
+            tools,
+            model_name,
+            session_id=None,
+            message_id=None,
+            cancel_event=None,
+            db=None,
+            collector=None,
+            tools_schema=None,
+            max_turns=6,
+        ):
+            def _worker():
+                try:
+                    time.sleep(0.1)
+                    if message_id and db:
+                        db.update_message_status(message_id=message_id, status="done", content="completed background answer")
+                        db.add_message_trace(session_id, message_id, {"summary": {"duration_ms": 100}, "spans": [{"name": "tool_step"}]})
+                finally:
+                    if session_id:
+                        _ACTIVE_RUN_REGISTRY.unregister(session_id)
+                    finished_event.set()
+
+            threading.Thread(target=_worker, daemon=True).start()
+            yield {"type": "answer_delta", "delta": "init"}
+
+    pipeline = MagicMock()
+    engine = AgenticRagEngine(
+        db=db,
+        pipeline=pipeline,
+        runner=SimulatedBackgroundRunner(),
+    )
+    sess = db.create_agentic_session(title="Disconnect Test")
+    gen = engine.run_stream("hello page refresh", session_id=sess["id"])
+    first = next(gen)
+    assert first["type"] == "init"
+    second = next(gen)
+    assert second["type"] == "answer_delta"
+    gen.close()  # Simulates browser page refresh / SSE disconnect
+
+    assert finished_event.wait(timeout=3.0)
+    messages = db.get_messages_all(sess["id"])
+    assert messages[1]["status"] == "done"
+    assert messages[1]["content"] == "completed background answer"
+    assert messages[1]["trace"] is not None
+    assert messages[1]["trace"]["spans"][0]["name"] == "tool_step"

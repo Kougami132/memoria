@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
 import {
   Activity,
   Check,
+  Copy,
   AlertCircle,
   Bot,
   BookOpen,
@@ -17,7 +19,9 @@ import {
   Pencil,
   Plus,
   ArrowUp,
+  RotateCcw,
   Sparkles,
+  Square,
   Trash2,
   Wrench,
   BrainCircuit,
@@ -62,6 +66,32 @@ const mdComponents: Components = {
     <blockquote className="border-l-2 border-primary/40 pl-4 italic text-muted-foreground my-3">
       {children}
     </blockquote>
+  ),
+  table: ({ children }) => (
+    <div className="my-3 overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-xs text-left border-collapse">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="bg-muted/60 text-foreground font-semibold border-b border-border">
+      {children}
+    </thead>
+  ),
+  tbody: ({ children }) => (
+    <tbody className="divide-y divide-border/60">{children}</tbody>
+  ),
+  tr: ({ children }) => (
+    <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
+  ),
+  th: ({ children }) => (
+    <th className="px-3 py-2 text-xs font-semibold text-foreground border-r border-border/40 last:border-r-0">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="px-3 py-2 text-xs text-foreground/90 border-r border-border/40 last:border-r-0 whitespace-pre-wrap">
+      {children}
+    </td>
   ),
 }
 
@@ -116,15 +146,26 @@ interface StreamingAssistantState {
 
 export function AgenticChat() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  useEffect(() => {
+    currentSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [streamState, setStreamState] = useState<StreamingAssistantState | null>(null)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editingContent, setEditingContent] = useState('')
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const currentSendingTextRef = useRef<string>('')
+  const currentUserMsgIdRef = useRef<string | null>(null)
+  const currentTempUserMsgIdRef = useRef<string | null>(null)
+  const currentSessionIdRef = useRef<string | null>(null)
   const hasInitializedRef = useRef(false)
+  const isStoppingRef = useRef(false)
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
     queryKey: ['agent-sessions'],
@@ -173,10 +214,10 @@ export function AgenticChat() {
         if (!isMounted) return
         setMessages(msgs)
 
-        const lastMsg = msgs[msgs.length - 1]
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'streaming') {
-          pollTimer = setTimeout(fetchAndCheckStatus, 1500)
-        }
+      const lastMsg = msgs[msgs.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.status === 'streaming' || lastMsg.status === 'pending_approval' || (lastMsg.status === 'approved' && !lastMsg.content))) {
+        pollTimer = setTimeout(fetchAndCheckStatus, 1500)
+      }
       } catch (err) {
         console.error('Failed to fetch agent messages:', err)
       }
@@ -247,23 +288,10 @@ export function AgenticChat() {
     }
   }
 
-  const handleSend = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
-    const text = input.trim()
-    if (!text || isResponding) return
-
-    const userMsg: Message = {
-      id: 'temp-' + Date.now(),
-      session_id: activeSessionId || '',
-      role: 'user',
-      content: text,
-      created_at: new Date().toISOString(),
-      sources: [],
-    }
-
-    setMessages((prev) => [...prev, userMsg])
-    setInput('')
-
+  const executeAgentStream = async (text: string, targetSessionId?: string, userMsgId?: string) => {
+    currentSendingTextRef.current = text
+    if (userMsgId) currentTempUserMsgIdRef.current = userMsgId
+    currentUserMsgIdRef.current = null
     const abortController = new AbortController()
     abortControllerRef.current = abortController
 
@@ -275,12 +303,17 @@ export function AgenticChat() {
       isStreaming: true,
     })
 
+    let currentSessionId = targetSessionId || activeSessionId || undefined
+    currentSessionIdRef.current = currentSessionId || null
     try {
-      let currentSessionId = activeSessionId || undefined
       for await (const event of api.streamAgentChat(text, currentSessionId, abortController.signal)) {
         if (event.type === 'init') {
+          if (event.user_message_id) {
+            currentUserMsgIdRef.current = event.user_message_id
+          }
           if (event.session_id && event.session_id !== activeSessionId) {
             currentSessionId = event.session_id
+            currentSessionIdRef.current = event.session_id
             setActiveSessionId(event.session_id)
             refetchSessions()
           }
@@ -339,22 +372,174 @@ export function AgenticChat() {
           } : null)
         }
       }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        setStreamState((prev) => prev ? {
-          ...prev,
-          isStreaming: false,
-          error: err.message || '请求发生错误',
-        } : null)
+   } catch (err: any) {
+     if (err.name === 'AbortError') {
+       setStreamState(null)
+       return
+     }
+     setStreamState((prev) => prev ? {
+       ...prev,
+       isStreaming: false,
+       error: err.message || '请求发生错误',
+     } : null)
+   } finally {
+     abortControllerRef.current = null
+     currentSendingTextRef.current = ''
+     currentTempUserMsgIdRef.current = null
+     currentUserMsgIdRef.current = null
+   }
+ }
+
+  const handleStopStream = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    isStoppingRef.current = true
+    setTimeout(() => {
+      isStoppingRef.current = false
+    }, 800)
+
+    let textToRestore = currentSendingTextRef.current
+    const tempId = currentTempUserMsgIdRef.current
+    const userMsgId = currentUserMsgIdRef.current
+
+    if (!textToRestore) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          textToRestore = messages[i].content
+          break
+        }
       }
-    } finally {
+    }
+    if (textToRestore) {
+      setInput(textToRestore)
+    }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
       abortControllerRef.current = null
     }
+    currentSendingTextRef.current = ''
+    currentTempUserMsgIdRef.current = null
+    currentUserMsgIdRef.current = null
+
+    setMessages((prev) => {
+      let cutoffIndex = -1
+      if (userMsgId) {
+        cutoffIndex = prev.findIndex((m) => m.id === userMsgId)
+      }
+      if (cutoffIndex < 0 && tempId) {
+        cutoffIndex = prev.findIndex((m) => m.id === tempId)
+      }
+      if (cutoffIndex < 0) {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'user') {
+            cutoffIndex = i
+            break
+          }
+        }
+      }
+      if (cutoffIndex >= 0) {
+        return prev.slice(0, cutoffIndex)
+      }
+      return prev.filter((m) => m.status !== 'streaming' && (!tempId || m.id !== tempId))
+    })
+    setStreamState(null)
+
+    const sessId = currentSessionIdRef.current || activeSessionId
+    if (sessId) {
+      try {
+        await api.abortAgentSession(sessId, { rollback: true, message_id: userMsgId || undefined })
+      } catch (err) {
+        console.error('Abort agent session error:', err)
+      }
+      try {
+        const msgs = await api.getAgentMessages(sessId)
+        setMessages(msgs)
+      } catch (err) {
+        console.error('Failed to reload messages after abort:', err)
+      }
+    }
+  }
+
+  const handleSend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (isStoppingRef.current) return
+    const text = input.trim()
+    if (!text || isResponding) return
+
+    const userMsg: Message = {
+      id: 'temp-' + Date.now(),
+      session_id: activeSessionId || '',
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+      sources: [],
+    }
+
+    setMessages((prev) => [...prev, userMsg])
+    setInput('')
+    await executeAgentStream(text, activeSessionId || undefined, userMsg.id)
+  }
+
+  const handleCopy = (msgId: string, text: string) => {
+    if (!text) return
+    navigator.clipboard.writeText(text)
+    setCopiedMessageId(msgId)
+    setTimeout(() => setCopiedMessageId(null), 2000)
+  }
+
+  const handleEditAndResend = async (messageId: string, newContent: string) => {
+    if (!activeSessionId || isResponding || !newContent.trim()) return
+    setEditingMessageId(null)
+    try {
+      await api.truncateAgentSession(activeSessionId, { message_id: messageId, inclusive: true })
+      const targetIdx = messages.findIndex((m) => m.id === messageId)
+      const keptMessages = targetIdx >= 0 ? messages.slice(0, targetIdx) : messages
+      const userMsg: Message = {
+        id: 'temp-' + Date.now(),
+        session_id: activeSessionId,
+        role: 'user',
+        content: newContent.trim(),
+        created_at: new Date().toISOString(),
+        sources: [],
+      }
+      setMessages([...keptMessages, userMsg])
+      await executeAgentStream(newContent.trim(), activeSessionId, userMsg.id)
+    } catch (err) {
+      console.error('Failed to edit and resend in agent chat:', err)
+    }
+  }
+
+  const handleResend = async (msg: Message) => {
+    await handleEditAndResend(msg.id, msg.content)
+  }
+
+  const handleRegenerate = async (assistantMsgId: string) => {
+    if (!activeSessionId || isResponding) return
+    const targetIdx = messages.findIndex((m) => m.id === assistantMsgId)
+    if (targetIdx < 0) return
+
+    // Find preceding user message
+    let lastUserMsg: Message | null = null
+    for (let i = targetIdx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMsg = messages[i]
+        break
+      }
+    }
+    if (!lastUserMsg) return
+
+    await api.truncateAgentSession(activeSessionId, { message_id: assistantMsgId, inclusive: true })
+    setMessages(messages.slice(0, targetIdx))
+    await executeAgentStream(lastUserMsg.content, activeSessionId, lastUserMsg.id)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      if (isStoppingRef.current) return
       if (!isResponding) {
         handleSend()
       }
@@ -372,24 +557,39 @@ export function AgenticChat() {
     }
   }
 
-  const handleRespondHistoricalApproval = async (approvalId: string, approved: boolean) => {
-    try {
-      await api.respondHostApproval(approvalId, approved)
-      setMessages(prev => prev.map(m => {
-        if (m.metadata?.approval_id === approvalId) {
-          return { ...m, status: approved ? 'approved' : 'rejected' }
+ const handleRespondHistoricalApproval = async (approvalId: string, approved: boolean) => {
+   try {
+     await api.respondHostApproval(approvalId, approved)
+     setMessages(prev => prev.map(m => {
+       if (m.metadata?.approval_id === approvalId) {
+         return { ...m, status: approved ? 'approved' : 'rejected' }
+       }
+       return m
+     }))
+      if (activeSessionId) {
+        const checkAfterDecision = async () => {
+          try {
+            const msgs = await api.getAgentMessages(activeSessionId)
+            setMessages(msgs)
+            const lastMsg = msgs[msgs.length - 1]
+            if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.status === 'streaming' || lastMsg.status === 'pending_approval' || (lastMsg.status === 'approved' && !lastMsg.content))) {
+              setTimeout(checkAfterDecision, 1500)
+            }
+          } catch (err) {
+            console.error('Failed to poll agent status after approval decision:', err)
+          }
         }
-        return m
-      }))
-    } catch (err) {
-      console.error('Failed to respond to approval:', err)
-    }
-  }
+        setTimeout(checkAfterDecision, 800)
+      }
+   } catch (err) {
+     console.error('Failed to respond to approval:', err)
+   }
+ }
 
-  const isResponding = Boolean(
-    streamState?.isStreaming ||
-    messages.some((m) => m.status === 'streaming')
-  )
+ const isResponding = Boolean(
+   streamState?.isStreaming ||
+    messages.some((m) => m.status === 'streaming' || m.status === 'pending_approval' || (m.status === 'approved' && !m.content))
+ )
 
   return (
     <div className="flex h-full bg-background">
@@ -508,7 +708,28 @@ export function AgenticChat() {
           ) : (
             <>
               {(streamState ? messages.filter((m) => m.status !== 'streaming') : messages).map((msg) => (
-                <ChatMessageItem key={msg.id} msg={msg} onRespondApproval={handleRespondHistoricalApproval} />
+                <ChatMessageItem
+                  key={msg.id}
+                  msg={msg}
+                  isResponding={isResponding}
+                  isEditing={editingMessageId === msg.id}
+                  editingContent={editingContent}
+                  onStartEdit={(targetMsg) => {
+                    setEditingMessageId(targetMsg.id)
+                    setEditingContent(targetMsg.content)
+                  }}
+                  onCancelEdit={() => {
+                    setEditingMessageId(null)
+                    setEditingContent('')
+                  }}
+                  onChangeEditContent={setEditingContent}
+                  onSaveEdit={handleEditAndResend}
+                  onResend={handleResend}
+                  onRegenerate={handleRegenerate}
+                  onCopy={handleCopy}
+                  isCopied={copiedMessageId === msg.id}
+                  onRespondApproval={handleRespondHistoricalApproval}
+                />
               ))}
 
               {/* Streaming message */}
@@ -532,13 +753,27 @@ export function AgenticChat() {
                 className="w-full resize-none bg-transparent px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
               />
               <div className="flex items-center justify-end px-3 py-1.5 border-t border-border/50 bg-background/50 rounded-b-xl">
-                <button
-                  type="submit"
-                  disabled={!input.trim() || isResponding}
-                  className="inline-flex items-center justify-center p-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
+                {isResponding ? (
+                  <button
+                    key="agentic-stop-btn"
+                    type="button"
+                    onClick={handleStopStream}
+                    className="inline-flex items-center justify-center p-1.5 rounded-lg bg-foreground text-background hover:opacity-90 transition-colors shadow-xs"
+                    title="停止生成"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    key="agentic-send-btn"
+                    type="submit"
+                    disabled={!input.trim()}
+                    className="inline-flex items-center justify-center p-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="发送消息"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           </form>
@@ -550,14 +785,38 @@ export function AgenticChat() {
 
 function ChatMessageItem({
   msg,
+  isResponding,
+  isEditing,
+  editingContent,
+  onStartEdit,
+  onCancelEdit,
+  onChangeEditContent,
+  onSaveEdit,
+  onResend,
+  onRegenerate,
+  onCopy,
+  isCopied,
   onRespondApproval,
 }: {
   msg: Message
+  isResponding: boolean
+  isEditing: boolean
+  editingContent: string
+  onStartEdit: (msg: Message) => void
+  onCancelEdit: () => void
+  onChangeEditContent: (val: string) => void
+  onSaveEdit: (messageId: string, newContent: string) => void
+  onResend: (msg: Message) => void
+  onRegenerate: (assistantMsgId: string) => void
+  onCopy: (msgId: string, text: string) => void
+  isCopied: boolean
   onRespondApproval?: (approvalId: string, approved: boolean) => void
 }) {
   const isUser = msg.role === 'user'
   const [traceExpanded, setTraceExpanded] = useState(false)
   const [thoughtExpanded, setThoughtExpanded] = useState(false)
+  const [editInput, setEditInput] = useState(msg.content)
+  const editInputRef = useRef<HTMLTextAreaElement>(null)
 
   // Parse trace & thought from metadata if available
   const trace = msg.trace
@@ -565,21 +824,94 @@ function ChatMessageItem({
   const thought = typeof rawThought === 'string' ? rawThought : null
   const totalDurationMs = trace?.summary?.duration_ms ?? trace?.spans?.reduce((acc, s) => acc + (s.duration_ms || 0), 0)
   const totalDuration = formatDuration(totalDurationMs && totalDurationMs > 0 ? totalDurationMs : null)
+  useEffect(() => {
+    if (isEditing) {
+      setEditInput(editingContent || msg.content)
+      setTimeout(() => editInputRef.current?.focus(), 50)
+    }
+  }, [isEditing, editingContent, msg.content])
 
   return (
-    <div className={`flex gap-3 max-w-4xl mx-auto ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`group flex gap-3 max-w-4xl mx-auto ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary flex-shrink-0 mt-0.5">
           <Bot className="w-4 h-4" />
         </div>
       )}
 
-      <div className={`flex flex-col gap-2 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`flex flex-col gap-1.5 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
         {/* User Message */}
         {isUser ? (
-          <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm whitespace-pre-wrap">
-            {msg.content}
-          </div>
+          isEditing ? (
+            <div className="w-full min-w-[320px] max-w-xl bg-card border border-border p-3 rounded-2xl shadow-sm space-y-2">
+              <textarea
+                ref={editInputRef}
+                value={editInput}
+                onChange={(e) => {
+                  setEditInput(e.target.value)
+                  onChangeEditContent(e.target.value)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    if (editInput.trim()) onSaveEdit(msg.id, editInput.trim())
+                  }
+                  if (e.key === 'Escape') onCancelEdit()
+                }}
+                rows={3}
+                className="w-full bg-transparent resize-none border-0 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden leading-relaxed"
+              />
+              <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/50">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onCancelEdit}
+                  className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => editInput.trim() && onSaveEdit(msg.id, editInput.trim())}
+                  disabled={!editInput.trim()}
+                  className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:opacity-90"
+                >
+                  发送
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-end gap-1">
+              <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm whitespace-pre-wrap">
+                {msg.content}
+              </div>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pt-0.5">
+                <button
+                  onClick={() => onCopy(msg.id, msg.content)}
+                  className="p-1 rounded-md hover:bg-muted hover:text-foreground transition-colors"
+                  title={isCopied ? "已复制" : "复制"}
+                >
+                  {isCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  onClick={() => onStartEdit(msg)}
+                  disabled={isResponding}
+                  className="p-1 rounded-md hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="编辑"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => onResend(msg)}
+                  disabled={isResponding}
+                  className="p-1 rounded-md hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="重新发送"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )
         ) : (
           <div className="w-full space-y-3">
             {/* Thought Chain (if exists) */}
@@ -640,9 +972,9 @@ function ChatMessageItem({
               </div>
             )}
 
-            {/* Answer Content */}
-            {msg.status === 'pending_approval' && msg.metadata?.approval_id ? (
-              <div className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3">
+           {/* Answer Content */}
+            {msg.status === 'pending_approval' && msg.metadata?.approval_id && (
+               <div className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
                     <Terminal className="w-4 h-4 text-blue-500" />
@@ -665,30 +997,31 @@ function ChatMessageItem({
                   >
                     拒绝执行
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => onRespondApproval?.(msg.metadata!.approval_id, true)}
-                    className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    允许执行
-                  </Button>
-                </div>
-              </div>
-            ) : msg.status === 'streaming' && !msg.content ? (
+                 <Button
+                   size="sm"
+                   onClick={() => onRespondApproval?.(msg.metadata!.approval_id, true)}
+                   className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
+                 >
+                   <Check className="w-3.5 h-3.5" />
+                   允许执行
+                 </Button>
+               </div>
+             </div>
+            )}
+
+           {/* Answer Content or In-progress Prompt */}
+            {(msg.status === 'streaming' || msg.status === 'pending_approval' || msg.status === 'approved') && !msg.content ? (
               <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
                 <Sparkles className="w-4 h-4 animate-spin text-primary" />
                 <span className="text-xs">助手正在思考与响应中，请稍候...</span>
               </div>
-            ) : (
-              (msg.content || !msg.metadata?.approval_id) && (
-                <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
-                  <ReactMarkdown components={mdComponents}>{msg.content}</ReactMarkdown>
-                </div>
-              )
-            )}
+           ) : msg.content ? (
+               <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
+                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{msg.content}</ReactMarkdown>
+               </div>
+           ) : null}
 
-            {msg.status === 'approved' && !msg.content && msg.metadata?.approval_id && (
+           {msg.status === 'approved' && !msg.content && msg.metadata?.approval_id && (
               <div className="text-xs text-muted-foreground flex items-center gap-1.5 px-1">
                 <Check className="w-3.5 h-3.5 text-green-500" />
                 <span>已批准在主机 {msg.metadata?.host_name || msg.metadata?.host_id} 执行命令: <code className="font-mono">{msg.metadata?.command}</code></span>
@@ -705,6 +1038,27 @@ function ChatMessageItem({
             {/* Sources & Citations */}
             {msg.sources && msg.sources.length > 0 && (
               <SourcesList sources={msg.sources} />
+            )}
+
+            {/* Assistant Action Bar */}
+            {msg.status !== 'streaming' && (
+              <div className="flex items-center gap-1 pt-1 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => onCopy(msg.id, msg.content)}
+                  className="p-1 rounded-md hover:bg-muted hover:text-foreground transition-colors"
+                  title={isCopied ? "已复制" : "复制"}
+                >
+                  {isCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  onClick={() => onRegenerate(msg.id)}
+                  disabled={isResponding}
+                  className="p-1 rounded-md hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="重新生成"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -837,10 +1191,11 @@ function StreamingMessageItem({
           </div>
         )}
 
-        {/* Real-time Answer Output */}
-        {state.answer && (
-          <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
-            <ReactMarkdown components={mdComponents}>{state.answer}</ReactMarkdown>
+      {/* Real-time Answer Output */}
+
+       {state.answer && (
+         <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{state.answer}</ReactMarkdown>
           </div>
         )}
 
@@ -1005,5 +1360,3 @@ function SourcesList({ sources }: { sources: Source[] }) {
 }
 
 export default AgenticChat
-
-
