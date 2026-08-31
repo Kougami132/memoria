@@ -56,8 +56,17 @@ _ACTIVE_RUN_REGISTRY = _ActiveRunRegistry()
 
 
 def _log_trace(event_type: str, message: str, **kwargs):
+    agent_tag = kwargs.pop("agent", None) or kwargs.pop("agent_name", None)
+    target_agent = kwargs.pop("target_agent", None)
+    if agent_tag and target_agent:
+        prefix = f"[{agent_tag} -> {target_agent}]"
+    elif agent_tag:
+        prefix = f"[{agent_tag}]"
+    else:
+        prefix = "[Orchestrator]"
+
     extra_str = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
-    log_line = f"[AGENT TRACE] [{event_type}] {message}"
+    log_line = f"[AGENT TRACE] {prefix} [{event_type}] {message}"
     if extra_str:
         log_line += f" | {extra_str}"
     logger.info(log_line)
@@ -242,10 +251,28 @@ def _normalize_span(exported: dict[str, Any]) -> dict:
     usage = span_data.get("usage") or exported.get("usage")
     if usage is None and isinstance(cleaned_data.get("output"), dict):
         usage = cleaned_data["output"].get("usage")
+    tool_name = span_data.get("name")
+    meta = TOOL_METADATA.get(tool_name, {}) if tool_name else {}
+    span_type = span_data.get("type") or exported.get("type") or "span"
+    if span_type in {"agent", "generation"}:
+        agent_id = exported.get("agent_id") or span_data.get("agent_id") or "orchestrator"
+        agent_name = exported.get("agent_name") or span_data.get("agent_name") or "Orchestrator"
+        agent_role = "orchestrator"
+        parent_agent_id = None
+    else:
+        agent_id = exported.get("agent_id") or span_data.get("agent_id") or meta.get("agent_id") or ("knowledge_agent" if tool_name and "knowledge" in tool_name else "host_agent" if tool_name and "host" in tool_name else "specialist")
+        agent_name = exported.get("agent_name") or span_data.get("agent_name") or meta.get("agent_name") or ("KnowledgeAgent" if agent_id == "knowledge_agent" else "HostAgent" if agent_id == "host_agent" else "SpecialistAgent")
+        agent_role = "specialist"
+        parent_agent_id = exported.get("parent_agent_id") or span_data.get("parent_agent_id") or "orchestrator"
+
     return {
         "id": exported.get("id"),
         "trace_id": exported.get("trace_id"),
         "parent_id": exported.get("parent_id"),
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "agent_role": agent_role,
+        "parent_agent_id": parent_agent_id,
         "type": span_data.get("type") or "span",
         "name": _span_name(span_data),
         "started_at": started_at,
@@ -318,30 +345,18 @@ def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) 
         {
             "type": "function",
             "function": {
-                "name": "list_knowledge_bases",
-                "description": "查询当前允许访问的所有可用知识库列表及文档统计信息。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_knowledge_base",
-                "description": "在指定的知识库中检索与问题相关的文本片段与参考资料。",
+                "name": "delegate_to_knowledge_agent",
+                "description": "【多 Agent 委派】委派知识库专家 KnowledgeAgent 跨多个知识库检索与分析文本片段与资料。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "kb_id": {
-                            "type": "string",
-                            "description": "要检索的知识库ID",
-                        },
                         "query": {
                             "type": "string",
-                            "description": "检索关键词或查询问题",
+                            "description": "检索关键词或问题",
+                        },
+                        "kb_id": {
+                            "type": "string",
+                            "description": "可选：指定要检索的单一知识库ID，留空则检索所有可用知识库",
                         },
                         "top_k": {
                             "type": "integer",
@@ -349,7 +364,7 @@ def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) 
                             "default": 5,
                         },
                     },
-                    "required": ["kb_id", "query"],
+                    "required": ["query"],
                     "additionalProperties": False,
                 },
             },
@@ -360,42 +375,25 @@ def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) 
             {
                 "type": "function",
                 "function": {
-                    "name": "list_hosts",
-                    "description": "查询当前允许访问的所有远程主机与服务器列表及基本状态。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_host_info",
-                    "description": "获取指定远程主机的系统配置与运行状态详情（如操作系统、CPU负载、内存及磁盘信息）。",
+                    "name": "delegate_to_host_agent",
+                    "description": "【多 Agent 委派】委派主机运维专家 HostAgent 执行远程服务器探测、状态巡检或受控命令执行任务。",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "host_id": {"type": "string", "description": "要查询的主机ID"},
+                            "instruction": {
+                                "type": "string",
+                                "description": "运维任务描述或目标说明",
+                            },
+                            "host_id": {
+                                "type": "string",
+                                "description": "可选：目标主机ID",
+                            },
+                            "command": {
+                                "type": "string",
+                                "description": "可选：需直接执行的受控Shell指令",
+                            },
                         },
-                        "required": ["host_id"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "run_host_command",
-                    "description": "在指定的主机上执行安全的只读/状态查询指令（如 uptime, df -h, free -m, ps, docker ps 等）。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "host_id": {"type": "string", "description": "要执行命令的主机ID"},
-                            "command": {"type": "string", "description": "要执行的Shell命令"},
-                        },
-                        "required": ["host_id", "command"],
+                        "required": ["instruction"],
                         "additionalProperties": False,
                     },
                 },
@@ -413,7 +411,27 @@ async def _execute_agent_tool_async(
     message_id: str | None = None,
     db: Any = None,
 ) -> Any:
-    if name == "list_knowledge_bases":
+    if name == "delegate_to_knowledge_agent":
+        query = str(args.get("query") or "")
+        kb_id = args.get("kb_id")
+        top_k = int(args.get("top_k") or 5)
+        return tools.delegate_to_knowledge_agent(query=query, kb_id=kb_id, top_k=top_k)
+    elif name == "delegate_to_host_agent":
+        instruction = str(args.get("instruction") or "")
+        host_id = args.get("host_id")
+        command = args.get("command")
+        if command and host_id:
+            return await _execute_agent_tool_async(
+                "run_host_command",
+                {"host_id": host_id, "command": command},
+                tools,
+                event_queue=event_queue,
+                session_id=session_id,
+                message_id=message_id,
+                db=db,
+            )
+        return tools.delegate_to_host_agent(instruction=instruction, host_id=host_id, command=command)
+    elif name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
     elif name == "search_knowledge_base":
         kb_id = str(args.get("kb_id") or "")
@@ -452,7 +470,7 @@ async def _execute_agent_tool_async(
                 command=command,
                 session_id=session_id,
             )
-            _log_trace("APPROVAL_REQ", f"Host command waiting for user approval: host={host_name}({host_id}) cmd={command!r} approval_id={approval.id}")
+            _log_trace("APPROVAL_REQ", f"Host command waiting for user approval: host={host_name}({host_id}) cmd={command!r} approval_id={approval.id}", agent="HostAgent")
             if message_id and db:
                 db.update_message_status(
                     message_id=message_id,
@@ -475,7 +493,7 @@ async def _execute_agent_tool_async(
                 })
             # Wait for decision
             approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=300.0)
-            _log_trace("APPROVAL_DEC", f"User decision for approval_id={approval.id}: approved={approved}")
+            _log_trace("APPROVAL_DEC", f"User decision for approval_id={approval.id}: approved={approved}", agent="HostAgent")
             if message_id and db:
                 db.update_message_status(
                     message_id=message_id,
@@ -493,13 +511,23 @@ async def _execute_agent_tool_async(
                     "error": f"Command execution rejected by user or timed out: '{command}'",
                     "status": "rejected",
                 }
-            return tools.run_host_command(host_id, command, approved=True)
+        return tools.run_host_command(host_id, command, approved=True)
             
         return tools.run_host_command(host_id, command)
     else:
         raise ValueError(f"Unknown agent tool: {name}")
 
 def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
+    if name == "delegate_to_knowledge_agent":
+        query = str(args.get("query") or "")
+        kb_id = args.get("kb_id")
+        top_k = int(args.get("top_k") or 5)
+        return tools.delegate_to_knowledge_agent(query=query, kb_id=kb_id, top_k=top_k)
+    elif name == "delegate_to_host_agent":
+        instruction = str(args.get("instruction") or "")
+        host_id = args.get("host_id")
+        command = args.get("command")
+        return tools.delegate_to_host_agent(instruction=instruction, host_id=host_id, command=command)
     if name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
     elif name == "search_knowledge_base":
@@ -695,7 +723,7 @@ class OpenAIAgentsRunner:
                         _log_trace("CANCELLED", "Agent run cancelled before turn", turn=turn, session_id=session_id)
                         break
                     turn += 1
-                    _log_trace("GEN_TURN", f"Starting generation turn {turn}/{max_turns}", model=model_name)
+                    _log_trace("GEN_TURN", f"Starting generation turn {turn}/{max_turns}", agent="Orchestrator", model=model_name)
                     gen_span_id = f"span-gen-{turn}-{uuid.uuid4().hex[:6]}"
                     gen_start = time.time()
                     gen_span = {
@@ -852,10 +880,20 @@ class OpenAIAgentsRunner:
 
                         tool_span_id = f"span-tool-{uuid.uuid4().hex[:8]}"
                         tool_start = time.time()
+                        meta = TOOL_METADATA.get(tool_name, {})
+                        tool_agent_id = meta.get("agent_id") or ("knowledge_agent" if "knowledge" in tool_name else "host_agent" if "host" in tool_name else "specialist")
+                        tool_agent_name = meta.get("agent_name") or ("KnowledgeAgent" if tool_agent_id == "knowledge_agent" else "HostAgent" if tool_agent_id == "host_agent" else "SpecialistAgent")
+                        tool_agent_role = meta.get("agent_role") or "specialist"
+                        tool_parent_agent_id = meta.get("parent_agent_id") or "orchestrator"
+
                         tool_span = {
                             "id": tool_span_id,
                             "trace_id": trace_id,
                             "parent_id": agent_span_id,
+                            "agent_id": tool_agent_id,
+                            "agent_name": tool_agent_name,
+                            "agent_role": tool_agent_role,
+                            "parent_agent_id": tool_parent_agent_id,
                             "type": "function",
                             "name": tool_name,
                             "started_at": datetime.utcnow().isoformat() + "Z",
@@ -878,7 +916,10 @@ class OpenAIAgentsRunner:
                         tool_error = None
                         tool_result = None
                         try:
-                            _log_trace("TOOL_CALL", f"Calling tool {tool_name}", args=str(args)[:120])
+                            if tool_name.startswith("delegate_to_"):
+                                _log_trace("DELEGATE", f"Delegating task to {tool_agent_name} ({tool_name})", agent="Orchestrator", target_agent=tool_agent_name, args=str(args)[:120])
+                            else:
+                                _log_trace("TOOL_CALL", f"Calling tool {tool_name}", agent=tool_agent_name, args=str(args)[:120])
                             tool_result = await _execute_agent_tool_async(
                                 tool_name,
                                 args,
@@ -896,7 +937,10 @@ class OpenAIAgentsRunner:
                         tool_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
                         tool_span["duration_ms"] = max(0, round((tool_end - tool_start) * 1000))
                         tool_span["data"]["output"] = tool_result
-                        _log_trace("TOOL_RESULT", f"Tool {tool_name} returned", duration_ms=tool_span["duration_ms"], error=tool_error)
+                        if tool_name.startswith("delegate_to_"):
+                            _log_trace("DELEGATE_RETURN", f"Subagent {tool_agent_name} completed delegated task", agent=tool_agent_name, target_agent="Orchestrator", duration_ms=tool_span["duration_ms"], error=tool_error)
+                        else:
+                            _log_trace("TOOL_RESULT", f"Tool {tool_name} returned", agent=tool_agent_name, duration_ms=tool_span["duration_ms"], error=tool_error)
                         if tool_error:
                             tool_span["error"] = tool_error
 
@@ -975,7 +1019,7 @@ class OpenAIAgentsRunner:
                         )
                         if final_trace:
                             db.add_message_trace(session_id, message_id, final_trace)
-                        _log_trace("PERSIST_INTERRUPTED", f"Directly persisted interrupted status to DB for message {message_id}", session_id=session_id)
+                        _log_trace("PERSIST_INTERRUPTED", f"Directly persisted interrupted status to DB for message {message_id}", agent="Orchestrator", session_id=session_id)
                     else:
                         db.update_message_status(
                             message_id=message_id,
@@ -985,7 +1029,7 @@ class OpenAIAgentsRunner:
                         )
                         if final_trace:
                             db.add_message_trace(session_id, message_id, final_trace)
-                        _log_trace("PERSIST_DONE", f"Directly persisted final answer to DB for message {message_id}", session_id=session_id)
+                        _log_trace("PERSIST_DONE", f"Directly persisted final answer to DB for message {message_id}", agent="Orchestrator", session_id=session_id)
 
                 event_queue.put({
                     "type": "done",
@@ -1340,14 +1384,20 @@ class AgenticRagEngine:
         base_prompt = custom_system_prompt if (custom_system_prompt is not None and custom_system_prompt != "") else (effective.get("system_prompt") or "")
         if is_bot:
             role_desc = (
-                "You are an AI assistant in Memoria configured for this specific bot. "
-                "You have access to tools specifically configured for this bot (such as bound knowledge bases and host servers). "
-                "When the user asks questions or issues commands, select and use the available tools as appropriate."
+                "You are the central Orchestrator AI agent in Memoria configured for this specific bot. "
+                "You coordinate specialist sub-agents using the Agent-as-Tool pattern:\n"
+                "1. `delegate_to_knowledge_agent`: Delegate to KnowledgeAgent for searching knowledge bases, extracting facts, and retrieving reference documents.\n"
+                "2. `delegate_to_host_agent`: Delegate to HostAgent for querying server status, inspecting hosts, and executing controlled commands.\n"
+                "When the user asks questions or issues tasks, determine the necessary domain tasks and delegate them to the appropriate specialist agents. "
+                "Synthesize their returned findings to provide a complete, clear, and accurate final response."
             )
         else:
             role_desc = (
-                "You are Memoria's independent AI Agent assistant. You can access every knowledge base "
-                "and host server available in the system. When the user asks questions or issues tasks, "
-                "freely inspect and utilize all available tools to accomplish the goal."
+                "You are Memoria's central Orchestrator AI Agent (主调度智能体). "
+                "You coordinate specialist agents using the Agent-as-Tool architecture to accomplish user requests:\n"
+                "1. `delegate_to_knowledge_agent`: Delegate to KnowledgeAgent for searching knowledge bases, extracting facts, and retrieving reference documents.\n"
+                "2. `delegate_to_host_agent`: Delegate to HostAgent for querying server status, inspecting hosts, and executing controlled commands.\n"
+                "When the user asks questions or issues tasks, determine the necessary domain tasks and delegate them to the appropriate specialist agents. "
+                "Synthesize their returned findings to provide a complete, clear, and accurate final response."
             )
         return f"{base_prompt}\n\n{role_desc}".strip()

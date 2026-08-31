@@ -5,6 +5,7 @@
 ## 功能
 
 - **RAG 问答**：文档切分 → 向量化 → 相似度检索 → LLM 回答，回答附带来源引用
+- **多 Agent 协同（Agent-as-Tool）**：主调度智能体统筹分析，专有 Sub-Agent 负责知识库深度检索与远程主机运维巡检
 - **Bot 系统**：每个 Bot 关联多个知识库，拥有独立 System Prompt
 - **多轮对话**：Session 持久化对话历史，支持续聊和会话管理
 - **Vault 同步**：绑定本地目录或 WebDAV，自动周期同步（默认 15 分钟）
@@ -141,6 +142,46 @@ pytest           # 运行测试
 ruff check .     # Lint
 black .          # 格式化
 ```
+
+## 多 Agent 架构（Agent-as-Tool）
+
+Memoria 采用 **Agent-as-Tool** 架构，将专业领域的复杂能力封装为独立专家智能体（Sub-Agent），由主调度智能体（Orchestrator）统一理解意图、分解任务并委派执行。
+
+### 智能体职责说明
+
+| 智能体 | 角色定位 | 核心职责 |
+| :--- | :--- | :--- |
+| **Orchestrator（主调度智能体）** | 调度大脑 / 意图分发 | 接收用户会话输入，分析推理任务意图，拆解跨领域子任务，委派给对应的专业智能体并综合多方返回结果输出最终答复。 |
+| **KnowledgeAgent（知识库专家）** | 知识检索 / 文档提炼 | 负责多知识库探索与跨库混合检索（向量+关键词），提炼高相关文本片段与参考资料，提供溯源证据链。 |
+| **HostAgent（主机运维专家）** | 服务器巡检 / 受控操作 | 负责探测多主机节点状态、系统指标（CPU/内存/磁盘/进程）诊断，并在受控安全策略与审批机制下执行系统指令。 |
+
+### 各 Agent 配备工具
+
+#### 1. Orchestrator 主调度工具
+- `delegate_to_knowledge_agent`：委派知识库专家 KnowledgeAgent 进行跨库检索与内容分析。
+  - 参数：`query`（查询内容，必填）、`kb_id`（可选指定知识库）、`top_k`（检索数量，默认 5）。
+- `delegate_to_host_agent`：委派主机运维专家 HostAgent 执行远程服务器探测、巡检或受控指令。
+  - 参数：`instruction`（运维任务描述，必填）、`host_id`（可选目标主机）、`command`（可选指定指令）。
+
+#### 2. KnowledgeAgent 内部工具
+- `list_knowledge_bases`：查询当前允许访问的所有知识库元数据及文档统计信息。
+- `search_knowledge_base`：在指定的知识库内执行向量与关键词混合检索，返回高相关文本分块。
+
+#### 3. HostAgent 内部工具
+- `list_hosts`：查询可用主机与服务器节点、网络地址、标签及运行状态。
+- `get_host_info`：获取指定主机的操作系统、负载、内存、磁盘和运行指标详情。
+- `run_host_command`：在指定主机上执行受控指令，内置三级安全策略：
+  - `safe`（只读安全）：如 `uptime`、`df -h`、`free -m`、`docker ps` 等，直接安全执行。
+  - `ask`（需要审批）：如重启服务、修改配置等敏感操作，通过 Web 端与会话流式交互等待用户确认。
+  - `danger`（危险拦截）：如 `rm -rf /`、格式化硬盘等高危命令，系统级直接拦截熔断。
+
+### 链路可观测性（Tracing & Logging）
+
+- **Web 界面 Tracing**：全链路呈现调用层级、各 Agent 耗时分布、入参出参以及关联的专家身份徽标。
+- **控制台实时日志**：
+  - 调度流转：`[AGENT TRACE] [Orchestrator -> HostAgent] [DELEGATE] ...`
+  - 专家执行：`[AGENT TRACE] [HostAgent] [TOOL_CALL] ...`
+  - 结果交付：`[AGENT TRACE] [HostAgent -> Orchestrator] [DELEGATE_RETURN] ...`
 
 ## 架构
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from memoria.agents.state import SourceCollector
-from memoria.connectors.host.tools import AgentHostTools, HostAccessError, HOST_TOOL_METADATA
+from memoria.connectors.host.tools import AgentHostTools, HOST_TOOL_METADATA
 
 if TYPE_CHECKING:
     from memoria.core.pipeline import Pipeline
@@ -16,10 +16,34 @@ TOOL_METADATA: dict[str, dict[str, str]] = {
     "list_knowledge_bases": {
         "label": "查询可用知识库",
         "description": "获取当前允许访问的所有知识库元数据与文档总数",
+        "agent_id": "knowledge_agent",
+        "agent_name": "KnowledgeAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
     },
     "search_knowledge_base": {
         "label": "检索知识库内容",
         "description": "在指定知识库中执行向量与关键字混合检索，返回高相关文本片段",
+        "agent_id": "knowledge_agent",
+        "agent_name": "KnowledgeAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
+    "delegate_to_knowledge_agent": {
+        "label": "委派知识库专家",
+        "description": "委派专精于文档检索与内容提炼的 KnowledgeAgent 处理知识库相关问题",
+        "agent_id": "knowledge_agent",
+        "agent_name": "KnowledgeAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
+    "delegate_to_host_agent": {
+        "label": "委派主机运维专家",
+        "description": "委派专精于远程服务器探查与受控命令执行的 HostAgent 处理主机运维任务",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
     },
     **HOST_TOOL_METADATA,
 }
@@ -137,3 +161,46 @@ class AgentTools:
 
     def run_host_command(self, host_id: str, command: str, approved: bool = False) -> dict:
         return self.host.run_host_command(host_id, command, approved=approved)
+
+    def delegate_to_knowledge_agent(self, query: str, kb_id: str | None = None, top_k: int = 5) -> dict:
+        """Subagent action: Retrieve information across knowledge bases and return summarized findings."""
+        if kb_id:
+            results = self.search_knowledge_base(kb_id=kb_id, query=query, top_k=top_k)
+            return {
+                "status": "success",
+                "agent": "KnowledgeAgent",
+                "kb_id": kb_id,
+                "result_count": len(results),
+                "chunks": results,
+            }
+        kbs = self.list_knowledge_bases()
+        all_results = []
+        for kb in kbs:
+            if kb.get("document_count", 0) > 0:
+                try:
+                    res = self.search_knowledge_base(kb_id=kb["id"], query=query, top_k=top_k)
+                    all_results.extend(res)
+                except Exception:
+                    continue
+        return {
+            "status": "success",
+            "agent": "KnowledgeAgent",
+            "kbs_searched": len(kbs),
+            "result_count": len(all_results),
+            "chunks": all_results,
+        }
+
+    def delegate_to_host_agent(self, instruction: str, host_id: str | None = None, command: str | None = None) -> dict:
+        """Subagent action: Dispatch host inspection or operations through HostAgent."""
+        if command and host_id:
+            return self.run_host_command(host_id=host_id, command=command)
+        if host_id:
+            return self.get_host_info(host_id=host_id)
+        hosts = self.list_hosts()
+        return {
+            "status": "success",
+            "agent": "HostAgent",
+            "hosts_available": len(hosts),
+            "hosts": hosts,
+            "instruction": instruction,
+        }

@@ -66,6 +66,10 @@ export interface AgentTraceSpan {
   id?: string | null
   trace_id?: string | null
   parent_id?: string | null
+  agent_id?: string | null
+  agent_name?: string | null
+  agent_role?: 'orchestrator' | 'specialist' | string | null
+  parent_agent_id?: string | null
   type: string
   name: string
   started_at?: string | null

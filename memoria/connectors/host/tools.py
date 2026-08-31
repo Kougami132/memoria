@@ -17,14 +17,26 @@ HOST_TOOL_METADATA: dict[str, dict[str, str]] = {
     "list_hosts": {
         "label": "查询可用主机与服务器",
         "description": "获取当前允许访问的所有主机节点、网络地址、标签及状态元数据",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
     },
     "get_host_info": {
         "label": "获取主机详情与运行状态",
         "description": "查询指定主机的操作系统、负载、内存、磁盘和运行指标",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
     },
     "run_host_command": {
         "label": "在主机上执行受控命令",
         "description": "在允许的主机上运行系统状态查询或安全诊断命令（如 uptime, df -h, free -m, docker ps 等）",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
     },
 }
 
