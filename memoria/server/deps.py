@@ -1,7 +1,10 @@
 from memoria.connectors.registry import ConnectorRegistry
 import logging
 import os
+import secrets
 from functools import lru_cache
+
+from fastapi import Depends, HTTPException, Request
 
 from memoria.agents.engine import AgenticRagEngine
 from memoria.config import get_effective_settings, settings
@@ -20,6 +23,31 @@ _agentic_engine: AgenticRagEngine | None = None
 def get_db() -> DB:
     os.makedirs(os.path.dirname(os.path.abspath(settings.db_path)), exist_ok=True)
     return DB(settings.db_path)
+
+
+def require_external_api_token(
+    request: Request,
+    db: DB = Depends(get_db),
+) -> None:
+    """Require an OpenAI-compatible bearer token when one is configured."""
+    configured_token = get_effective_settings(db)["external_api_token"]
+    if not configured_token:
+        return
+
+    authorization = request.headers.get("authorization", "")
+    parts = authorization.split(" ")
+    scheme = parts[0] if parts else ""
+    supplied_token = parts[1] if len(parts) == 2 else ""
+    if (
+        scheme.lower() != "bearer"
+        or not supplied_token
+        or not secrets.compare_digest(supplied_token, configured_token)
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def get_pipeline() -> Pipeline:

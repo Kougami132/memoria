@@ -139,13 +139,13 @@ export interface ChatStreamFinalEvent { type: 'final'; answer: string; session_i
 export interface ChatStreamErrorEvent { type: 'error'; detail: string }
 export type ChatStreamEvent = ChatStreamMetaEvent | ChatStreamDeltaEvent | ChatStreamStatusEvent | ChatStreamFinalEvent | ChatStreamErrorEvent
 export interface Settings {
-  openai_base_url: string; openai_api_key: string; embedding_model: string;
+  openai_base_url: string; openai_api_key: string; external_api_token: string; embedding_model: string;
   llm_model: string; system_prompt: string; top_k: string; chunk_size: string; chunk_overlap: string;
   vault_sync_interval_minutes: string
   host_dangerous_patterns?: string
 }
 export interface SettingsUpdate {
-  openai_base_url?: string; api_key?: string; embedding_model?: string;
+  openai_base_url?: string; api_key?: string; external_api_token?: string; embedding_model?: string;
   llm_model?: string; system_prompt?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
   vault_sync_interval_minutes?: number
 }
@@ -212,12 +212,17 @@ export async function* streamResponses(
   sessionId?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentStreamEvent> {
+  const settings = await getSettings()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Memoria-Client': 'web',
+  }
+  if (settings.external_api_token) {
+    headers.Authorization = `Bearer ${settings.external_api_token}`
+  }
   const res = await fetch('/v1/responses', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Memoria-Client': 'web',
-    },
+    headers,
     body: JSON.stringify({
       model,
       input,

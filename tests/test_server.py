@@ -101,6 +101,33 @@ def test_settings_put(client):
     assert data["llm_model"] == "gpt-4o"
 
 
+def test_external_api_token_authentication_and_rotation(client):
+    assert client.get("/v1/models").status_code == 200
+
+    configured = client.put("/api/settings", json={"external_api_token": "first-token"})
+    assert configured.status_code == 200
+    assert configured.json()["external_api_token"] == "first-token"
+
+    for headers in ({}, {"Authorization": "Basic first-token"}, {"Authorization": "Bearer wrong-token"}, {"Authorization": "Bearer"}):
+        response = client.get("/v1/models", headers=headers)
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"] == "Bearer"
+        assert response.json()["detail"] == "Invalid or missing bearer token"
+
+    valid = client.get("/v1/models", headers={"Authorization": "Bearer first-token"})
+    assert valid.status_code == 200
+
+    rotated = client.put("/api/settings", json={"external_api_token": "second-token"})
+    assert rotated.status_code == 200
+    assert client.get("/v1/models", headers={"Authorization": "Bearer first-token"}).status_code == 401
+    assert client.get("/v1/models", headers={"Authorization": "Bearer second-token"}).status_code == 200
+
+    disabled = client.put("/api/settings", json={"external_api_token": ""})
+    assert disabled.status_code == 200
+    assert disabled.json()["external_api_token"] == ""
+    assert client.get("/v1/models").status_code == 200
+
+
 def test_settings_system_prompt_get_and_put(client):
     r = client.get("/api/settings")
     assert r.status_code == 200

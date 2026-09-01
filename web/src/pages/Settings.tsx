@@ -18,6 +18,7 @@ export default function Settings() {
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
   const [form, setForm] = useState<Partial<Record<string, string>>>({})
   const [showKey, setShowKey] = useState(false)
+  const [showExternalToken, setShowExternalToken] = useState(false)
   const [saved, setSaved] = useState(false)
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' })
@@ -51,6 +52,9 @@ export default function Settings() {
       }
       if (form.openai_api_key !== settings?.openai_api_key) {
         payload.api_key = form.openai_api_key
+      }
+      if (form.external_api_token !== settings?.external_api_token) {
+        payload.external_api_token = form.external_api_token
       }
       return api.updateSettings(payload)
     },
@@ -170,6 +174,28 @@ export default function Settings() {
                 onClick={() => setShowKey(v => !v)}
               >
                 {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">外部 API Token (Bearer)</Label>
+            <div className="flex gap-2">
+              <Input
+                type={showExternalToken ? 'text' : 'password'}
+                placeholder="留空则不启用认证"
+                value={form.external_api_token ?? ''}
+                onChange={set('external_api_token')}
+                className="flex-1 rounded-xl border-border bg-background font-mono text-sm"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0 rounded-xl border-border"
+                onClick={() => setShowExternalToken(v => !v)}
+                aria-label={showExternalToken ? '隐藏外部 API Token' : '显示外部 API Token'}
+              >
+                {showExternalToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>
             </div>
           </div>

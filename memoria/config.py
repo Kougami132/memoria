@@ -20,6 +20,7 @@ DEFAULT_SYSTEM_PROMPT = """你是一个专业的智能助手，请始终用用�
 class Settings(BaseSettings):
     openai_base_url: str = "http://localhost"
     openai_api_key: str = "mock"
+    external_api_token: str = ""
     use_mock: bool = False
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "deepseek-v4-flash"
@@ -46,6 +47,7 @@ def get_effective_settings(db) -> dict:
     fields = {
         "openai_base_url": str(settings.openai_base_url),
         "openai_api_key": str(settings.openai_api_key),
+        "external_api_token": str(settings.external_api_token),
         "embedding_model": str(settings.embedding_model),
         "llm_model": str(settings.llm_model),
         "system_prompt": str(settings.system_prompt),

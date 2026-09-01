@@ -24,6 +24,7 @@ class FetchModelsRequest(BaseModel):
 class SettingsUpdate(BaseModel):
     openai_base_url: Optional[str] = None
     api_key: Optional[str] = None
+    external_api_token: Optional[str] = None
     embedding_model: Optional[str] = None
     llm_model: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -47,6 +48,7 @@ def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get
     mapping = {
         "openai_base_url": body.openai_base_url,
         "openai_api_key": body.api_key,
+        "external_api_token": body.external_api_token,
         "embedding_model": body.embedding_model,
         "llm_model": body.llm_model,
         "system_prompt": body.system_prompt,
@@ -61,7 +63,7 @@ def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get
     for key, value in mapping.items():
         if value is None:
             continue
-        if value == "":
+        if value == "" and key != "external_api_token":
             db.delete_setting(key)
         else:
             db.set_setting(key, value)

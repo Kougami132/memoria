@@ -14,11 +14,15 @@ except ImportError:  # pragma: no cover
 from pydantic import BaseModel, Field
 
 from memoria.agents.engine import AgenticRagEngine
-from memoria.server.deps import get_agentic_engine, get_db
+from memoria.server.deps import get_agentic_engine, get_db, require_external_api_token
 from memoria.storage.db import DB
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/v1", tags=["openai"])
+router = APIRouter(
+    prefix="/v1",
+    tags=["openai"],
+    dependencies=[Depends(require_external_api_token)],
+)
 
 
 # ------------------------------------------------------------------

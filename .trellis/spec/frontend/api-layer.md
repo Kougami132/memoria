@@ -28,7 +28,7 @@ Conventions:
 - **Base path**: always `/api` (relative, same-origin).
 - **Error handling**: non-ok responses throw an `Error` with the status code and response body. There is no retry or toast layer here; UI components handle error display via TanStack Query's error state.
 - **204 No Content**: returns `undefined` (typed as `T`). Deletion endpoints use this.
-- **No auth headers**: the backend has no auth; no headers are added by `req()`.
+- **Management auth boundary**: `req()` does not add authentication headers for same-origin `/api` management calls. OpenAI-compatible browser calls under `/v1` must read the configured inbound token through the settings flow and send it as `Authorization: Bearer <token>` only when configured.
 
 ---
 

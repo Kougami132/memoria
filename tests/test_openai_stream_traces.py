@@ -49,7 +49,7 @@ def test_openai_responses_stream_emits_subagent_spans():
         {"type": "done", "trace": {}, "sources": []},
     ]
 
-    with patch("memoria.agents.engine.OpenAIAgenticChatEngine.run_stream", return_value=iter(mock_events)):
+    with patch("memoria.agents.engine.AgenticRagEngine.run_stream", return_value=iter(mock_events)):
         response = client.post(
             "/v1/responses",
             headers={"X-Memoria-Client": "web"},

@@ -19,6 +19,7 @@ No custom exception hierarchy exists. The project relies on standard exceptions:
 - **`APIConnectionError`** (from `openai`): raised when the OpenAI-compatible endpoint is unreachable. Mapped to **503**.
 - **`APIError`** (from `openai`): raised on API-level errors (bad request, auth failure). Mapped to **502**.
 - **`RuntimeError`**: raised by the pipeline for unexpected internal failures. Mapped to **502**.
+- **Bearer authentication failure**: OpenAI-compatible `/v1/*` routes return **401** with `WWW-Authenticate: Bearer` when an inbound token is configured and the request credential is missing or invalid.
 
 ---
 
@@ -93,6 +94,7 @@ All errors are returned as FastAPI's default JSON error format: `{"detail": "<me
 
 | Status | When | Example detail |
 --------|------|---------------
+| 401 | Missing or invalid configured inbound Bearer token on `/v1/*` | `"Invalid or missing bearer token"` |
 | 404 | Entity not found (via `ValueError` catch or direct check) | `"Bot abc123 not found"` |
 | 409 | Conflict (duplicate resource, wrong state) | `"Knowledge base already has a vault"` |
 | 422 | Request validation failure (automatic, via Pydantic) | Pydantic validation message |
@@ -102,6 +104,7 @@ All errors are returned as FastAPI's default JSON error format: `{"detail": "<me
 Status code conventions:
 
 - **404**: entity not found. Business logic raises `ValueError`; route catches and converts.
+- **401**: OpenAI-compatible inbound authentication failed. Include `WWW-Authenticate: Bearer`; do not echo or log the supplied token.
 - **409**: conflict state. Route checks state directly and raises `HTTPException(409)`.
 - **422**: request body validation. Handled automatically by FastAPI + Pydantic.
 - **503**: dependency service unreachable. Use for network/connection failures.

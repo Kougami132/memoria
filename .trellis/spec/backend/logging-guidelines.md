@@ -95,7 +95,7 @@ except Exception:
 
 ## What NOT to Log
 
-- **API keys**: never log `openai_api_key` or `webdav_password`. The pipeline init logs `base_url` and `model` but never the key.
+- **Credentials**: never log `openai_api_key`, `external_api_token`, or `webdav_password`. The pipeline init logs `base_url` and `model` but never credentials; authentication failures must not include token values.
 - **Full document content**: RAG debug logs truncate text to 120 chars (`c["text"][:120]`). Never log full chunk text at INFO level.
 - **Full LLM responses**: RAG debug logs truncate the answer to 200 chars (`answer[:200]`).
 - **User PII**: message content is not logged at INFO level. Only the query is logged at DEBUG level via `%r`.
