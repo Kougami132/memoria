@@ -102,6 +102,22 @@ class VaultFileRow(Base):
     synced_at = Column(String, nullable=False)
 
 
+
+class ApiInvocationLogRow(Base):
+    __tablename__ = "api_invocation_logs"
+    id = Column(String, primary_key=True)
+    timestamp = Column(String, nullable=False)
+    endpoint = Column(String, nullable=False)
+    method = Column(String, nullable=False, default="POST")
+    model = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=False, default=200)
+    duration_ms = Column(Integer, nullable=False, default=0)
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    session_id = Column(String, nullable=True)
+    error_msg = Column(Text, nullable=True)
+
 class SessionRow(Base):
     __tablename__ = "sessions"
     id = Column(String, primary_key=True)
@@ -982,3 +998,86 @@ class DB:
             row = s.get(VaultFileRow, vault_file_id)
             if row:
                 s.delete(row)
+
+    # ------------------------------------------------------------------
+    # API Invocation Logs
+    # ------------------------------------------------------------------
+
+    def log_api_invocation(
+        self,
+        endpoint: str,
+        method: str,
+        model: str,
+        status_code: int,
+        duration_ms: int,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        session_id: str | None = None,
+        error_msg: str | None = None,
+    ) -> dict:
+        log_id = f"log-{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        row = ApiInvocationLogRow(
+            id=log_id,
+            timestamp=now,
+            endpoint=endpoint,
+            method=method,
+            model=model,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            session_id=session_id,
+            error_msg=error_msg,
+        )
+        with self._s() as s:
+            s.add(row)
+            s.flush()
+            return {
+                "id": row.id,
+                "timestamp": row.timestamp,
+                "endpoint": row.endpoint,
+                "method": row.method,
+                "model": row.model,
+                "status_code": row.status_code,
+                "duration_ms": row.duration_ms,
+                "prompt_tokens": row.prompt_tokens,
+                "completion_tokens": row.completion_tokens,
+                "total_tokens": row.total_tokens,
+                "session_id": row.session_id,
+                "error_msg": row.error_msg,
+            }
+
+    def list_api_invocations(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        with self._s() as s:
+            rows = (
+                s.query(ApiInvocationLogRow)
+                .order_by(desc(ApiInvocationLogRow.timestamp))
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": r.id,
+                    "timestamp": r.timestamp,
+                    "endpoint": r.endpoint,
+                    "method": r.method,
+                    "model": r.model,
+                    "status_code": r.status_code,
+                    "duration_ms": r.duration_ms,
+                    "prompt_tokens": r.prompt_tokens,
+                    "completion_tokens": r.completion_tokens,
+                    "total_tokens": r.total_tokens,
+                    "session_id": r.session_id,
+                    "error_msg": r.error_msg,
+                }
+                for r in rows
+            ]
+
+    def clear_api_invocations(self) -> int:
+        with self._s() as s:
+            count = s.query(ApiInvocationLogRow).delete()
+            return count

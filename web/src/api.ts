@@ -1,4 +1,4 @@
-const BASE = '/api'
+﻿const BASE = '/api'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${BASE}${path}`, init)
@@ -84,6 +84,35 @@ export interface AgentTraceSpan {
   data?: Record<string, unknown>
   error?: unknown
 }
+
+export interface InvocationLog {
+  id: string
+  timestamp: string
+  endpoint: string
+  method: string
+  model: string
+  status_code: number
+  duration_ms: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  session_id?: string | null
+  error_msg?: string | null
+}
+
+export interface InvocationLogsResponse {
+  items: InvocationLog[]
+  limit: number
+  offset: number
+}
+
+export interface SystemLogsResponse {
+  status: string
+  placeholder: boolean
+  message: string
+  items: any[]
+}
+
 export interface AgentTrace {
   id?: string
   session_id?: string
@@ -159,7 +188,7 @@ export const agentChat = (message: string, sessionId?: string) =>
   })
 
 export interface AgentStreamEvent {
-  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'done' | 'error'
+  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'sources' | 'done' | 'error'
   phase?: 'start' | 'end'
   session_id?: string
   message_id?: string
@@ -177,20 +206,29 @@ export interface AgentStreamEvent {
   command?: string
 }
 
-export async function* streamAgentChat(
-  message: string,
+export async function* streamResponses(
+  model: string,
+  input: string,
   sessionId?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentStreamEvent> {
-  const res = await fetch(`${BASE}/agent-chat/stream`, {
+  const res = await fetch('/v1/responses', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Memoria-Client': 'web',
+    },
+    body: JSON.stringify({
+      model,
+      input,
+      conversation_id: sessionId,
+      stream: true,
+    }),
     signal,
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail ?? 'Agent stream request failed')
+    throw new Error(err.detail ?? 'Responses stream request failed')
   }
   if (!res.body) throw new Error('ReadableStream not supported')
 
@@ -204,16 +242,90 @@ export async function* streamAgentChat(
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (trimmed) {
-        yield JSON.parse(trimmed) as AgentStreamEvent
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (line.startsWith('data:')) {
+        const dataStr = line.slice(5).trim()
+        if (!dataStr || dataStr === '[DONE]') continue
+        try {
+          const parsed = JSON.parse(dataStr)
+          // Map OpenAI response SSE events to AgentStreamEvent
+          if (parsed.type === 'response.session_updated') {
+            yield {
+              type: 'init',
+              session_id: parsed.session_id,
+              message_id: parsed.message_id,
+              user_message_id: parsed.user_message_id,
+            }
+          } else if (parsed.type === 'response.thought.delta') {
+            yield {
+              type: 'thought_delta',
+              delta: parsed.delta,
+            }
+          } else if (parsed.type === 'response.approval_required') {
+            yield {
+              type: 'approval_required',
+              approval_id: parsed.approval_id,
+              host_id: parsed.host_id,
+              host_name: parsed.host_name,
+              command: parsed.command,
+            }
+          } else if (parsed.type === 'response.text.delta') {
+            yield {
+              type: 'answer_delta',
+              delta: parsed.delta,
+            }
+          } else if (parsed.type === 'response.output_item.added') {
+            const spanObj = parsed.span || parsed.item
+            if (spanObj && (spanObj.type === 'tool_call' || spanObj.type === 'agent' || spanObj.type === 'guardrail' || spanObj.type === 'model' || spanObj.type === 'generation' || spanObj.type === 'tool' || spanObj.type === 'function' || spanObj.type === 'span')) {
+              yield {
+                type: 'trace_span',
+                phase: 'start',
+                span: spanObj,
+              }
+            }
+          } else if (parsed.type === 'response.output_item.done') {
+            const spanObj = parsed.span || parsed.item
+            if (spanObj && (spanObj.type === 'tool_call' || spanObj.type === 'agent' || spanObj.type === 'guardrail' || spanObj.type === 'model' || spanObj.type === 'generation' || spanObj.type === 'tool' || spanObj.type === 'function' || spanObj.type === 'span')) {
+              yield {
+                type: 'trace_span',
+                phase: 'end',
+                span: spanObj,
+              }
+            }
+          } else if (parsed.type === 'response.sources') {
+            yield {
+              type: 'sources',
+              sources: parsed.sources,
+            }
+          } else if (parsed.type === 'response.error') {
+            yield {
+              type: 'error',
+              detail: parsed.error?.message || 'Unknown stream error',
+            }
+          } else if (parsed.type === 'response.completed') {
+            yield {
+              type: 'done',
+              session_id: parsed.response?.conversation_id,
+              message_id: '',
+              answer: '',
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse SSE line:', line, e)
+        }
       }
     }
   }
-  if (buffer.trim()) {
-    yield JSON.parse(buffer.trim()) as AgentStreamEvent
-  }
+}
+
+export async function* streamAgentChat(
+  message: string,
+  sessionId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<AgentStreamEvent> {
+  yield* streamResponses('memoria-agent', message, sessionId, signal)
 }
 
 export async function* streamBotChat(
@@ -222,38 +334,7 @@ export async function* streamBotChat(
   sessionId?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentStreamEvent> {
-  const res = await fetch(`${BASE}/chat/${botId}/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId }),
-    signal,
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail ?? 'Bot stream request failed')
-  }
-  if (!res.body) throw new Error('ReadableStream not supported')
-
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (trimmed) {
-        yield JSON.parse(trimmed) as AgentStreamEvent
-      }
-    }
-  }
-  if (buffer.trim()) {
-    yield JSON.parse(buffer.trim()) as AgentStreamEvent
-  }
+  yield* streamResponses(`bot:${botId}`, message, sessionId, signal)
 }
 export const listAgentSessions = () => req<Session[]>('/agent-sessions')
 export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)
@@ -420,3 +501,15 @@ export const respondHostApproval = (approvalId: string, approved: boolean) =>
     method: 'POST',
     ...json({ approved }),
   })
+
+export const logsApi = {
+  listInvocations: (params?: { limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.limit) q.set('limit', String(params.limit))
+    if (params?.offset) q.set('offset', String(params.offset))
+    const queryStr = q.toString() ? `?${q.toString()}` : ''
+    return req<InvocationLogsResponse>(`/logs/invocations${queryStr}`)
+  },
+  clearInvocations: () => req<void>('/logs/invocations', { method: 'DELETE' }),
+  getSystemLogs: () => req<SystemLogsResponse>('/logs/system'),
+}

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { 
-  Bot, 
+  Bot,
+  ScrollText, 
   Database, 
   MessageSquare, 
   Sparkles, 
@@ -20,6 +21,7 @@ const navLinks = [
   { to: '/knowledge-bases', label: '知识库', icon: Database },
   { to: '/hosts', label: '主机管理', icon: Server },
   { to: '/bots', label: 'Bots 助手', icon: Bot },
+  { to: '/logs', label: '日志', icon: ScrollText },
   { to: '/settings', label: '系统设置', icon: Settings },
 ]
 

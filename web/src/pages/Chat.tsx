@@ -96,6 +96,8 @@ const mdComponents: Components = {
 }
 
 const TOOL_CN_MAP: Record<string, string> = {
+  delegate_to_knowledge_agent: '委派知识库专家 (KnowledgeAgent)',
+  delegate_to_host_agent: '委派主机运维专家 (HostAgent)',
   list_knowledge_bases: '查询可用知识库',
   search_knowledge_base: '检索知识库内容',
   list_hosts: '查询可用远程主机',
@@ -113,6 +115,8 @@ function getToolDisplayName(name?: string, type?: string): string {
 
 function getToolIcon(name?: string, type?: string) {
   if (type === 'generation') return <Cpu className="w-3.5 h-3.5 text-purple-500" />
+  if (name === 'delegate_to_knowledge_agent') return <Database className="w-3.5 h-3.5 text-blue-500" />
+  if (name === 'delegate_to_host_agent') return <Server className="w-3.5 h-3.5 text-indigo-500" />
   if (name === 'list_knowledge_bases') return <Database className="w-3.5 h-3.5 text-blue-500" />
   if (name === 'search_knowledge_base') return <Search className="w-3.5 h-3.5 text-amber-500" />
   if (name === 'list_hosts') return <Server className="w-3.5 h-3.5 text-indigo-500" />
@@ -1016,7 +1020,7 @@ function ChatMessageItem({
             )}
 
             {/* Traces / Steps if available */}
-            {trace && trace.spans && trace.spans.filter((s) => s.type !== 'agent').length > 0 && (
+            {trace && trace.spans && trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length > 0 && (
               <div className="rounded-lg border border-border bg-muted/30 text-xs overflow-hidden">
                 <button
                   onClick={() => setTraceExpanded(!traceExpanded)}
@@ -1024,7 +1028,7 @@ function ChatMessageItem({
                 >
                   <div className="flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5 text-primary" />
-                    <span>执行轨迹与工具调用 ({trace.spans.filter((s) => s.type !== 'agent').length} 个步骤)</span>
+                    <span>执行轨迹与工具调用 ({trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length} 个步骤)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {trace?.summary?.total_tokens !== undefined && trace.summary.total_tokens !== null && (
@@ -1044,7 +1048,7 @@ function ChatMessageItem({
                 </button>
                 {traceExpanded && (
                   <div className="p-3 border-t border-border space-y-2">
-                    {trace.spans.filter((s) => s.type !== 'agent').map((span, idx) => (
+                    {trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).map((span, idx) => (
                       <TraceSpanCard key={span.id || idx} span={span} />
                     ))}
                   </div>
@@ -1090,7 +1094,7 @@ function ChatMessageItem({
             )}
 
            {/* Answer Content or In-progress Prompt */}
-            {(msg.status === 'streaming' || msg.status === 'pending_approval' || msg.status === 'approved') && !msg.content ? (
+            {(msg.status === 'streaming' || msg.status === 'approved') && !msg.content ? (
              <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
                <Sparkles className="w-4 h-4 animate-spin text-primary" />
                <span className="text-xs">助手正在思考与响应中，请稍候...</span>
@@ -1198,7 +1202,7 @@ function StreamingMessageItem({
         )}
 
         {/* Real-time Tool Execution Traces */}
-        {state.traces && state.traces.filter((s) => s.type !== 'agent').length > 0 && (
+        {state.traces && state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length > 0 && (
           <div className="rounded-lg border border-border bg-muted/30 text-xs overflow-hidden">
             <button
               onClick={() => setTraceExpanded(!traceExpanded)}
@@ -1206,7 +1210,7 @@ function StreamingMessageItem({
             >
               <div className="flex items-center gap-1.5">
                 <Activity className="w-3.5 h-3.5 text-primary" />
-                <span>执行轨迹与工具调用 ({state.traces.filter((s) => s.type !== 'agent').length} 个步骤)</span>
+                <span>执行轨迹与工具调用 ({state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length} 个步骤)</span>
               </div>
               <div className="flex items-center gap-2">
                 {streamTotalTokens > 0 && (
@@ -1226,7 +1230,7 @@ function StreamingMessageItem({
             </button>
             {traceExpanded && (
               <div className="p-3 border-t border-border space-y-2">
-                {state.traces.filter((s) => s.type !== 'agent').map((span, idx) => (
+                {state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).map((span, idx) => (
                   <TraceSpanCard key={span.id || idx} span={span} />
                 ))}
               </div>
@@ -1300,6 +1304,8 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
   const displayName = getToolDisplayName(toolName, span.type)
   const isRunning = !span.ended_at && !span.error
   const isError = Boolean(span.error)
+  const agentName = span.agent_name || (span.agent_id === 'orchestrator' ? 'Orchestrator' : span.agent_id ? span.agent_id : 'Orchestrator')
+  const isOrchestrator = span.agent_id === 'orchestrator' || (!span.agent_id && isGen)
 
   const rawData = span.data || {}
   const rawInput = (rawData as Record<string, unknown>).input ?? (rawData as Record<string, unknown>).args
@@ -1318,6 +1324,18 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
       >
         <div className="flex items-center gap-2 overflow-hidden">
           {getToolIcon(toolName, span.type)}
+          <Badge
+            variant="secondary"
+            className={`text-[10px] px-1.5 py-0 font-medium ${
+              isOrchestrator
+                ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
+                : agentName.includes('Knowledge') || span.agent_id === 'knowledge_agent'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+            }`}
+          >
+            {agentName}
+          </Badge>
           <span className="font-medium text-foreground">{displayName}</span>
           {!isGen && toolName && toolName !== displayName && (
             <span className="text-[11px] text-muted-foreground font-mono">({toolName})</span>

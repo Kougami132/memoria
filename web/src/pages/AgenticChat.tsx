@@ -940,7 +940,7 @@ function ChatMessageItem({
             )}
 
             {/* Traces / Steps if available */}
-            {trace && trace.spans && trace.spans.filter((s) => s.type !== 'agent').length > 0 && (
+            {trace && trace.spans && trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length > 0 && (
               <div className="rounded-lg border border-border bg-muted/30 text-xs overflow-hidden">
                 <button
                   onClick={() => setTraceExpanded(!traceExpanded)}
@@ -948,7 +948,7 @@ function ChatMessageItem({
                 >
                   <div className="flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5 text-primary" />
-                    <span>执行轨迹与工具调用 ({trace.spans.filter((s) => s.type !== 'agent').length} 个步骤)</span>
+                    <span>执行轨迹与工具调用 ({trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length} 个步骤)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {trace?.summary?.total_tokens !== undefined && trace.summary.total_tokens !== null && (
@@ -968,7 +968,7 @@ function ChatMessageItem({
                 </button>
                 {traceExpanded && (
                   <div className="p-3 border-t border-border space-y-2">
-                    {trace.spans.filter((s) => s.type !== 'agent').map((span, idx) => (
+                    {trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).map((span, idx) => (
                       <TraceSpanCard key={span.id || idx} span={span} />
                     ))}
                   </div>
@@ -1014,7 +1014,7 @@ function ChatMessageItem({
             )}
 
            {/* Answer Content or In-progress Prompt */}
-            {(msg.status === 'streaming' || msg.status === 'pending_approval' || msg.status === 'approved') && !msg.content ? (
+            {(msg.status === 'streaming' || msg.status === 'approved') && !msg.content ? (
               <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
                 <Sparkles className="w-4 h-4 animate-spin text-primary" />
                 <span className="text-xs">助手正在思考与响应中，请稍候...</span>
@@ -1122,7 +1122,7 @@ function StreamingMessageItem({
         )}
 
         {/* Real-time Tool Execution Traces */}
-        {state.traces && state.traces.filter((s) => s.type !== 'agent').length > 0 && (
+        {state.traces && state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length > 0 && (
           <div className="rounded-lg border border-border bg-muted/30 text-xs overflow-hidden">
             <button
               onClick={() => setTraceExpanded(!traceExpanded)}
@@ -1130,7 +1130,7 @@ function StreamingMessageItem({
             >
               <div className="flex items-center gap-1.5">
                 <Activity className="w-3.5 h-3.5 text-primary" />
-                <span>执行轨迹与工具调用 ({state.traces.filter((s) => s.type !== 'agent').length} 个步骤)</span>
+                <span>执行轨迹与工具调用 ({state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length} 个步骤)</span>
               </div>
               <div className="flex items-center gap-2">
                 {streamTotalTokens > 0 && (
@@ -1150,7 +1150,7 @@ function StreamingMessageItem({
             </button>
             {traceExpanded && (
               <div className="p-3 border-t border-border space-y-2">
-                {state.traces.filter((s) => s.type !== 'agent').map((span, idx) => (
+                {state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).map((span, idx) => (
                   <TraceSpanCard key={span.id || idx} span={span} />
                 ))}
               </div>

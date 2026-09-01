@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from memoria.server.routes import agent_chat, agent_sessions, bots, chat, documents, hosts, knowledge_bases, settings, sessions, vaults
+from memoria.server.routes import agent_sessions, bots, documents, hosts, knowledge_bases, logs, openai, settings, sessions, vaults
 from memoria.server.deps import get_db, get_pipeline
 from memoria.vault.syncer import VaultSyncer
 
@@ -51,13 +51,13 @@ def create_app(lifespan=_lifespan) -> FastAPI:
     app.include_router(knowledge_bases.router, prefix="/api")
     app.include_router(bots.router, prefix="/api")
     app.include_router(documents.router, prefix="/api")
-    app.include_router(chat.router, prefix="/api")
-    app.include_router(agent_chat.router, prefix="/api")
     app.include_router(agent_sessions.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
     app.include_router(vaults.router, prefix="/api")
     app.include_router(hosts.router, prefix="/api")
+    app.include_router(logs.router, prefix="/api")
+    app.include_router(openai.router)
 
     @app.get("/api/health")
     def health():
