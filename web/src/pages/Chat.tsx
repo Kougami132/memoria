@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -150,9 +151,11 @@ interface StreamingAssistantState {
 
 
 export function Chat() {
+  const navigate = useNavigate()
+  const { sessionId } = useParams<{ sessionId: string }>()
+  const activeSessionId = sessionId || null
   const { data: bots = [] } = useQuery({ queryKey: ['bots'], queryFn: api.listBots })
   const [botId, setBotId] = useState<string>('')
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   useEffect(() => {
     currentSessionIdRef.current = activeSessionId
   }, [activeSessionId])
@@ -171,15 +174,22 @@ export function Chat() {
   const currentUserMsgIdRef = useRef<string | null>(null)
   const currentTempUserMsgIdRef = useRef<string | null>(null)
   const currentSessionIdRef = useRef<string | null>(null)
-  const hasInitializedRef = useRef<string | null>(null)
   const isStoppingRef = useRef(false)
 
-  // Auto-select first bot if none selected
+  const { data: routeSession } = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => api.getSession(sessionId!),
+    enabled: !!sessionId,
+  })
+
+  // Resolve the bot from the routed session, or use the first bot for a new chat.
   useEffect(() => {
-    if (!botId && bots.length > 0) {
+    if (routeSession?.bot_id && routeSession.bot_id !== botId) {
+      setBotId(routeSession.bot_id)
+    } else if (!sessionId && !botId && bots.length > 0) {
       setBotId(bots[0].id)
     }
-  }, [bots, botId])
+  }, [bots, botId, routeSession, sessionId])
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
     queryKey: ['sessions', botId],
@@ -189,30 +199,15 @@ export function Chat() {
 
   // Listen to global new chat event from sidebar
   useEffect(() => {
-    const handleGlobalNewChat = () => handleCreateSession()
+    const handleGlobalNewChat = () => {
+      setMessages([])
+      setInput('')
+      setStreamState(null)
+      navigate('/chat')
+    }
     window.addEventListener('memoria:new-chat', handleGlobalNewChat)
     return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
-  }, [])
-
-  // Restore active session when botId sessions first load
-  useEffect(() => {
-    if (botId && sessions.length > 0 && hasInitializedRef.current !== botId) {
-      hasInitializedRef.current = botId
-      const saved = localStorage.getItem(`memoria:active_bot_session_${botId}`)
-      if (saved && sessions.some(s => s.id === saved)) {
-        setActiveSessionId(saved)
-      } else {
-        setActiveSessionId(sessions[0].id)
-      }
-    }
-  }, [sessions, botId])
-
-  // Save active session to localStorage
-  useEffect(() => {
-    if (botId && activeSessionId) {
-      localStorage.setItem(`memoria:active_bot_session_${botId}`, activeSessionId)
-    }
-  }, [activeSessionId, botId])
+  }, [navigate])
 
   // Load messages for current session & poll if background task is streaming
   useEffect(() => {
@@ -263,13 +258,11 @@ export function Chat() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [streamState])
 
-  const handleCreateSession = async () => {
-    setActiveSessionId(null)
+  const handleCreateSession = () => {
     setMessages([])
+    setInput('')
     setStreamState(null)
-    if (botId) {
-      localStorage.removeItem(`memoria:active_bot_session_${botId}`)
-    }
+    navigate('/chat')
   }
 
   const handleDeleteSession = async (id: string) => {
@@ -279,14 +272,7 @@ export function Chat() {
       if (activeSessionId === id) {
         const remaining = sessions.filter((s) => s.id !== id)
         const nextId = remaining.length > 0 ? remaining[0].id : null
-        setActiveSessionId(nextId)
-        if (botId) {
-          if (nextId) {
-            localStorage.setItem(`memoria:active_bot_session_${botId}`, nextId)
-          } else {
-            localStorage.removeItem(`memoria:active_bot_session_${botId}`)
-          }
-        }
+        navigate(nextId ? `/chat/${encodeURIComponent(nextId)}` : '/chat', { replace: true })
       }
     } catch (e) {
       console.error(e)
@@ -334,7 +320,7 @@ export function Chat() {
           if (event.session_id && event.session_id !== activeSessionId) {
             currentSessionId = event.session_id
             currentSessionIdRef.current = event.session_id
-            setActiveSessionId(event.session_id)
+            navigate(`/chat/${encodeURIComponent(event.session_id)}`, { replace: true })
             refetchSessions()
           }
         } else if (event.type === 'thought_delta') {
@@ -374,7 +360,7 @@ export function Chat() {
           } : null))
         } else if (event.type === 'done') {
           if (event.session_id && event.session_id !== activeSessionId) {
-            setActiveSessionId(event.session_id)
+            navigate(`/chat/${encodeURIComponent(event.session_id)}`, { replace: true })
             refetchSessions()
           }
           if (currentSessionId || event.session_id) {
@@ -625,9 +611,9 @@ export function Chat() {
             value={botId}
             onValueChange={(id) => {
               setBotId(id)
-              setActiveSessionId(null)
               setMessages([])
               setStreamState(null)
+              navigate('/chat')
             }}
             disabled={streamState?.isStreaming}
           >
@@ -669,7 +655,7 @@ export function Chat() {
                   : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
               }`}
               onClick={() => {
-                if (editingSessionId !== s.id) setActiveSessionId(s.id)
+                if (editingSessionId !== s.id) navigate(`/chat/${encodeURIComponent(s.id)}`)
               }}
             >
               {editingSessionId === s.id ? (

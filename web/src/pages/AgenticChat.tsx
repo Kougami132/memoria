@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -149,7 +150,9 @@ interface StreamingAssistantState {
 }
 
 export function AgenticChat() {
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const { sessionId } = useParams<{ sessionId: string }>()
+  const activeSessionId = sessionId || null
   useEffect(() => {
     currentSessionIdRef.current = activeSessionId
   }, [activeSessionId])
@@ -168,7 +171,6 @@ export function AgenticChat() {
   const currentUserMsgIdRef = useRef<string | null>(null)
   const currentTempUserMsgIdRef = useRef<string | null>(null)
   const currentSessionIdRef = useRef<string | null>(null)
-  const hasInitializedRef = useRef(false)
   const isStoppingRef = useRef(false)
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
@@ -178,30 +180,15 @@ export function AgenticChat() {
 
   // Listen to global new chat event from sidebar
   useEffect(() => {
-    const handleGlobalNewChat = () => handleCreateSession()
+    const handleGlobalNewChat = () => {
+      setMessages([])
+      setInput('')
+      setStreamState(null)
+      navigate('/agentic-chat')
+    }
     window.addEventListener('memoria:new-chat', handleGlobalNewChat)
     return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
-  }, [])
-
-  // Restore active session from localStorage or sessions list on initial load
-  useEffect(() => {
-    if (!hasInitializedRef.current && sessions.length > 0) {
-      hasInitializedRef.current = true
-      const saved = localStorage.getItem('memoria:active_agent_session')
-      if (saved && sessions.some(s => s.id === saved)) {
-        setActiveSessionId(saved)
-      } else {
-        setActiveSessionId(sessions[0].id)
-      }
-    }
-  }, [sessions])
-
-  // Save active session to localStorage
-  useEffect(() => {
-    if (activeSessionId) {
-      localStorage.setItem('memoria:active_agent_session', activeSessionId)
-    }
-  }, [activeSessionId])
+  }, [navigate])
 
   // Load messages for current session & poll if background task is streaming
   useEffect(() => {
@@ -251,11 +238,11 @@ export function AgenticChat() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [streamState])
 
-  const handleCreateSession = async () => {
-    setActiveSessionId(null)
+  const handleCreateSession = () => {
     setMessages([])
+    setInput('')
     setStreamState(null)
-    localStorage.removeItem('memoria:active_agent_session')
+    navigate('/agentic-chat')
   }
 
   const handleDeleteSession = async (id: string) => {
@@ -265,12 +252,7 @@ export function AgenticChat() {
       if (activeSessionId === id) {
         const remaining = sessions.filter((s) => s.id !== id)
         const nextId = remaining.length > 0 ? remaining[0].id : null
-        setActiveSessionId(nextId)
-        if (nextId) {
-          localStorage.setItem('memoria:active_agent_session', nextId)
-        } else {
-          localStorage.removeItem('memoria:active_agent_session')
-        }
+        navigate(nextId ? `/agentic-chat/${encodeURIComponent(nextId)}` : '/agentic-chat', { replace: true })
       }
     } catch (e) {
       console.error(e)
@@ -318,7 +300,7 @@ export function AgenticChat() {
           if (event.session_id && event.session_id !== activeSessionId) {
             currentSessionId = event.session_id
             currentSessionIdRef.current = event.session_id
-            setActiveSessionId(event.session_id)
+            navigate(`/agentic-chat/${encodeURIComponent(event.session_id)}`, { replace: true })
             refetchSessions()
           }
         } else if (event.type === 'thought_delta') {
@@ -358,7 +340,7 @@ export function AgenticChat() {
           } : null)
         } else if (event.type === 'done') {
           if (event.session_id && event.session_id !== activeSessionId) {
-            setActiveSessionId(event.session_id)
+            navigate(`/agentic-chat/${encodeURIComponent(event.session_id)}`, { replace: true })
             refetchSessions()
           }
           if (currentSessionId || event.session_id) {
@@ -624,7 +606,7 @@ export function AgenticChat() {
                   key={sess.id}
                   onClick={() => {
                     if (editingSessionId !== sess.id) {
-                      setActiveSessionId(sess.id)
+                      navigate(`/agentic-chat/${encodeURIComponent(sess.id)}`)
                     }
                   }}
                   className={`group relative flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs transition-colors ${

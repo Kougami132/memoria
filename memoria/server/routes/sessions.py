@@ -23,6 +23,14 @@ class SessionAbort(BaseModel):
     message_id: Optional[str] = None
 
 
+@router.get("/{session_id}")
+def get_session(session_id: str, db: DB = Depends(get_db)) -> dict:
+    session = db.get_session(session_id)
+    if session is None or session.get("session_type") != "bot":
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
 @router.get("/{session_id}/messages")
 def get_messages(
     session_id: str,

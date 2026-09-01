@@ -392,6 +392,7 @@ export async function chatStream(
 }
 
 export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${sessionId}/messages`)
+export const getSession = (sessionId: string) => req<Session>(`/sessions/${sessionId}`)
 export const updateSession = (id: string, data: { title: string }) =>
   req<Session>(`/sessions/${id}`, { method: 'PATCH', ...json(data) })
 export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { method: 'DELETE' })

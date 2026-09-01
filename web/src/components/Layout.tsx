@@ -25,6 +25,8 @@ const navLinks = [
   { to: '/settings', label: '系统设置', icon: Settings },
 ]
 
+const newChatPaths = new Set(['/chat', '/agentic-chat'])
+
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isDark, setIsDark] = useState(() => {
@@ -82,6 +84,9 @@ export default function Layout() {
                   <NavLink
                     key={to}
                     to={to}
+                    onClick={() => {
+                      if (newChatPaths.has(to)) window.dispatchEvent(new Event('memoria:new-chat'))
+                    }}
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
                         isActive
@@ -135,6 +140,9 @@ export default function Layout() {
                 <NavLink
                   key={to}
                   to={to}
+                  onClick={() => {
+                    if (newChatPaths.has(to)) window.dispatchEvent(new Event('memoria:new-chat'))
+                  }}
                   className={({ isActive }) =>
                     `w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
                       isActive

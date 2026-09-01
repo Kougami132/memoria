@@ -22,7 +22,9 @@ export default function App() {
             <Route path="hosts" element={<Hosts />} />
             <Route path="bots" element={<Bots />} />
             <Route path="chat" element={<Chat />} />
+            <Route path="chat/:sessionId" element={<Chat />} />
             <Route path="agentic-chat" element={<AgenticChat />} />
+            <Route path="agentic-chat/:sessionId" element={<AgenticChat />} />
             <Route path="logs" element={<Logs />} />
             <Route path="settings" element={<Settings />} />
           </Route>
