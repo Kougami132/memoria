@@ -312,7 +312,9 @@ export function Chat() {
     let currentSessionId = targetSessionId || activeSessionId || undefined
     currentSessionIdRef.current = currentSessionId || null
     try {
-      for await (const event of api.streamBotChat(botId, text, currentSessionId, abortController.signal)) {
+      const modelKey = bots.find((bot) => bot.id === botId)?.model_key
+      if (!modelKey) throw new Error('Selected bot model is unavailable')
+      for await (const event of api.streamBotChat(modelKey, text, currentSessionId, abortController.signal)) {
         if (event.type === 'init') {
           if (event.user_message_id) {
             currentUserMsgIdRef.current = event.user_message_id

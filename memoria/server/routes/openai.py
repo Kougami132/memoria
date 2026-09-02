@@ -48,8 +48,7 @@ def list_models(db: DB = Depends(get_db)):
     ]
     bots = db.list_bots()
     for bot in bots:
-        models.append(ModelObject(id=f"bot:{bot['id']}", owned_by="memoria-bot"))
-        models.append(ModelObject(id=bot["id"], owned_by="memoria-bot"))
+        models.append(ModelObject(id=f"bot:{bot['model_key']}", owned_by="memoria-bot"))
     return ModelListResponse(data=models)
 
 
@@ -72,14 +71,13 @@ class ChatCompletionRequest(BaseModel):
     session_id: Optional[str] = None
 
 
-def _resolve_bot_id(model: str) -> Optional[str]:
-    if not model:
+def _resolve_bot(model: str, db: DB) -> Optional[dict]:
+    if not model or model in ("memoria-agent", "default", "agent"):
         return None
-    if model.startswith("bot:"):
-        return model[4:]
-    if model in ("memoria-agent", "default", "agent"):
-        return None
-    return model
+    bot = db.resolve_bot_model(model)
+    if bot is None:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model}")
+    return bot
 
 
 def _extract_user_prompt(messages: List[ChatCompletionMessage]) -> str:
@@ -117,7 +115,9 @@ def chat_completions(
         or request.query_params.get("client") == "web"
     )
     start_time = time.time()
-    bot_id = _resolve_bot_id(body.model)
+    resolved_bot = _resolve_bot(body.model, db)
+    bot_id = resolved_bot["id"] if resolved_bot else None
+    log_model = resolved_bot["name"] if resolved_bot else body.model
     user_prompt = _extract_user_prompt(body.messages)
     session_id = body.session_id or body.conversation_id
     req_id = f"chatcmpl-{uuid.uuid4().hex[:16]}"
@@ -237,7 +237,7 @@ def chat_completions(
                         db.log_api_invocation(
                             endpoint="/v1/chat/completions",
                             method="POST",
-                            model=body.model,
+                            model=log_model,
                             status_code=status_code,
                             duration_ms=duration_ms,
                             prompt_tokens=prompt_tokens,
@@ -276,7 +276,7 @@ def chat_completions(
             db.log_api_invocation(
                 endpoint="/v1/chat/completions",
                 method="POST",
-                model=body.model,
+                model=log_model,
                 status_code=200,
                 duration_ms=duration_ms,
                 prompt_tokens=prompt_tokens,
@@ -314,7 +314,7 @@ def chat_completions(
             db.log_api_invocation(
                 endpoint="/v1/chat/completions",
                 method="POST",
-                model=body.model,
+                model=log_model,
                 status_code=404,
                 duration_ms=duration_ms,
                 prompt_tokens=prompt_tokens,
@@ -328,7 +328,7 @@ def chat_completions(
             db.log_api_invocation(
                 endpoint="/v1/chat/completions",
                 method="POST",
-                model=body.model,
+                model=log_model,
                 status_code=500,
                 duration_ms=duration_ms,
                 prompt_tokens=prompt_tokens,
@@ -385,7 +385,9 @@ def create_response(
         or request.query_params.get("client") == "web"
     )
     start_time = time.time()
-    bot_id = _resolve_bot_id(body.model)
+    resolved_bot = _resolve_bot(body.model, db)
+    bot_id = resolved_bot["id"] if resolved_bot else None
+    log_model = resolved_bot["name"] if resolved_bot else body.model
     user_prompt = _extract_response_input(body.input)
     session_id = body.session_id or body.conversation_id
     response_id = f"resp_{uuid.uuid4().hex[:16]}"
@@ -589,7 +591,7 @@ def create_response(
                         db.log_api_invocation(
                             endpoint="/v1/responses",
                             method="POST",
-                            model=body.model,
+                            model=log_model,
                             status_code=status_code,
                             duration_ms=duration_ms,
                             prompt_tokens=prompt_tokens,
@@ -628,7 +630,7 @@ def create_response(
             db.log_api_invocation(
                 endpoint="/v1/responses",
                 method="POST",
-                model=body.model,
+                model=log_model,
                 status_code=200,
                 duration_ms=duration_ms,
                 prompt_tokens=prompt_tokens,
@@ -667,7 +669,7 @@ def create_response(
             db.log_api_invocation(
                 endpoint="/v1/responses",
                 method="POST",
-                model=body.model,
+                model=log_model,
                 status_code=404,
                 duration_ms=duration_ms,
                 prompt_tokens=prompt_tokens,
@@ -681,7 +683,7 @@ def create_response(
             db.log_api_invocation(
                 endpoint="/v1/responses",
                 method="POST",
-                model=body.model,
+                model=log_model,
                 status_code=500,
                 duration_ms=duration_ms,
                 prompt_tokens=prompt_tokens,

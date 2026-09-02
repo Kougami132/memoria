@@ -107,3 +107,13 @@ Guidelines:
 4. **Not cleaning up child rows on delete.** `delete_kb` manually deletes `bot_kb_links`, `vault_files`, `vaults`, and `documents` before deleting the KB row. New parent tables must do the same; SQLAlchemy auto-cascade is not configured.
 
 5. **Storing timestamps as Python `datetime` objects.** The project stores all timestamps as UTC ISO strings (`datetime.now(timezone.utc).isoformat()`). ORM columns are `Column(String)`, not `DateTime`. Keep this convention for consistency.
+
+## External Bot Identity
+
+Bot identity has separate storage and API concerns:
+
+- `bots.id` is the internal UUID used for relationships, sessions, management routes, and engine calls.
+- `Bot.name` is the user-visible label and may contain Unicode characters.
+- `bots.model_key` is a user-visible, unique, readable ASCII identifier for external model APIs. Use a readable slug derived from ASCII names where possible, but require explicit input for names such as Chinese that cannot yield a meaningful ASCII key. Keep it stable when only the display name changes.
+
+When adding or migrating this field, use an idempotent `PRAGMA table_info` check, backfill missing values before creating the unique index, and keep legacy ID aliases in API resolution only. Do not expose internal UUIDs as the canonical model list identifiers.

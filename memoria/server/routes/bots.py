@@ -11,6 +11,7 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 
 class BotCreate(BaseModel):
     name: str
+    model_key: Optional[str] = None
     system_prompt: str = ""
     kb_ids: list[str] = []
     host_ids: list[str] = []
@@ -20,6 +21,7 @@ class BotCreate(BaseModel):
 
 class BotUpdate(BaseModel):
     name: Optional[str] = None
+    model_key: Optional[str] = None
     system_prompt: Optional[str] = None
     kb_ids: Optional[list[str]] = None
     host_ids: Optional[list[str]] = None
@@ -29,14 +31,18 @@ class BotUpdate(BaseModel):
 
 @router.post("", status_code=201)
 def create_bot(body: BotCreate, db: DB = Depends(get_db)):
-    return db.create_bot(
-        name=body.name,
-        system_prompt=body.system_prompt,
-        kb_ids=body.kb_ids,
-        host_ids=body.host_ids,
-        host_security_modes=body.host_security_modes,
-        model_override=body.model_override,
-    )
+    try:
+        return db.create_bot(
+            name=body.name,
+            system_prompt=body.system_prompt,
+            kb_ids=body.kb_ids,
+            host_ids=body.host_ids,
+            host_security_modes=body.host_security_modes,
+            model_override=body.model_override,
+            model_key=body.model_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("")
@@ -54,15 +60,19 @@ def get_bot(bot_id: str, db: DB = Depends(get_db)):
 
 @router.put("/{bot_id}")
 def update_bot(bot_id: str, body: BotUpdate, db: DB = Depends(get_db)):
-    bot = db.update_bot(
-        bot_id=bot_id,
-        name=body.name,
-        system_prompt=body.system_prompt,
-        kb_ids=body.kb_ids,
-        host_ids=body.host_ids,
-        host_security_modes=body.host_security_modes,
-        model_override=body.model_override,
-    )
+    try:
+        bot = db.update_bot(
+            bot_id=bot_id,
+            name=body.name,
+            system_prompt=body.system_prompt,
+            kb_ids=body.kb_ids,
+            host_ids=body.host_ids,
+            host_security_modes=body.host_security_modes,
+            model_override=body.model_override,
+            model_key=body.model_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if bot is None:
         raise HTTPException(status_code=404, detail="Bot not found")
     return bot

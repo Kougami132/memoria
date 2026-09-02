@@ -11,13 +11,14 @@ export interface KB { id: string; name: string; description: string; type: 'uplo
 export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; source: 'upload' | 'vault'; path?: string; created_at: string }
 export interface UploadResult { doc_id: string; chunk_count: number; doc: Doc }
 export interface Bot {
-  id: string; name: string; system_prompt: string;
+  id: string; name: string; model_key: string; system_prompt: string;
   model_override: string | null; kb_ids: string[]; created_at: string
   host_ids?: string[]
   host_security_modes?: Record<string, HostSecurityMode>
 }
 export interface BotCreate {
   name: string
+  model_key?: string
   system_prompt?: string
   kb_ids?: string[]
   host_ids?: string[]
@@ -26,6 +27,7 @@ export interface BotCreate {
 }
 export interface BotUpdate {
   name?: string
+  model_key?: string
   system_prompt?: string
   kb_ids?: string[]
   host_ids?: string[]
@@ -334,12 +336,12 @@ export async function* streamAgentChat(
 }
 
 export async function* streamBotChat(
-  botId: string,
+  modelKey: string,
   message: string,
   sessionId?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentStreamEvent> {
-  yield* streamResponses(`bot:${botId}`, message, sessionId, signal)
+  yield* streamResponses(`bot:${modelKey}`, message, sessionId, signal)
 }
 export const listAgentSessions = () => req<Session[]>('/agent-sessions')
 export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)

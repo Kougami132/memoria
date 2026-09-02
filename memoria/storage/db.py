@@ -2,6 +2,7 @@ from __future__ import annotations
 from memoria.connectors.crypto import decrypt_secret, encrypt_secret
 
 import json
+import re
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ class BotRow(Base):
     __tablename__ = "bots"
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
+    model_key = Column(String, nullable=False, unique=True, default="")
     system_prompt = Column(String, default="")
     model_override = Column(String, default=None)
     created_at = Column(String, nullable=False)
@@ -168,6 +170,25 @@ def _uid() -> str:
     return str(uuid.uuid4())
 
 
+BOT_MODEL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+LEGACY_UUID_MODEL_KEY_RE = re.compile(r"^bot-[0-9a-f]{32}$")
+
+
+def _bot_model_key(name: str) -> str:
+    """Create a readable key from an ASCII Bot name; non-ASCII names need an explicit key."""
+    key = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    if not key or not name.isascii():
+        raise ValueError("model_key is required for Bot names that cannot produce an ASCII identifier")
+    return key[:63].rstrip("-")
+
+
+def _validate_bot_model_key(model_key: str) -> str:
+    model_key = model_key.strip().lower()
+    if not BOT_MODEL_KEY_RE.fullmatch(model_key):
+        raise ValueError("model_key must be 1-63 characters of lowercase ASCII letters, numbers, '_' or '-'")
+    return model_key
+
+
 AUTO_SESSION_TITLE_MAX_CHARS = 32
 MANUAL_SESSION_TITLE_MAX_CHARS = 80
 DEFAULT_SESSION_TITLE = "新对话"
@@ -246,6 +267,39 @@ class DB:
             if "security_mode" not in bot_host_cols:
                 conn.execute(text("ALTER TABLE bot_host_links ADD COLUMN security_mode TEXT DEFAULT NULL"))
                 conn.commit()
+            bot_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bots)"))]
+            if "model_key" not in bot_cols:
+                conn.execute(text("ALTER TABLE bots ADD COLUMN model_key TEXT DEFAULT ''"))
+                conn.commit()
+            bot_rows = conn.execute(text(
+                "SELECT id, name, model_key FROM bots "
+                "WHERE model_key IS NULL OR model_key = '' OR model_key GLOB 'bot-[0-9a-f]*'"
+            )).fetchall()
+            for bot_row in bot_rows:
+                try:
+                    model_key = _bot_model_key(bot_row[1])
+                except ValueError:
+                    # Legacy records without an ASCII name remain addressable until renamed/configured.
+                    model_key = f"legacy-{bot_row[0][:8]}"
+                if bot_row[2] and not LEGACY_UUID_MODEL_KEY_RE.fullmatch(bot_row[2]):
+                    continue
+                base_model_key = model_key
+                suffix = 2
+                while conn.execute(
+                    text("SELECT 1 FROM bots WHERE model_key = :model_key AND id != :bot_id"),
+                    {"model_key": model_key, "bot_id": bot_row[0]},
+                ).first():
+                    suffix_text = f"-{suffix}"
+                    model_key = f"{base_model_key[:63 - len(suffix_text)]}{suffix_text}"
+                    suffix += 1
+                conn.execute(
+                    text("UPDATE bots SET model_key = :model_key WHERE id = :bot_id"),
+                    {"model_key": model_key, "bot_id": bot_row[0]},
+                )
+            if bot_rows:
+                conn.commit()
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bots_model_key ON bots (model_key)"))
+            conn.commit()
             session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
             session_cols = [r[1] for r in session_info]
             bot_id_notnull = any(r[1] == "bot_id" and r[3] == 1 for r in session_info)
@@ -354,7 +408,8 @@ class DB:
             if lk.security_mode is not None
         }
         return {
-            "id": row.id, "name": row.name, "system_prompt": row.system_prompt,
+            "id": row.id, "name": row.name, "model_key": row.model_key,
+            "system_prompt": row.system_prompt,
             "model_override": row.model_override, "created_at": row.created_at,
             "kb_ids": [lk.kb_id for lk in links],
             "host_ids": [lk.host_id for lk in host_links],
@@ -364,10 +419,22 @@ class DB:
     def create_bot(self, name: str, system_prompt: str = "", kb_ids: list[str] | None = None,
                    host_ids: list[str] | None = None,
                    host_security_modes: dict[str, str] | None = None,
-                   model_override: str | None = None) -> dict:
+                   model_override: str | None = None,
+                   model_key: str | None = None) -> dict:
         with self._s() as s:
+            if model_key is None:
+                model_key = _bot_model_key(name)
+                base = model_key
+                suffix = 2
+                while s.query(BotRow).filter(BotRow.model_key == model_key).first():
+                    model_key = f"{base}-{suffix}"
+                    suffix += 1
+            else:
+                model_key = _validate_bot_model_key(model_key)
+                if s.query(BotRow).filter(BotRow.model_key == model_key).first():
+                    raise ValueError(f"model_key already exists: {model_key}")
             row = BotRow(id=_uid(), name=name, system_prompt=system_prompt,
-                         model_override=model_override, created_at=_now())
+                         model_key=model_key, model_override=model_override, created_at=_now())
             s.add(row)
             for kb_id in (kb_ids or []):
                 s.add(BotKBLink(bot_id=row.id, kb_id=kb_id))
@@ -388,16 +455,37 @@ class DB:
         with self._s() as s:
             return [self._bot_dict(s, r) for r in s.query(BotRow).all()]
 
+    def resolve_bot_model(self, model: str) -> dict | None:
+        if not model:
+            return None
+        canonical_key = model[4:] if model.startswith("bot:") else model
+        with self._s() as s:
+            row = s.query(BotRow).filter(BotRow.model_key == canonical_key).first()
+            if row is None:
+                name_matches = s.query(BotRow).filter(BotRow.name == model).all()
+                if len(name_matches) == 1:
+                    row = name_matches[0]
+            if row is None:
+                legacy_id = canonical_key
+                row = s.get(BotRow, legacy_id)
+            return self._bot_dict(s, row) if row else None
+
     def update_bot(self, bot_id: str, name: str | None = None, system_prompt: str | None = None,
                    kb_ids: list[str] | None = None, host_ids: list[str] | None = None,
                    host_security_modes: dict[str, str] | None = None,
-                   model_override: str | None = None) -> dict | None:
+                   model_override: str | None = None,
+                   model_key: str | None = None) -> dict | None:
         with self._s() as s:
             row = s.get(BotRow, bot_id)
             if row is None:
                 return None
             if name is not None:
                 row.name = name
+            if model_key is not None and model_key != row.model_key:
+                model_key = _validate_bot_model_key(model_key)
+                if s.query(BotRow).filter(BotRow.model_key == model_key, BotRow.id != bot_id).first():
+                    raise ValueError(f"model_key already exists: {model_key}")
+                row.model_key = model_key
             if system_prompt is not None:
                 row.system_prompt = system_prompt
             if model_override is not None:

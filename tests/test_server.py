@@ -74,6 +74,50 @@ def test_chat(client):
     assert data["choices"][0]["message"]["content"] == "[mock agentic response]" 
 
 
+@pytest.mark.parametrize("model_field", ["model_key", "name", "legacy_prefixed", "id"])
+def test_chat_accepts_bot_model_aliases(client, model_field):
+    bot = client.post("/api/bots", json={
+        "name": "中文助手",
+        "model_key": "customer-support",
+        "system_prompt": "",
+        "kb_ids": [],
+    }).json()
+    model = f"bot:{bot['id']}" if model_field == "legacy_prefixed" else bot[model_field]
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": model, "messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model"] == model
+
+
+def test_responses_accepts_bot_name_and_model_key(client):
+    bot = client.post("/api/bots", json={
+        "name": "常规对话助手",
+        "model_key": "general-chat",
+        "system_prompt": "",
+        "kb_ids": [],
+    }).json()
+
+    for model in (bot["name"], bot["model_key"]):
+        response = client.post("/v1/responses", json={"model": model, "input": "hello"})
+        assert response.status_code == 200
+        assert response.json()["model"] == model
+
+
+@pytest.mark.parametrize("endpoint,payload", [
+    ("/v1/chat/completions", {"model": "unknown-model", "messages": [{"role": "user", "content": "hello"}]}),
+    ("/v1/responses", {"model": "unknown-model", "input": "hello"}),
+])
+def test_unknown_model_returns_404(client, endpoint, payload):
+    response = client.post(endpoint, json=payload)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Model not found: unknown-model"
+
+
 def test_upload_unsupported_format(client, tmp_path):
     kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
     f = tmp_path / "doc.pdf"
@@ -578,7 +622,11 @@ def test_openai_models(client):
     assert data["object"] == "list"
     model_ids = [m["id"] for m in data["data"]]
     assert "memoria-agent" in model_ids
-    assert f"bot:{bot['id']}" in model_ids
+    assert f"bot:{bot['model_key']}" in model_ids
+    assert bot["model_key"] not in model_ids
+    assert bot["id"] not in model_ids
+    assert f"bot:{bot['id']}" not in model_ids
+    assert len(model_ids) == len(set(model_ids))
 
 
 def test_api_logs_and_clear(client):
@@ -593,7 +641,7 @@ def test_api_logs_and_clear(client):
     assert len(logs_data["items"]) >= 1
     last_log = logs_data["items"][0]
     assert last_log["endpoint"] == "/v1/chat/completions"
-    assert last_log["model"] == bot["id"]
+    assert last_log["model"] == bot["name"]
     assert last_log["status_code"] == 200
     assert "duration_ms" in last_log
     assert "total_tokens" in last_log

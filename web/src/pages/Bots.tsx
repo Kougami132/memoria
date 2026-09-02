@@ -29,6 +29,7 @@ function BotForm({
   defaultPrompt: string
 }) {
   const [name, setName] = useState(initial?.name ?? '')
+  const [modelKey, setModelKey] = useState(initial?.model_key ?? '')
   const [prompt, setPrompt] = useState(initial?.system_prompt ?? defaultPrompt)
   const [selectedKBs, setSelectedKBs] = useState<Set<string>>(new Set(initial?.kb_ids ?? []))
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set(initial?.host_ids ?? []))
@@ -81,6 +82,18 @@ function BotForm({
           rows={4}
           className="rounded-xl border-border bg-background resize-none leading-relaxed"
         />
+      </div>
+      <div className="space-y-1.5">
+          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            外部模型标识 <span className="normal-case font-normal text-muted-foreground">（唯一 ASCII 标识；英文名称可自动生成）</span>
+          </Label>
+          <Input
+            placeholder="例如：customer-support"
+            value={modelKey}
+            onChange={e => setModelKey(e.target.value)}
+            className="rounded-xl border-border bg-background font-mono"
+          />
+          <p className="text-[11px] text-muted-foreground">中文名称必须填写；外部调用的 model_id 为 bot:&lt;model_key&gt;。</p>
       </div>
       {kbs.length > 0 && (
         <div className="space-y-1.5">
@@ -183,6 +196,7 @@ function BotForm({
         <Button
           onClick={() => onSubmit({
             name,
+            model_key: modelKey || undefined,
             system_prompt: prompt,
             kb_ids: [...selectedKBs],
             host_ids: [...selectedHosts],

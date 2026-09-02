@@ -22,10 +22,81 @@ def test_bot_crud(db):
     kb = db.create_kb("kb1", "")
     bot = db.create_bot("bot1", "prompt", [kb["id"]])
     assert bot["kb_ids"] == [kb["id"]]
+    assert bot["model_key"] == "bot1"
+    assert bot["model_key"].isascii()
+    original_model_key = bot["model_key"]
     updated = db.update_bot(bot["id"], name="bot2")
     assert updated["name"] == "bot2"
+    assert updated["model_key"] == original_model_key
     db.delete_bot(bot["id"])
     assert db.get_bot(bot["id"]) is None
+
+
+def test_bot_model_keys_are_unique_and_resolvable(db):
+    first = db.create_bot("中文助手", model_key="customer-support")
+    second = db.create_bot("other")
+
+    assert first["model_key"] == "customer-support"
+    assert second["model_key"] == "other"
+    assert db.resolve_bot_model(first["model_key"])["id"] == first["id"]
+    with pytest.raises(ValueError, match="already exists"):
+        db.create_bot("另一个助手", model_key=first["model_key"])
+
+
+def test_ascii_bot_names_get_readable_collision_keys_and_custom_keys(db):
+    first = db.create_bot("Support Bot")
+    second = db.create_bot("Support Bot")
+    custom = db.create_bot("中文助手", model_key="customer-support")
+    assert first["model_key"] == "support-bot"
+    assert second["model_key"] == "support-bot-2"
+    assert custom["model_key"] == "customer-support"
+
+
+def test_chinese_bot_names_require_custom_model_key(db):
+    with pytest.raises(ValueError, match="model_key is required"):
+        db.create_bot("中文助手")
+
+    bot = db.create_bot("中文助手", model_key="support")
+    with pytest.raises(ValueError, match="lowercase ASCII"):
+        db.update_bot(bot["id"], model_key="客服助手")
+
+
+def test_bot_model_aliases_resolve(db):
+    bot = db.create_bot("Support Bot")
+    assert db.resolve_bot_model(f"bot:{bot['model_key']}")["id"] == bot["id"]
+    assert db.resolve_bot_model(bot["name"])["id"] == bot["id"]
+    assert db.resolve_bot_model(f"bot:{bot['id']}")["id"] == bot["id"]
+    assert db.resolve_bot_model(bot["id"])["id"] == bot["id"]
+
+
+def test_bot_model_name_resolution_rejects_ambiguous_names(db):
+    db.create_bot("重复助手", model_key="duplicate-1")
+    db.create_bot("重复助手", model_key="duplicate-2")
+
+    assert db.resolve_bot_model("重复助手") is None
+
+
+def test_bot_model_key_migration_backfills_legacy_bots(tmp_path):
+    db_path = tmp_path / "legacy-bots.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE bots (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, system_prompt TEXT,
+                model_override TEXT, created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO bots (id, name, system_prompt, model_override, created_at)
+            VALUES ('legacy-1', '旧助手', '', NULL, '2026-09-01T00:00:00+00:00')
+        """)
+
+    migrated = DB(str(db_path))
+    bot = migrated.get_bot("legacy-1")
+
+    assert bot["name"] == "旧助手"
+    assert bot["model_key"] == "legacy-legacy-1"
+    assert bot["model_key"].isascii()
+    assert DB(str(db_path)).get_bot("legacy-1")["model_key"] == bot["model_key"]
 
 
 def test_doc_crud(db):
