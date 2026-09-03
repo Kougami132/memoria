@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -5,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from memoria.config import get_effective_settings
+from memoria.config import get_effective_settings, get_qq_settings
 from memoria.core.embedder import Embedder
 from memoria.llm.caller import LLMCaller
 from memoria.server.deps import get_db, reset_pipeline
@@ -36,9 +37,66 @@ class SettingsUpdate(BaseModel):
     host_dangerous_patterns: Optional[list[str]] = None
 
 
+class QQSettingsUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    app_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    gateway_intents: Optional[int] = None
+    c2c_enabled: Optional[bool] = None
+    group_enabled: Optional[bool] = None
+    group_require_mention: Optional[bool] = None
+    user_allowlist: Optional[list[str]] = None
+    group_allowlist: Optional[list[str]] = None
+    allow_unlisted_users: Optional[bool] = None
+    allow_unlisted_groups: Optional[bool] = None
+    group_approval_enabled: Optional[bool] = None
+    max_queue_size: Optional[int] = None
+    run_timeout_seconds: Optional[int] = None
+
+
 @router.get("")
 def get_settings(db: DB = Depends(get_db)):
     return get_effective_settings(db)
+
+
+@router.get("/qq")
+def get_qq_channel_settings(db: DB = Depends(get_db)):
+    result = get_qq_settings(db).copy()
+    result["client_secret"] = "********" if result["client_secret"] else ""
+    return result
+
+
+@router.get("/qq/status")
+def get_qq_channel_status(request: Request):
+    adapter = getattr(request.app.state, "qq_adapter", None)
+    if adapter is None:
+        return {"status": "disabled", "last_error": None}
+    return {"status": adapter.status, "last_error": adapter.last_error}
+
+
+@router.put("/qq")
+async def update_qq_channel_settings(body: QQSettingsUpdate, request: Request, db: DB = Depends(get_db)):
+    data = body.model_dump(exclude_unset=True)
+    if body.max_queue_size is not None and body.max_queue_size < 1:
+        raise HTTPException(status_code=422, detail="max_queue_size must be >= 1")
+    if body.run_timeout_seconds is not None and body.run_timeout_seconds < 1:
+        raise HTTPException(status_code=422, detail="run_timeout_seconds must be >= 1")
+    if body.enabled is True and body.app_id is not None and not body.app_id.strip():
+        raise HTTPException(status_code=422, detail="app_id must not be empty")
+    if body.client_secret == "********":
+        data.pop("client_secret", None)
+    for key, value in data.items():
+        if isinstance(value, bool):
+            value = str(value).lower()
+        elif isinstance(value, (list, dict)):
+            value = json.dumps(value, ensure_ascii=False)
+        db.set_setting(f"qq_{key}", str(value))
+    adapter = getattr(request.app.state, "qq_adapter", None)
+    if adapter:
+        asyncio.create_task(adapter.reload())
+    result = get_qq_settings(db).copy()
+    result["client_secret"] = "********" if result["client_secret"] else ""
+    return result
 
 
 @router.put("")

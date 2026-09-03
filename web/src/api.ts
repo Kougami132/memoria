@@ -343,6 +343,40 @@ export async function* streamBotChat(
 ): AsyncGenerator<AgentStreamEvent> {
   yield* streamResponses(`bot:${modelKey}`, message, sessionId, signal)
 }
+
+export interface QQSettings {
+  enabled: string
+  app_id: string
+  client_secret: string
+  gateway_intents: string
+  c2c_enabled: string
+  group_enabled: string
+  group_require_mention: string
+  user_allowlist: string
+  group_allowlist: string
+  allow_unlisted_users: string
+  allow_unlisted_groups: string
+  group_approval_enabled: string
+  max_queue_size: string
+  run_timeout_seconds: string
+}
+
+export interface QQSettingsUpdate {
+  enabled?: boolean
+  app_id?: string
+  client_secret?: string
+  gateway_intents?: number
+  c2c_enabled?: boolean
+  group_enabled?: boolean
+  group_require_mention?: boolean
+  user_allowlist?: string[]
+  group_allowlist?: string[]
+  allow_unlisted_users?: boolean
+  allow_unlisted_groups?: boolean
+  group_approval_enabled?: boolean
+  max_queue_size?: number
+  run_timeout_seconds?: number
+}
 export const listAgentSessions = () => req<Session[]>('/agent-sessions')
 export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)
 export const updateAgentSession = (id: string, data: { title: string }) =>
@@ -420,6 +454,11 @@ export const testEmbedding = () =>
   req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', { method: 'POST' })
 export const testChat = () =>
   req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', { method: 'POST' })
+export const getQQSettings = () => req<QQSettings>('/settings/qq')
+export const updateQQSettings = (data: QQSettingsUpdate) =>
+  req<QQSettings>('/settings/qq', { method: 'PUT', ...json(data) })
+export const getQQStatus = () =>
+  req<{ status: string; last_error: string | null }>('/settings/qq/status')
 
 export interface Vault {
   id: string; kb_id: string; type: 'local' | 'webdav';

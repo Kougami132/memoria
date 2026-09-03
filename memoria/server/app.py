@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from memoria.server.routes import agent_sessions, bots, documents, hosts, knowledge_bases, logs, openai, settings, sessions, vaults
-from memoria.server.deps import get_db, get_pipeline
+from memoria.server.deps import get_agentic_engine, get_db, get_pipeline
 from memoria.vault.syncer import VaultSyncer
 
 
@@ -33,6 +33,7 @@ def _sync_all_vaults():
 async def _lifespan(app: FastAPI):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from memoria.config import get_effective_settings
+    from memoria.qqbot import QQBotAdapter
 
     scheduler = AsyncIOScheduler()
 
@@ -42,7 +43,14 @@ async def _lifespan(app: FastAPI):
     scheduler.add_job(_sync_all_vaults, "interval", minutes=interval_minutes, max_instances=1, id="vault_poll")
     scheduler.start()
     app.state.scheduler = scheduler
-    yield
+    qq_adapter = QQBotAdapter(get_db(), get_agentic_engine)
+    app.state.qq_adapter = qq_adapter
+    await qq_adapter.start()
+    try:
+        yield
+    finally:
+        await qq_adapter.stop()
+        app.state.qq_adapter = None
     scheduler.shutdown(wait=False)
 
 

@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, desc, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -160,6 +161,23 @@ class RuntimeSettingRow(Base):
     key = Column(String, primary_key=True)
     value = Column(String, nullable=False)
     updated_at = Column(String, nullable=False)
+
+
+class QQSessionMappingRow(Base):
+    __tablename__ = "qq_session_mappings"
+    key = Column(String, primary_key=True)
+    app_id = Column(String, nullable=False)
+    context_type = Column(String, nullable=False)
+    context_id = Column(String, nullable=False)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=False, unique=True)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+
+class QQEventRow(Base):
+    __tablename__ = "qq_events"
+    event_id = Column(String, primary_key=True)
+    received_at = Column(String, nullable=False)
 
 
 def _now() -> str:
@@ -921,6 +939,63 @@ class DB:
     def get_all_settings(self) -> dict[str, str]:
         with self._s() as s:
             return {r.key: r.value for r in s.query(RuntimeSettingRow).all()}
+
+    # -- QQ Bot -------------------------------------------------------------
+
+    def get_or_create_qq_session(
+        self,
+        app_id: str,
+        context_type: str,
+        context_id: str,
+        title: str | None = None,
+    ) -> dict:
+        key = f"{app_id}:{context_type}:{context_id}"
+        with self._s() as s:
+            row = s.get(QQSessionMappingRow, key)
+            if row:
+                session = s.get(SessionRow, row.session_id)
+                if session:
+                    row.updated_at = _now()
+                    return self._session_dict(session)
+
+            session = SessionRow(
+                id=_uid(), bot_id=None, session_type="agentic",
+                title=_auto_session_title(title), created_at=_now(),
+            )
+            s.add(session)
+            s.flush()
+            mapping = QQSessionMappingRow(
+                key=key, app_id=app_id, context_type=context_type,
+                context_id=context_id, session_id=session.id,
+                created_at=_now(), updated_at=_now(),
+            )
+            s.add(mapping)
+            try:
+                s.flush()
+            except IntegrityError:
+                # Another gateway worker may have created the same mapping.
+                s.rollback()
+                existing = s.get(QQSessionMappingRow, key)
+                if not existing:
+                    raise
+                session = s.get(SessionRow, existing.session_id)
+                if not session:
+                    raise RuntimeError("QQ session mapping points to a missing session")
+                existing.updated_at = _now()
+                return self._session_dict(session)
+            return self._session_dict(session)
+
+    def claim_qq_event(self, event_id: str) -> bool:
+        if not event_id:
+            return False
+        with self._s() as s:
+            s.add(QQEventRow(event_id=event_id, received_at=_now()))
+            try:
+                s.flush()
+            except IntegrityError:
+                s.rollback()
+                return False
+            return True
 
     def list_sessions(self, bot_id: str) -> list[dict]:
         with self._s() as s:

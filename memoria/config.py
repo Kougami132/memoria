@@ -64,3 +64,30 @@ def get_effective_settings(db) -> dict:
         url += "/v1"
     fields["openai_base_url"] = url
     return fields
+
+
+QQ_SETTING_KEYS = (
+    "enabled", "app_id", "client_secret", "gateway_intents", "c2c_enabled",
+    "group_enabled", "group_require_mention", "user_allowlist", "group_allowlist",
+    "allow_unlisted_users", "allow_unlisted_groups", "group_approval_enabled",
+    "max_queue_size", "run_timeout_seconds",
+)
+
+
+def get_qq_settings(db) -> dict:
+    values = {
+        key.removeprefix("qq_"): value
+        for key, value in db.get_all_settings().items()
+        if key.startswith("qq_")
+    }
+    defaults = {
+        "enabled": "false", "app_id": "", "client_secret": "", "gateway_intents": "0",
+        "c2c_enabled": "true", "group_enabled": "true", "group_require_mention": "true",
+        "user_allowlist": "[]", "group_allowlist": "[]", "allow_unlisted_users": "false",
+        "allow_unlisted_groups": "false", "group_approval_enabled": "false",
+        "max_queue_size": "32", "run_timeout_seconds": "300",
+    }
+    for key in QQ_SETTING_KEYS:
+        if key in values:
+            defaults[key] = values[key]
+    return defaults
