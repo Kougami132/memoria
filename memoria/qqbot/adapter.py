@@ -3,12 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+import urllib.error
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from memoria.agents.engine import AgenticRagEngine
 from memoria.config import get_qq_settings
+from memoria.qqbot.formatting import (
+    MAX_MESSAGE_LENGTH,
+    markdown_to_plain_text,
+    split_markdown,
+)
 from memoria.qqbot.gateway import QQGateway
 from memoria.qqbot.models import QQInboundMessage, parse_message
 from memoria.qqbot.policy import QQPolicy
@@ -34,16 +42,35 @@ class QQBotAdapter:
         self.last_error: str | None = None
         self._approval_contexts: dict[str, tuple[str, str, str]] = {}
         self._running = False
+        self._lifecycle_lock = asyncio.Lock()
 
     def _get_engine(self) -> AgenticRagEngine:
         if callable(self._engine):
             self._engine = self._engine()
         return self._engine
 
+    @staticmethod
+    def _next_msg_seq(seed: str = "default") -> int:
+        del seed
+        time_part = int(time.time()) % 100000000
+        rand = int(uuid.uuid4().hex[:4], 16)
+        return (time_part ^ rand) % 65536
+
+    @staticmethod
+    def _is_markdown_unsupported(error_body: str) -> bool:
+        text = error_body.lower()
+        markdown_terms = ("markdown", "msg_type")
+        unsupported_terms = ("unsupported", "not support", "不支持", "invalid")
+        return any(term in text for term in markdown_terms) and any(term in text for term in unsupported_terms)
+
     def _policy(self) -> QQPolicy:
         return QQPolicy.from_settings({k.removeprefix("qq_"): v for k, v in self.db.get_all_settings().items() if k.startswith("qq_")} | get_qq_settings(self.db))
 
     async def start(self) -> None:
+        async with self._lifecycle_lock:
+            await self._start_locked()
+
+    async def _start_locked(self) -> None:
         policy = self._policy()
         if not policy.enabled:
             self.status = "disabled"
@@ -52,19 +79,33 @@ class QQBotAdapter:
             self.status = "error"
             self.last_error = "QQ App ID and Client Secret are required"
             return
+        if self._running and self._gateway_task and not self._gateway_task.done():
+            return
         self.last_error = None
         self.status = "connecting"
         self._running = True
         self._gateway = QQGateway(
             policy.app_id,
             policy.client_secret,
-            policy.gateway_intents,
+            0,
             self.handle_event,
             self._handle_gateway_error,
         )
-        self._gateway_task = asyncio.create_task(self._gateway.run())
+        self._gateway_task = asyncio.create_task(self._run_gateway(self._gateway))
+
+    async def _run_gateway(self, gateway: QQGateway) -> None:
+        try:
+            await gateway.run()
+        finally:
+            if self._running and self._gateway is gateway and self.status == "connecting":
+                self.status = "error"
+                self.last_error = "QQ Gateway stopped before receiving READY"
 
     async def stop(self) -> None:
+        async with self._lifecycle_lock:
+            await self._stop_locked()
+
+    async def _stop_locked(self) -> None:
         self._running = False
         if self._gateway:
             await self._gateway.stop()
@@ -85,11 +126,13 @@ class QQBotAdapter:
         logger.error("QQ Gateway connection failed: %s", error)
 
     async def reload(self) -> None:
-        await self.stop()
-        self.last_error = None
-        await self.start()
+        async with self._lifecycle_lock:
+            await self._stop_locked()
+            self.last_error = None
+            await self._start_locked()
 
     async def handle_event(self, event: dict) -> None:
+        event_type = event.get("t")
         if event.get("t") == "READY":
             self.status = "connected"
             return
@@ -97,12 +140,22 @@ class QQBotAdapter:
             await self._handle_interaction(event)
             return
         message = parse_message(event)
-        if not message or not self.db.claim_qq_event(message.event_id):
+        if not message:
+            logger.warning("Ignoring QQ event: unsupported or invalid message event type=%s", event_type)
+            return
+        if not self.db.claim_qq_event(message.event_id):
+            logger.info("Ignoring duplicate QQ message: event_id=%s", message.event_id)
             return
         policy = self._policy()
         if not policy.allows(message.context_type, message.user_openid, message.group_openid):
+            logger.warning(
+                "Ignoring QQ message: blocked by policy context=%s user=%s group=%s "
+                "(check enabled switches and allowlists)",
+                message.context_type, message.user_openid, message.group_openid,
+            )
             return
         if message.context_type == "group" and policy.group_require_mention and not self._has_bot_mention(event):
+            logger.warning("Ignoring QQ group message: bot mention not detected group=%s", message.group_openid)
             return
         key = f"{policy.app_id}:{message.context_type}:{message.context_id}"
         queue = self._queues.setdefault(key, asyncio.Queue(maxsize=policy.max_queue_size))
@@ -110,6 +163,10 @@ class QQBotAdapter:
             logger.warning("QQ context queue full: context=%s", key)
             return
         await queue.put(_QueuedMessage(message))
+        logger.info(
+            "Queued QQ message: event_id=%s context=%s user=%s content_length=%d",
+            message.event_id, key, message.user_openid, len(message.content),
+        )
         if key not in self._workers or self._workers[key].done():
             self._workers[key] = asyncio.create_task(self._worker(key, queue))
 
@@ -195,7 +252,10 @@ class QQBotAdapter:
                     await self.send_approval(message, event)
         answer = next((str(event.get("answer") or "") for event in reversed(events) if event.get("type") == "done"), "")
         if answer:
+            logger.info("QQ agent response ready: event_id=%s answer_length=%d", message.event_id, len(answer))
             await self.send_message(message, answer)
+        else:
+            logger.warning("QQ agent returned no final answer: event_id=%s", message.event_id)
 
     @staticmethod
     def _next_stream_event(stream: Any) -> tuple[dict, bool]:
@@ -236,20 +296,59 @@ class QQBotAdapter:
             else f"https://api.sgroup.qq.com/v2/groups/{context_id}/messages"
         )
         import urllib.request
-        chunks = [content[index:index + 4000] for index in range(0, len(content), 4000)] or [""]
+        chunks = split_markdown(content, MAX_MESSAGE_LENGTH) or [""]
+        markdown_enabled = True
         for index, chunk in enumerate(chunks):
-            payload_data = {"content": chunk, "msg_type": 0}
-            if reply_to and index == 0:
-                payload_data["msg_id"] = reply_to
-            if keyboard and index == 0:
-                payload_data["keyboard"] = keyboard
-            payload = json.dumps(payload_data, ensure_ascii=False).encode()
+            use_reply = bool(reply_to and index == 0)
             for attempt in range(3):
+                msg_seq = self._next_msg_seq(reply_to or context_id)
+                if markdown_enabled:
+                    payload_data = {
+                        "markdown": {"content": chunk[:MAX_MESSAGE_LENGTH]},
+                        "msg_type": 2,
+                        "msg_seq": msg_seq,
+                    }
+                else:
+                    payload_data = {
+                        "content": markdown_to_plain_text(chunk)[:MAX_MESSAGE_LENGTH],
+                        "msg_type": 0,
+                        "msg_seq": msg_seq,
+                    }
+                if use_reply:
+                    payload_data["msg_id"] = reply_to
+                if keyboard and index == 0:
+                    payload_data["keyboard"] = keyboard
+                payload = json.dumps(payload_data, ensure_ascii=False).encode()
                 request = urllib.request.Request(endpoint, data=payload, headers={"Content-Type": "application/json", "Authorization": f"QQBot {token}"}, method="POST")
                 try:
                     await asyncio.to_thread(self._post, request)
+                    logger.info(
+                        "QQ message sent: context=%s target=%s chunk=%d/%d",
+                        context_type, context_id, index + 1, len(chunks),
+                    )
                     break
                 except urllib.error.HTTPError as exc:
+                    error_body = self._read_http_error_body(exc)
+                    logger.warning(
+                        "QQ message send failed: HTTP %s context=%s target=%s attempt=%d/%d body=%s",
+                        exc.code, context_type, context_id, attempt + 1, 3, error_body,
+                    )
+                    if use_reply and exc.code == 400 and "40034024" in error_body:
+                        logger.info(
+                            "QQ reply msg_id rejected; retrying as an active message: context=%s target=%s",
+                            context_type, context_id,
+                        )
+                        use_reply = False
+                        continue
+                    if markdown_enabled and exc.code == 400 and self._is_markdown_unsupported(error_body):
+                        logger.info(
+                            "QQ Markdown message rejected; retrying as plain text: context=%s target=%s",
+                            context_type,
+                            context_id,
+                        )
+                        markdown_enabled = False
+                        attempt = -1
+                        continue
                     if exc.code == 401 and attempt == 0 and self._gateway:
                         self._gateway.invalidate_token()
                         token = await self._gateway.fetch_token()
@@ -265,3 +364,11 @@ class QQBotAdapter:
         import urllib.request
         with urllib.request.urlopen(request, timeout=15):
             pass
+
+    @staticmethod
+    def _read_http_error_body(error: urllib.error.HTTPError) -> str:
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+        except OSError:
+            return "<unavailable>"
+        return body[:1000] or "<empty>"

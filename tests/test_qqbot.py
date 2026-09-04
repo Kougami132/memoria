@@ -1,9 +1,19 @@
 import asyncio
+import io
+import json
+import urllib.error
 
 import pytest
 
 from memoria.qqbot.adapter import QQBotAdapter
-from memoria.qqbot.gateway import QQGateway
+from memoria.qqbot.formatting import markdown_to_plain_text, split_markdown
+from memoria.qqbot.gateway import (
+    DEFAULT_GATEWAY_INTENTS,
+    QQGateway,
+    QQGatewayAPIError,
+    QQGatewayCloseError,
+    QQGatewayConfigurationError,
+)
 from memoria.qqbot.models import parse_message
 from memoria.qqbot.policy import QQPolicy
 from memoria.storage.db import DB
@@ -29,6 +39,19 @@ def test_parse_qq_messages_and_reject_incomplete_events():
 
     assert parse_message({"t": "C2C_MESSAGE_CREATE", "d": {"id": "e3", "content": "x"}}) is None
     assert parse_message({"t": "GROUP_AT_MESSAGE_CREATE", "d": {"id": "e4", "group_openid": "g1", "author": {"member_openid": "m1"}, "content": "  "}}) is None
+
+
+def test_parse_qq_message_id_from_gateway_event_envelope():
+    message = parse_message({
+        "op": 0,
+        "t": "C2C_MESSAGE_CREATE",
+        "id": "envelope-event",
+        "d": {"id": "message-id", "author": {"user_openid": "u1"}, "content": "hello"},
+    })
+
+    assert message is not None
+    assert message.event_id == "envelope-event"
+    assert message.message_id == "message-id"
 
 
 def test_qq_policy_requires_allowlist_by_default():
@@ -99,6 +122,91 @@ async def test_adapter_uses_lazy_system_agent_and_preserves_context(tmp_path):
     await adapter.stop()
 
 
+@pytest.mark.asyncio
+async def test_adapter_falls_back_to_active_message_when_reply_id_is_rejected(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+    adapter = QQBotAdapter(db, lambda: None)
+
+    class Gateway:
+        async def fetch_token(self):
+            return "token"
+
+    adapter._gateway = Gateway()
+    requests = []
+
+    def fake_post(request):
+        requests.append(json.loads(request.data))
+        if len(requests) == 1:
+            raise urllib.error.HTTPError(
+                request.full_url, 400, "bad request", {},
+                io.BytesIO(b'{"code":40034024,"message":"msg_id rejected"}'),
+            )
+
+    monkeypatch.setattr(adapter, "_post", fake_post)
+
+    await adapter.send_target("c2c", "user", "answer", "message-id")
+
+    assert [request["msg_type"] for request in requests] == [2, 2]
+    assert [request["markdown"] for request in requests] == [
+        {"content": "answer"},
+        {"content": "answer"},
+    ]
+    assert requests[0]["msg_id"] == "message-id"
+    assert "msg_id" not in requests[1]
+    assert all(0 <= request["msg_seq"] <= 65535 for request in requests)
+
+
+@pytest.mark.asyncio
+async def test_adapter_does_not_downgrade_arbitrary_markdown_400(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    adapter = QQBotAdapter(db, lambda: None)
+
+    class Gateway:
+        async def fetch_token(self):
+            return "token"
+
+    adapter._gateway = Gateway()
+
+    def fake_post(request):
+        raise urllib.error.HTTPError(
+            request.full_url, 400, "bad request", {},
+            io.BytesIO(b'{"code":100017,"message":"invalid payload"}'),
+        )
+
+    monkeypatch.setattr(adapter, "_post", fake_post)
+
+    with pytest.raises(urllib.error.HTTPError):
+        await adapter.send_target("c2c", "user", "answer")
+
+
+def test_qq_markdown_helpers_keep_content_readable():
+    content = "# 标题\n\n**重点** `code`\n\n- 一\n- 二\n\n[链接](https://example.com)"
+    plain = markdown_to_plain_text(content)
+    assert "标题" in plain
+    assert "**" not in plain
+    assert "链接 (https://example.com)" in plain
+    assert split_markdown("a\nb", 2) == ["a", "b"]
+
+
+def test_split_markdown_keeps_fenced_code_blocks_balanced():
+    content = "说明\n\n```python\n" + "print('hello')\n" * 20 + "```\n\n结尾"
+    chunks = split_markdown(content, 40)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 40 for chunk in chunks)
+    assert all(chunk.count("```") % 2 == 0 for chunk in chunks)
+
+
+def test_adapter_msg_seq_is_a_qq_compatible_integer():
+    sequence = QQBotAdapter._next_msg_seq("context")
+
+    assert isinstance(sequence, int)
+    assert 0 <= sequence <= 65535
+
+
 def test_gateway_token_invalidation():
     gateway = QQGateway("app", "secret", 0, lambda event: None)
     gateway._token = "token"
@@ -115,15 +223,193 @@ def test_gateway_describes_qq_api_error_response():
     assert QQGateway._describe_response({}) == "unexpected response format"
 
 
+def test_gateway_http_error_preserves_retry_after():
+    error = urllib.error.HTTPError(
+        "https://api.sgroup.qq.com/gateway",
+        400,
+        "rate limited",
+        {"Retry-After": "12.5"},
+        None,
+    )
+    wrapped = QQGatewayAPIError("rate limited", QQGateway._retry_after(error))
+    assert wrapped.retry_after == 12.5
+
+
+def test_gateway_reconnect_delay_only_uses_numeric_payload():
+    assert QQGateway._reconnect_delay({"op": 7, "d": 5}) == 5.0
+    assert QQGateway._reconnect_delay({"op": 9, "d": True}) is None
+    assert QQGateway._reconnect_delay({"op": 7, "d": None}) is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_wait_is_interrupted_by_stop():
+    gateway = QQGateway("app", "secret", 0, lambda event: None)
+    waiter = asyncio.create_task(gateway._wait_before_reconnect(None, 30))
+    await asyncio.sleep(0)
+    await gateway.stop()
+    await asyncio.wait_for(waiter, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_gateway_reuses_gateway_url_during_reconnect(monkeypatch):
+    gateway = QQGateway("app", "secret", 0, lambda event: None)
+    fetched_urls = []
+    connections = 0
+
+    async def fake_fetch_token():
+        return "token"
+
+    async def fake_fetch_gateway_url(token):
+        fetched_urls.append(token)
+        gateway._gateway_url = "wss://gateway.example"
+        return gateway._gateway_url
+
+    async def fake_run_connection(token, gateway_url):
+        nonlocal connections
+        connections += 1
+        assert gateway_url == "wss://gateway.example"
+        if connections == 2:
+            gateway._stop.set()
+
+    async def fake_wait(server_delay, backoff):
+        return
+
+    monkeypatch.setattr(gateway, "fetch_token", fake_fetch_token)
+    monkeypatch.setattr(gateway, "fetch_gateway_url", fake_fetch_gateway_url)
+    monkeypatch.setattr(gateway, "_run_connection", fake_run_connection)
+    monkeypatch.setattr(gateway, "_wait_before_reconnect", fake_wait)
+
+    await gateway.run()
+
+    assert fetched_urls == ["token"]
+    assert connections == 2
+
+
+@pytest.mark.asyncio
+async def test_gateway_eof_requests_reconnect_backoff(monkeypatch):
+    async def on_event(event):
+        return None
+
+    gateway = QQGateway("app", "secret", 0, on_event)
+
+    class EmptyWebSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def recv(self):
+            if not hasattr(self, "sent_hello"):
+                self.sent_hello = True
+                return '{"op": 10, "d": {"heartbeat_interval": 45000}}'
+            return '{"op": 7, "d": 0}'
+
+        async def send(self, message):
+            return None
+
+    monkeypatch.setattr(
+        "memoria.qqbot.gateway.websockets.connect",
+        lambda *args, **kwargs: EmptyWebSocket(),
+    )
+
+    assert await gateway._run_connection("token", "wss://gateway.example") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_adapter_start_is_idempotent(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_client_secret", "secret")
+    db.set_setting("qq_gateway_intents", "1")
+    created = []
+
+    async def fake_run(self):
+        created.append(self)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(QQGateway, "run", fake_run)
+    adapter = QQBotAdapter(db, lambda: None)
+    await asyncio.gather(adapter.start(), adapter.start())
+    assert len(created) == 1
+    await adapter.stop()
+
+
 @pytest.mark.asyncio
 async def test_adapter_reports_gateway_failure(tmp_path):
     db = DB(str(tmp_path / "qq.db"))
     db.set_setting("qq_enabled", "true")
     db.set_setting("qq_app_id", "app")
     db.set_setting("qq_client_secret", "secret")
+    db.set_setting("qq_gateway_intents", "1")
     adapter = QQBotAdapter(db, lambda: None)
     await adapter.start()
     await adapter._handle_gateway_error(RuntimeError("QQ token API rejected the request: code=401001"))
     assert adapter.status == "error"
     assert adapter.last_error == "QQ token API rejected the request: code=401001"
     await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_adapter_uses_default_gateway_intents(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_client_secret", "secret")
+    created = []
+    running = asyncio.Event()
+
+    async def fake_run(self):
+        created.append(self)
+        await running.wait()
+
+    monkeypatch.setattr(QQGateway, "run", fake_run)
+    adapter = QQBotAdapter(db, lambda: None)
+
+    await adapter.start()
+    await asyncio.sleep(0)
+
+    assert adapter.status == "connecting"
+    assert len(created) == 1
+    assert created[0].intents == DEFAULT_GATEWAY_INTENTS
+    running.set()
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_hermes_default_intents():
+    gateway = QQGateway("app", "secret", 0, lambda event: None)
+
+    assert gateway.intents == DEFAULT_GATEWAY_INTENTS
+
+
+@pytest.mark.asyncio
+async def test_gateway_invalid_session_stops_without_retry(monkeypatch):
+    errors = []
+
+    async def on_error(error):
+        errors.append(error)
+
+    gateway = QQGateway("app", "secret", DEFAULT_GATEWAY_INTENTS, lambda event: None, on_error)
+
+    async def fake_fetch_token():
+        return "token"
+
+    async def fake_fetch_gateway_url(token):
+        return "wss://gateway.example"
+
+    monkeypatch.setattr(gateway, "fetch_token", fake_fetch_token)
+    monkeypatch.setattr(gateway, "fetch_gateway_url", fake_fetch_gateway_url)
+
+    async def fake_run_connection(token, gateway_url):
+        raise QQGatewayCloseError(4013, "invalid intents")
+
+    monkeypatch.setattr(gateway, "_run_connection", fake_run_connection)
+
+    await gateway.run()
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], QQGatewayConfigurationError)
+    assert "4013 invalid intents" in str(errors[0])
+    assert gateway._stop.is_set()
