@@ -420,6 +420,26 @@ async def _execute_agent_tool_async(
         instruction = str(args.get("instruction") or "")
         host_id = args.get("host_id")
         command = args.get("command")
+        if command and not host_id:
+            hosts = tools.list_hosts()
+            if len(hosts) == 1:
+                host_id = hosts[0].get("id")
+                _log_trace(
+                    "HOST_TARGET",
+                    f"Bound delegated command to the only available host: host={host_id}",
+                    agent="HostAgent",
+                )
+            else:
+                _log_trace(
+                    "HOST_TARGET",
+                    f"Rejected delegated command without explicit host: available_hosts={len(hosts)}",
+                    agent="HostAgent",
+                )
+                return {
+                    "status": "not_executed",
+                    "error": "A single unambiguous host must be selected before executing a delegated command",
+                    "command": str(command),
+                }
         if command and host_id:
             return await _execute_agent_tool_async(
                 "run_host_command",
@@ -448,20 +468,59 @@ async def _execute_agent_tool_async(
         command = str(args.get("command") or "")
         
         # Check if approval is required before execution
-        h = getattr(tools, "db", None) and tools.db.get_host(host_id)
-        host_sec_modes = getattr(tools, "host", None) and getattr(tools.host, "host_security_modes", None)
+        host_tools = getattr(tools, "host", None)
+        db = getattr(host_tools, "db", None) or getattr(tools, "db", None)
+        h = db.get_host(host_id) if db else None
+        host_sec_modes = getattr(host_tools, "host_security_modes", None)
         override_mode = (host_sec_modes or {}).get(host_id) if host_sec_modes else None
         sec_mode = override_mode or (h.get("security_mode") if h else "ask_confirmation") or ("read_only" if (h and h.get("safe_mode")) else "ask_confirmation")
         
-        from memoria.connectors.host.guard import CommandGuard
+        from memoria.connectors.host.guard import (
+            CommandApprovalRequired,
+            CommandGuard,
+            CommandSafetyViolation,
+        )
         import json
         from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
-        raw_patterns = tools.db.get_setting("host_dangerous_patterns") if getattr(tools, "db", None) else None
+        raw_patterns = db.get_setting("host_dangerous_patterns") if db else None
         dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
         guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
         
-        # If not safe and ask_confirmation mode, trigger approval flow
-        if sec_mode == "ask_confirmation" and not guard.is_safe_command(command):
+        # Match the Hermes boundary: reject blacklist violations before creating
+        # an approval, then use the whitelist only to decide whether approval is
+        # needed.  `is_safe_command()` alone does not enforce the blacklist.
+        try:
+            guard.validate_command(command)
+        except CommandSafetyViolation as exc:
+            _log_trace(
+                "HOST_SECURITY_BLOCK",
+                f"Host command rejected by safety policy: host={host_id} cmd={command!r} error={exc}",
+                agent="HostAgent",
+            )
+            return {
+                "status": "rejected",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+        except CommandApprovalRequired:
+            # This is the normal ask_confirmation branch. The command is not
+            # passed to the connector until the channel reports approval.
+            pass
+
+        is_safe_command = guard.is_safe_command(command)
+        approval_required = sec_mode == "ask_confirmation"
+        approval_token = None
+        approved = False
+        _log_trace(
+            "HOST_SECURITY",
+            f"Host command policy: host={h.get('name') if h else host_id}({host_id}) "
+            f"mode={sec_mode} safe={is_safe_command} approval_required={approval_required}",
+            agent="HostAgent",
+        )
+
+        # Only commands outside the read-only whitelist need approval.
+        if approval_required and not is_safe_command:
             from memoria.connectors.host.approval import global_host_approval_manager
             host_name = h.get("name") if h else host_id
             approval = global_host_approval_manager.create_approval(
@@ -493,7 +552,18 @@ async def _execute_agent_tool_async(
                 })
             # Wait for decision
             approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=300.0)
-            _log_trace("APPROVAL_DEC", f"User decision for approval_id={approval.id}: approved={approved}", agent="HostAgent")
+            if approved:
+                approval_token = global_host_approval_manager.get_authorization_token(
+                    approval.id,
+                    host_id,
+                    command,
+                    session_id,
+                )
+            _log_trace(
+                "APPROVAL_DEC",
+                f"User decision for approval_id={approval.id}: approved={approved} authorized={bool(approval_token)}",
+                agent="HostAgent",
+            )
             if message_id and db:
                 db.update_message_status(
                     message_id=message_id,
@@ -511,13 +581,85 @@ async def _execute_agent_tool_async(
                     "error": f"Command execution rejected by user or timed out: '{command}'",
                     "status": "rejected",
                 }
-        return tools.run_host_command(host_id, command, approved=True)
-            
-        return tools.run_host_command(host_id, command)
+        # Revalidate after approval. This keeps a stale or externally modified
+        # approval from turning into an unchecked execution.
+        try:
+            guard.validate_command(command, approved=bool(approval_token))
+        except CommandSafetyViolation as exc:
+            return {
+                "status": "rejected",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+        if approval_required and not is_safe_command and not approval_token:
+            return {
+                "status": "rejected",
+                "error": "Approval was accepted but no matching execution authorization was issued",
+                "host_id": host_id,
+                "command": command,
+            }
+        return tools.run_host_command(
+            host_id,
+            command,
+            approved=False,
+            approval_token=approval_token,
+            session_id=session_id,
+        )
     else:
         raise ValueError(f"Unknown agent tool: {name}")
 
 def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
+    """Execute tools from a synchronous runner without bypassing host policy.
+
+    Synchronous runners cannot wait for a channel approval event. They must
+    therefore report the pending approval instead of calling the host connector
+    directly. The streaming runner is the approval-capable path.
+    """
+    def sync_host_command(host_id: str, command: str) -> dict:
+        host_tools = getattr(tools, "host", None)
+        db = getattr(host_tools, "db", None) or getattr(tools, "db", None)
+        h = db.get_host(host_id) if db else None
+        host_security_modes = getattr(host_tools, "host_security_modes", None)
+        override_mode = (host_security_modes or {}).get(host_id) if host_security_modes else None
+        sec_mode = override_mode or (h.get("security_mode") if h else "ask_confirmation") or (
+            "read_only" if (h and h.get("safe_mode")) else "ask_confirmation"
+        )
+        from memoria.connectors.host.guard import CommandApprovalRequired, CommandGuard, CommandSafetyViolation
+        import json
+        from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
+
+        raw_patterns = db.get_setting("host_dangerous_patterns") if db else None
+        dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
+        guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
+        try:
+            guard.validate_command(command)
+        except CommandSafetyViolation as exc:
+            _log_trace(
+                "HOST_SECURITY_BLOCK",
+                f"Synchronous host command rejected by safety policy: host={host_id} cmd={command!r} error={exc}",
+                agent="HostAgent",
+            )
+            return {
+                "status": "rejected",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+        except CommandApprovalRequired:
+            _log_trace(
+                "APPROVAL_BLOCKED_SYNC",
+                f"Synchronous host command requires channel approval: host={host_id} cmd={command!r}",
+                agent="HostAgent",
+            )
+            return {
+                "status": "pending_approval",
+                "error": f"Command requires user approval before execution: '{command}'",
+                "host_id": host_id,
+                "command": command,
+            }
+        return tools.run_host_command(host_id, command, approved=False)
+
     if name == "delegate_to_knowledge_agent":
         query = str(args.get("query") or "")
         kb_id = args.get("kb_id")
@@ -527,6 +669,28 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
         instruction = str(args.get("instruction") or "")
         host_id = args.get("host_id")
         command = args.get("command")
+        if command and not host_id:
+            hosts = tools.list_hosts()
+            if len(hosts) == 1:
+                host_id = hosts[0].get("id")
+                _log_trace(
+                    "HOST_TARGET",
+                    f"Bound delegated command to the only available host: host={host_id}",
+                    agent="HostAgent",
+                )
+            else:
+                _log_trace(
+                    "HOST_TARGET",
+                    f"Rejected delegated command without explicit host: available_hosts={len(hosts)}",
+                    agent="HostAgent",
+                )
+                return {
+                    "status": "not_executed",
+                    "error": "A single unambiguous host must be selected before executing a delegated command",
+                    "command": str(command),
+                }
+        if command and host_id:
+            return sync_host_command(str(host_id), str(command))
         return tools.delegate_to_host_agent(instruction=instruction, host_id=host_id, command=command)
     if name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
@@ -543,7 +707,7 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
     elif name == "run_host_command":
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")
-        return tools.run_host_command(host_id, command)
+        return sync_host_command(host_id, command)
     else:
         raise ValueError(f"Unknown agent tool: {name}")
 
@@ -618,7 +782,11 @@ class OpenAIAgentsRunner:
             @function_tool
             def run_host_command(host_id: str, command: str) -> dict:
                 """Run a safe status inspection command on a host."""
-                return tools.run_host_command(host_id, command)
+                return _execute_agent_tool(
+                    "run_host_command",
+                    {"host_id": host_id, "command": command},
+                    tools,
+                )
             agent_tools.append(run_host_command)
 
         client = AsyncOpenAI(base_url=self._base_url, api_key=self._api_key)

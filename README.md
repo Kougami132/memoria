@@ -171,9 +171,10 @@ Memoria 采用 **Agent-as-Tool** 架构，将专业领域的复杂能力封装�
 - `list_hosts`：查询可用主机与服务器节点、网络地址、标签及运行状态。
 - `get_host_info`：获取指定主机的操作系统、负载、内存、磁盘和运行指标详情。
 - `run_host_command`：在指定主机上执行受控指令，内置三级安全策略：
-  - `safe`（只读安全）：如 `uptime`、`df -h`、`free -m`、`docker ps` 等，直接安全执行。
-  - `ask`（需要审批）：如重启服务、修改配置等敏感操作，通过 Web 端与会话流式交互等待用户确认。
-  - `danger`（危险拦截）：如 `rm -rf /`、格式化硬盘等高危命令，系统级直接拦截熔断。
+  - `read_only`（只读安全）：仅允许白名单中的查询命令，如 `uptime`、`df -h`、`free -m`、`docker ps`，直接执行。
+  - `ask_confirmation`（需要审批）：白名单外的命令需通过 Web 或 QQ 会话确认后执行。
+  - `unrestricted`（自由执行）：非危险黑名单命令直接执行。
+  - 危险黑名单命令（如 `rm -rf /`、格式化硬盘）在所有模式下都会被系统拦截。
 
 ### 链路可观测性（Tracing & Logging）
 

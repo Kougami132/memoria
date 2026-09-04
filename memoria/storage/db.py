@@ -560,7 +560,7 @@ class DB:
             "description": row.description or "",
             "tags": tags,
             "safe_mode": bool(row.safe_mode),
-            "security_mode": getattr(row, "security_mode", None) or ("read_only" if row.safe_mode else "unrestricted"),
+            "security_mode": getattr(row, "security_mode", None) or ("read_only" if row.safe_mode else "ask_confirmation"),
             "os_info": row.os_info or "",
             "status": row.status or "unknown",
             "created_at": row.created_at,

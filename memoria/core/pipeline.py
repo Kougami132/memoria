@@ -175,20 +175,40 @@ class Pipeline:
             raw_patterns = self.db.get_setting("host_dangerous_patterns")
             dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
 
+            # This legacy synchronous path has no channel approval loop. An
+            # interactive command must stop here instead of reaching a
+            # connector without a Hermes-style approval grant.
+            from memoria.connectors.host.guard import (
+                CommandApprovalRequired,
+                CommandGuard,
+                CommandSafetyViolation,
+            )
+            sec_mode = h.get("security_mode") or (
+                "read_only" if h.get("safe_mode") else "ask_confirmation"
+            )
+            guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
+            try:
+                guard.validate_command(cmd)
+            except CommandSafetyViolation as exc:
+                return {"status": "rejected", "error": str(exc), "host_id": host_id, "command": cmd}
+            except CommandApprovalRequired as exc:
+                return {"status": "pending_approval", "error": str(exc), "host_id": host_id, "command": cmd}
+
             if registry:
                 conn = registry.get(ResourceType.HOST, host_id)
                 if conn:
                     try:
                         if hasattr(conn, "guard"):
                             conn.guard.dangerous_patterns = dangerous_patterns
-                        return conn.execute_command(cmd).model_dump()
+                            conn.guard.validate_command(cmd)
+                        return conn.execute_command(cmd, approved=False).model_dump()
                     except Exception as e:
                         return {"error": f"执行主机命令失败: {e}"}
             try:
                 from memoria.connectors.host.connector import HostConnector
                 from memoria.connectors.host.models import HostConfig
                 conn = HostConnector(HostConfig(**h), dangerous_patterns=dangerous_patterns)
-                return conn.execute_command(cmd).model_dump()
+                return conn.execute_command(cmd, approved=False).model_dump()
             except Exception as e:
                 return {"error": f"执行主机命令异常: {e}"}
         else:

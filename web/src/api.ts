@@ -348,7 +348,6 @@ export interface QQSettings {
   enabled: string
   app_id: string
   client_secret: string
-  gateway_intents: string
   c2c_enabled: string
   group_enabled: string
   group_require_mention: string
@@ -365,7 +364,6 @@ export interface QQSettingsUpdate {
   enabled?: boolean
   app_id?: string
   client_secret?: string
-  gateway_intents?: number
   c2c_enabled?: boolean
   group_enabled?: boolean
   group_require_mention?: boolean

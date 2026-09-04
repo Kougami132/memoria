@@ -159,8 +159,21 @@ class AgentTools:
     def get_host_info(self, host_id: str) -> dict:
         return self.host.get_host_info(host_id)
 
-    def run_host_command(self, host_id: str, command: str, approved: bool = False) -> dict:
-        return self.host.run_host_command(host_id, command, approved=approved)
+    def run_host_command(
+        self,
+        host_id: str,
+        command: str,
+        approved: bool = False,
+        approval_token: str | None = None,
+        session_id: str | None = None,
+    ) -> dict:
+        return self.host.run_host_command(
+            host_id,
+            command,
+            approved=False,
+            approval_token=approval_token,
+            session_id=session_id,
+        )
 
     def delegate_to_knowledge_agent(self, query: str, kb_id: str | None = None, top_k: int = 5) -> dict:
         """Subagent action: Retrieve information across knowledge bases and return summarized findings."""
@@ -198,9 +211,12 @@ class AgentTools:
             return self.get_host_info(host_id=host_id)
         hosts = self.list_hosts()
         return {
-            "status": "success",
+            # Discovery is not execution.  Keep this response fail-closed so
+            # the model cannot mistake a host listing for a completed command.
+            "status": "not_executed",
             "agent": "HostAgent",
             "hosts_available": len(hosts),
             "hosts": hosts,
             "instruction": instruction,
+            "error": "No structured command was supplied; no host command was executed",
         }

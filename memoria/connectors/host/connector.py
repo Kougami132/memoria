@@ -143,14 +143,33 @@ class HostConnector(BaseConnector):
             status="online",
         )
 
-    def execute_command(self, command: str, timeout: int = 15, approved: bool = False) -> CommandResult:
+    def execute_command(
+        self,
+        command: str,
+        timeout: int = 15,
+        approved: bool = False,
+        approval_token: str | None = None,
+        session_id: str | None = None,
+    ) -> CommandResult:
         """Execute command on target host with security guardrails and connection pooling."""
         start_time = time.time()
         cmd = command.strip()
 
         # Step 1: Security validation
         try:
-            self.guard.validate_command(cmd, approved=approved)
+            # The legacy ``approved`` flag is intentionally ignored. Following
+            # Hermes' operation-specific approval model, interactive commands
+            # require a manager-issued, exact-match, one-shot grant.
+            authorized = False
+            if self.guard.security_mode == "ask_confirmation" and not self.guard.is_safe_command(cmd):
+                from memoria.connectors.host.approval import global_host_approval_manager
+
+                authorized = global_host_approval_manager.consume_authorization(
+                    approval_token or "", self.resource_id, cmd, session_id
+                )
+                if not authorized:
+                    raise CommandSafetyViolation(f"Command '{cmd}' requires a valid approved authorization")
+            self.guard.validate_command(cmd, approved=authorized)
         except Exception as e:
             return CommandResult(
                 command=cmd,

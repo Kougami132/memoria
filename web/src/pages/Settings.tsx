@@ -98,7 +98,6 @@ export default function Settings() {
       const lines = (value: unknown) => String(value || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean)
       const payload: QQSettingsUpdate = {
         enabled: Boolean(qqForm.enabled), app_id: String(qqForm.app_id || ''),
-        gateway_intents: Number(qqForm.gateway_intents || 0),
         c2c_enabled: Boolean(qqForm.c2c_enabled), group_enabled: Boolean(qqForm.group_enabled),
         group_require_mention: Boolean(qqForm.group_require_mention),
         user_allowlist: lines(qqForm.user_allowlist), group_allowlist: lines(qqForm.group_allowlist),
@@ -396,8 +395,7 @@ export default function Settings() {
             <div className="space-y-1.5"><Label>用户白名单 OpenID</Label><Textarea rows={4} value={String(qqForm.user_allowlist || '')} onChange={setQQ('user_allowlist')} placeholder="每行一个 OpenID" /></div>
             <div className="space-y-1.5"><Label>群白名单 OpenID</Label><Textarea rows={4} value={String(qqForm.group_allowlist || '')} onChange={setQQ('group_allowlist')} placeholder="每行一个 OpenID" /></div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="space-y-1.5"><Label>Gateway Intents</Label><Input type="number" value={String(qqForm.gateway_intents || '0')} onChange={setQQ('gateway_intents')} /></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5"><Label>队列大小</Label><Input type="number" min="1" value={String(qqForm.max_queue_size || '32')} onChange={setQQ('max_queue_size')} /></div>
             <div className="space-y-1.5"><Label>超时（秒）</Label><Input type="number" min="1" value={String(qqForm.run_timeout_seconds || '300')} onChange={setQQ('run_timeout_seconds')} /></div>
             <div className="flex items-end"><Button onClick={() => updateQQ.mutate()} disabled={updateQQ.isPending} className="w-full gap-2">{qqSaved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}{qqSaved ? '已保存' : '保存 QQ 配置'}</Button></div>

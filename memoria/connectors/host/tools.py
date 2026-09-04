@@ -102,8 +102,20 @@ class AgentHostTools:
             "status": h.get("status") or "online",
         }
 
-    def run_host_command(self, host_id: str, command: str, approved: bool = False) -> dict[str, Any]:
-        """Execute command on an allowed host."""
+    def run_host_command(
+        self,
+        host_id: str,
+        command: str,
+        approved: bool = False,
+        approval_token: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute a command after enforcing the current host policy.
+
+        The engine normally handles the interactive approval flow.  This second
+        check is intentional: direct callers and cached registry connectors must
+        not turn this tool into an approval bypass.
+        """
         self._ensure_allowed(host_id)
         h = self.db.get_host(host_id)
         assert h is not None
@@ -114,22 +126,72 @@ class AgentHostTools:
         raw_patterns = self.db.get_setting("host_dangerous_patterns")
         dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
 
+        sec_mode = (
+            (self.host_security_modes or {}).get(host_id)
+            or h.get("security_mode")
+            or ("read_only" if h.get("safe_mode") else "ask_confirmation")
+        )
+        from memoria.connectors.host.guard import (
+            CommandApprovalRequired,
+            CommandGuard,
+            CommandSafetyViolation,
+        )
+        guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
+        authorized = guard.is_safe_command(command)
+        if not authorized and approval_token:
+            from memoria.connectors.host.approval import global_host_approval_manager
+            authorized = global_host_approval_manager.validate_authorization(
+                approval_token, host_id, command.strip(), session_id
+            )
+        try:
+            # Do not treat an arbitrary/non-empty token as approval. The
+            # connector consumes and verifies the manager-issued grant against
+            # host, exact command, and session. Before that point, only the
+            # whitelist may pass directly.
+            guard.validate_command(command, approved=authorized)
+        except CommandSafetyViolation as exc:
+            return {
+                "status": "rejected",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+        except CommandApprovalRequired as exc:
+            if approval_token:
+                return {
+                    "status": "rejected",
+                    "error": "Invalid or mismatched approval authorization",
+                    "host_id": host_id,
+                    "command": command,
+                }
+            return {
+                "status": "pending_approval",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+
         if self.registry:
             from memoria.connectors.base import ResourceType
             conn = self.registry.get(ResourceType.HOST, host_id)
             if conn:
                 if hasattr(conn, "guard"):
                     conn.guard.dangerous_patterns = dangerous_patterns
-                res = conn.execute_command(command, approved=approved)  # type: ignore[attr-defined]
+                    conn.guard.security_mode = sec_mode
+                    conn.guard.safe_mode = sec_mode == "read_only"
+                res = conn.execute_command(  # type: ignore[attr-defined]
+                    command, approved=False, approval_token=approval_token, session_id=session_id
+                )
                 return res.model_dump()
 
         # Apply bot-level security mode override if configured
-        sec_mode = (self.host_security_modes or {}).get(host_id) or h.get("security_mode") or ("read_only" if h.get("safe_mode") else "ask_confirmation")
         host_dict = dict(h)
         host_dict["security_mode"] = sec_mode
 
         from memoria.connectors.host.connector import HostConnector
         from memoria.connectors.host.models import HostConfig
         conn = HostConnector(HostConfig(**host_dict), dangerous_patterns=dangerous_patterns)
-        res = conn.execute_command(command, approved=approved)
+        res = conn.execute_command(
+            command, approved=False, approval_token=approval_token, session_id=session_id
+        )
         return res.model_dump()
