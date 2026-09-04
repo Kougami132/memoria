@@ -169,6 +169,27 @@ class QQBotAdapter:
                 "(check enabled switches and allowlists)",
                 message.context_type, message.user_openid, message.group_openid,
             )
+            if message.context_type == "c2c" and policy.c2c_enabled and self._gateway:
+                notice = (
+                    "您暂未获得该 Bot 的访问权限。\n\n"
+                    f"您的身份标识 (OpenID) 为：\n{message.user_openid}\n\n"
+                    "请将此标识提供给管理员添加至白名单后即可正常对话。"
+                )
+                try:
+                    await self.send_message(message, notice)
+                except Exception:
+                    logger.warning("Failed to send unauthorized notice to user=%s", message.user_openid, exc_info=True)
+            elif message.context_type == "group" and policy.group_enabled and self._gateway:
+                if not policy.group_require_mention or self._has_bot_mention(event):
+                    notice = (
+                        "本群暂未获得该 Bot 的访问权限。\n\n"
+                        f"群标识 (Group OpenID) 为：\n{message.group_openid}\n\n"
+                        "请将此标识提供给管理员添加至群白名单后即可正常使用。"
+                    )
+                    try:
+                        await self.send_message(message, notice)
+                    except Exception:
+                        logger.warning("Failed to send unauthorized notice to group=%s", message.group_openid, exc_info=True)
             return
         if message.context_type == "group" and policy.group_require_mention and not self._has_bot_mention(event):
             logger.warning("Ignoring QQ group message: bot mention not detected group=%s", message.group_openid)
@@ -442,3 +463,4 @@ class QQBotAdapter:
         except OSError:
             return "<unavailable>"
         return body[:1000] or "<empty>"
+

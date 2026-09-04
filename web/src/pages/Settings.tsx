@@ -364,41 +364,122 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
-      <Card className="rounded-2xl border-border bg-card shadow-xs">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2">
-            <Radio className="w-4 h-4 text-foreground" />
-            <CardTitle className="text-base font-semibold">QQ Bot 官方通道</CardTitle>
+     <Card className="rounded-2xl border-border bg-card shadow-xs">
+       <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Radio className="w-4 h-4 text-foreground" />
+              <CardTitle className="text-base font-semibold">QQ Bot 官方通道</CardTitle>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-mono px-2.5 py-1 rounded-full bg-secondary/60 border border-border/60" aria-live="polite">
+              <span className={`h-2 w-2 rounded-full ${qqStatusColor[status] || 'bg-muted-foreground'}`} aria-hidden="true" />
+              <span className="text-muted-foreground">{qqStatusLabel[status] || status}</span>
+            </div>
           </div>
           <CardDescription>通过 QQ 官方 Bot API 接入系统 Agent。群聊会话按群共享，群审批默认关闭。</CardDescription>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground" aria-live="polite">
-            <span className={`h-2 w-2 rounded-full ${qqStatusColor[status] || 'bg-muted-foreground'}`} aria-hidden="true" />
-            <span>连接状态：{qqStatusLabel[status] || status}</span>
-            {status === 'error' && qqStatus?.last_error && (
-              <span className="basis-full break-all text-destructive">{qqStatus.last_error}</span>
-            )}
-          </div>
+          {status === 'error' && qqStatus?.last_error && (
+            <div className="mt-2 text-xs text-destructive break-all bg-destructive/10 p-2.5 rounded-xl border border-destructive/20">
+              {qqStatus.last_error}
+            </div>
+          )}
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5"><Label>App ID</Label><Input value={String(qqForm.app_id || '')} onChange={setQQ('app_id')} /></div>
-            <div className="space-y-1.5"><Label>Client Secret</Label><Input type="password" value={String(qqForm.client_secret || '')} onChange={setQQ('client_secret')} placeholder="留空保持当前密钥" /></div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">App ID</Label>
+              <Input
+                value={String(qqForm.app_id || '')}
+                onChange={setQQ('app_id')}
+                placeholder="在 QQ 开放平台申请的机器人 AppID"
+                className="rounded-xl border-border bg-background font-mono text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client Secret</Label>
+              <Input
+                type="password"
+                value={String(qqForm.client_secret || '')}
+                onChange={setQQ('client_secret')}
+                placeholder="留空保持当前密钥"
+                className="rounded-xl border-border bg-background font-mono text-sm"
+              />
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {([
-              ['enabled', '启用 QQ 通道'], ['c2c_enabled', '启用私聊'], ['group_enabled', '启用群聊'],
-              ['group_require_mention', '群聊要求 @ 机器人'], ['allow_unlisted_users', '允许未列入白名单的用户'],
-              ['allow_unlisted_groups', '允许未列入白名单的群'], ['group_approval_enabled', '启用群聊审批'],
-            ] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm"><Checkbox checked={Boolean(qqForm[key])} onCheckedChange={toggleQQ(key)} />{label}</label>)}
+
+          <div className="space-y-3 pt-1 border-t border-border">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">通道与权限策略</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {([
+                ['enabled', '启用 QQ 通道', '全局主开关，开启后连接官方网关'],
+                ['c2c_enabled', '启用私聊 (C2C)', '允许用户向机器人发起单聊对话'],
+                ['group_enabled', '启用群聊 (Group)', '允许机器人在加入的 QQ 群中响应'],
+                ['group_require_mention', '群聊要求 @ 机器人', '开启时只有被 @ 时才响应群消息'],
+                ['allow_unlisted_users', '允许未列入白名单的用户', '开启后任意用户均可私聊；关闭后未授权用户将收到自身 OpenID 提示'],
+                ['allow_unlisted_groups', '允许未列入白名单的群', '开启后任意群均可响应；关闭后未授权群将收到群 OpenID 提示'],
+                ['group_approval_enabled', '启用群聊操作审批', '允许群成员直接交互审批敏感操作卡片'],
+              ] as const).map(([key, label, desc]) => (
+                <label
+                  key={key}
+                  className="flex items-start gap-2.5 p-3 rounded-xl border border-border/70 bg-accent/20 hover:bg-accent/40 cursor-pointer transition-colors"
+                >
+                  <Checkbox
+                    checked={Boolean(qqForm[key])}
+                    onCheckedChange={toggleQQ(key)}
+                    className="mt-0.5"
+                  />
+                  <div className="space-y-0.5 select-none">
+                    <span className="text-xs font-medium text-foreground block">{label}</span>
+                    <span className="text-[11px] text-muted-foreground block leading-relaxed">{desc}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5"><Label>用户白名单 OpenID</Label><Textarea rows={4} value={String(qqForm.user_allowlist || '')} onChange={setQQ('user_allowlist')} placeholder="每行一个 OpenID" /></div>
-            <div className="space-y-1.5"><Label>群白名单 OpenID</Label><Textarea rows={4} value={String(qqForm.group_allowlist || '')} onChange={setQQ('group_allowlist')} placeholder="每行一个 OpenID" /></div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">用户白名单 (User OpenID)</Label>
+              <Textarea
+                rows={4}
+                value={String(qqForm.user_allowlist || '')}
+                onChange={setQQ('user_allowlist')}
+                placeholder="每行一个 32 位 User OpenID&#10;（QQ 官方已脱敏，不可填写纯数字 QQ 号）"
+                className="rounded-xl border-border bg-background font-mono text-xs leading-relaxed"
+              />
+              <p className="text-[11px] text-muted-foreground leading-normal">
+                需关闭「允许未列入白名单的用户」生效。未授权用户私聊时，机器人会自动回复其 OpenID 以便复制添加。
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">群白名单 (Group OpenID)</Label>
+              <Textarea
+                rows={4}
+                value={String(qqForm.group_allowlist || '')}
+                onChange={setQQ('group_allowlist')}
+                placeholder="每行一个 32 位 Group OpenID&#10;（QQ 官方已脱敏，不可填写纯数字群号）"
+                className="rounded-xl border-border bg-background font-mono text-xs leading-relaxed"
+              />
+              <p className="text-[11px] text-muted-foreground leading-normal">
+                需关闭「允许未列入白名单的群」生效。未授权群内 @ 机器人时，机器人会自动回复该群 OpenID。
+              </p>
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1.5"><Label>队列大小</Label><Input type="number" min="1" value={String(qqForm.max_queue_size || '32')} onChange={setQQ('max_queue_size')} /></div>
-            <div className="space-y-1.5"><Label>超时（秒）</Label><Input type="number" min="1" value={String(qqForm.run_timeout_seconds || '300')} onChange={setQQ('run_timeout_seconds')} /></div>
-            <div className="flex items-end"><Button onClick={() => updateQQ.mutate()} disabled={updateQQ.isPending} className="w-full gap-2">{qqSaved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}{qqSaved ? '已保存' : '保存 QQ 配置'}</Button></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">并发队列大小</Label>
+              <Input type="number" min="1" value={String(qqForm.max_queue_size || '32')} onChange={setQQ('max_queue_size')} className="rounded-xl border-border bg-background font-mono text-sm" />
+              <p className="text-[11px] text-muted-foreground">单个会话通道等待处理的最大消息堆叠数</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">执行超时（秒）</Label>
+              <Input type="number" min="1" value={String(qqForm.run_timeout_seconds || '300')} onChange={setQQ('run_timeout_seconds')} className="rounded-xl border-border bg-background font-mono text-sm" />
+              <p className="text-[11px] text-muted-foreground">单条消息调用 Agent/RAG 回复的最大等待时长</p>
+            </div>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button onClick={() => updateQQ.mutate()} disabled={updateQQ.isPending} className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs px-6">
+              {qqSaved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+              {qqSaved ? '已保存 QQ 配置' : '保存 QQ 配置'}
+            </Button>
           </div>
         </CardContent>
       </Card>
