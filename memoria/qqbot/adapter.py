@@ -133,10 +133,26 @@ class QQBotAdapter:
 
     async def handle_event(self, event: dict) -> None:
         event_type = event.get("t")
-        if event.get("t") == "READY":
+        if event.get("t") in {"READY", "RESUMED"}:
             self.status = "connected"
             return
         if event.get("t") == "INTERACTION_CREATE":
+            # Gateway wraps the interaction payload in an event envelope. The
+            # ACK endpoint expects the interaction payload id from d.id, not
+            # the envelope id (which may look like INTERACTION_CREATE:<uuid>).
+            interaction_id = str((event.get("d") or {}).get("id") or "")
+            if interaction_id and self._gateway:
+                try:
+                    await self._gateway.acknowledge_interaction(interaction_id)
+                except Exception:
+                    # Hermes continues the callback even when the platform ACK fails.
+                    logger.warning(
+                        "QQ interaction ACK failed; continuing interaction handling: id=%s",
+                        interaction_id,
+                        exc_info=True,
+                    )
+            elif not interaction_id:
+                logger.warning("QQ interaction has no id; skipping ACK")
             await self._handle_interaction(event)
             return
         message = parse_message(event)
@@ -182,7 +198,14 @@ class QQBotAdapter:
     async def _handle_interaction(self, event: dict) -> None:
         data = event.get("d") or {}
         interaction_data = data.get("data") or {}
-        custom_id = str(interaction_data.get("custom_id") or interaction_data.get("customId") or "")
+        resolved = interaction_data.get("resolved") or {}
+        custom_id = str(
+            resolved.get("button_data")
+            or resolved.get("button_id")
+            or interaction_data.get("custom_id")
+            or interaction_data.get("customId")
+            or ""
+        )
         parts = custom_id.split(":")
         if len(parts) != 3 or parts[0] != "approve" or parts[2] not in {"allow-once", "deny"}:
             return
@@ -205,15 +228,21 @@ class QQBotAdapter:
         if approval:
             self.db.update_approval_message_status(approval_id, approval.status)
             self._approval_contexts.pop(approval_id, None)
-            await self.send_target(context_type, context_id, "已处理审批：" + ("允许执行" if approved else "拒绝执行"))
+            # The interaction ACK is the complete QQ callback response.  Hermes
+            # does not send a second message from the interaction handler; the
+            # waiting agent produces the normal result message after resuming.
 
     @staticmethod
     def _interaction_openid(data: dict) -> str:
+        resolved = ((data.get("data") or {}).get("resolved") or {})
         candidates = [
+            data.get("user_openid"),
+            data.get("group_member_openid"),
             (data.get("user") or {}).get("openid"),
             (data.get("user") or {}).get("user_openid"),
             (data.get("author") or {}).get("user_openid"),
             (data.get("member") or {}).get("member_openid"),
+            resolved.get("user_id"),
         ]
         return next((str(value) for value in candidates if value), "")
 
@@ -221,7 +250,11 @@ class QQBotAdapter:
         while True:
             item = await queue.get()
             try:
-                await asyncio.wait_for(self._process(item.message), timeout=self._policy().run_timeout_seconds)
+                # Approval waits are intentionally longer than the normal
+                # message processing budget.  Hermes keeps the channel task
+                # alive while the approval session is resolved; cancelling
+                # this coroutine here would orphan the approved command.
+                await self._process(item.message)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -268,13 +301,50 @@ class QQBotAdapter:
         approval_id = str(event.get("approval_id") or "")
         command = str(event.get("command") or "")
         content = f"需要审批才能执行命令：\n{command}\n审批编号：{approval_id}"
-        keyboard = {
-            "content": [
-                {"id": f"approve:{approval_id}:allow-once", "render_data": {"label": "允许一次", "visited_label": "已处理", "style": 0}},
-                {"id": f"approve:{approval_id}:deny", "render_data": {"label": "拒绝", "visited_label": "已处理", "style": 1}},
-            ]
+        keyboard = self._approval_keyboard(approval_id)
+        try:
+            await self.send_target(message.context_type, message.context_id, content, message.message_id, keyboard=keyboard)
+        except Exception:
+            logger.exception(
+                "QQ approval keyboard send failed; trying text fallback: approval_id=%s",
+                approval_id,
+            )
+            fallback = content + "\n按钮发送失败，请在 Web 管理端处理审批。"
+            try:
+                await self.send_target(message.context_type, message.context_id, fallback, message.message_id)
+            except Exception:
+                logger.exception("QQ approval text fallback failed: approval_id=%s", approval_id)
+                raise
+
+    @staticmethod
+    def _approval_keyboard(approval_id: str) -> dict:
+        def button(button_id: str, label: str, visited_label: str, action: str, style: int) -> dict:
+            return {
+                "id": button_id,
+                "render_data": {
+                    "label": label,
+                    "visited_label": visited_label,
+                    "style": style,
+                },
+                "action": {
+                    "type": 1,
+                    "data": f"approve:{approval_id}:{action}",
+                    "permission": {"type": 2},
+                    "click_limit": 1,
+                },
+                "group_id": "approval",
+            }
+
+        return {
+            "content": {
+                "rows": [{
+                    "buttons": [
+                        button("allow", "允许一次", "已允许", "allow-once", 1),
+                        button("deny", "拒绝", "已拒绝", "deny", 0),
+                    ]
+                }]
+            }
         }
-        await self.send_target(message.context_type, message.context_id, content, message.message_id, keyboard=keyboard)
 
     async def send_message(self, message: QQInboundMessage, content: str) -> None:
         await self.send_target(message.context_type, message.context_id, content, message.message_id)

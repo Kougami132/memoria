@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import urllib.error
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -207,6 +208,171 @@ def test_adapter_msg_seq_is_a_qq_compatible_integer():
     assert 0 <= sequence <= 65535
 
 
+def test_approval_keyboard_matches_qq_inline_keyboard_payload():
+    keyboard = QQBotAdapter._approval_keyboard("appr_123")
+    buttons = keyboard["content"]["rows"][0]["buttons"]
+
+    assert [button["id"] for button in buttons] == ["allow", "deny"]
+    assert buttons[0]["action"] == {
+        "type": 1,
+        "data": "approve:appr_123:allow-once",
+        "permission": {"type": 2},
+        "click_limit": 1,
+    }
+    assert buttons[1]["action"]["data"] == "approve:appr_123:deny"
+    assert all(button["group_id"] == "approval" for button in buttons)
+
+
+@pytest.mark.asyncio
+async def test_send_approval_falls_back_without_keyboard(tmp_path):
+    db = DB(str(tmp_path / "qq.db"))
+    adapter = QQBotAdapter(db, lambda: None)
+    message = parse_message({
+        "t": "C2C_MESSAGE_CREATE",
+        "d": {"id": "message-id", "author": {"user_openid": "user"}, "content": "run"},
+    })
+    assert message is not None
+    sent = []
+
+    async def fake_send_target(context_type, context_id, content, reply_to=None, keyboard=None):
+        sent.append((context_type, context_id, content, reply_to, keyboard))
+        if keyboard is not None:
+            raise urllib.error.HTTPError(
+                "https://api.sgroup.qq.com/messages", 400, "bad request", {},
+                io.BytesIO(b'{"code":40011000,"message":"request data invalid"}'),
+            )
+
+    adapter.send_target = fake_send_target
+
+    await adapter.send_approval(message, {"approval_id": "appr_123", "command": "hostname"})
+
+    assert len(sent) == 2
+    assert sent[0][4]["content"]["rows"]
+    assert sent[1][4] is None
+    assert "按钮发送失败" in sent[1][2]
+
+
+@pytest.mark.asyncio
+async def test_interaction_accepts_resolved_button_data_and_user_id(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+    adapter = QQBotAdapter(db, lambda: None)
+    acked = []
+    class Gateway:
+        async def acknowledge_interaction(self, interaction_id, code=0):
+            acked.append((interaction_id, code))
+
+    adapter._gateway = Gateway()
+    adapter._approval_contexts["appr_123"] = ("c2c", "user", "user")
+    sent = []
+
+    class Approval:
+        status = "approved"
+
+    class Manager:
+        def respond(self, approval_id, approved):
+            assert approval_id == "appr_123"
+            assert approved is True
+            return Approval()
+
+    monkeypatch.setattr("memoria.connectors.host.approval.global_host_approval_manager", Manager())
+
+    async def fake_send_target(*args, **kwargs):
+        sent.append((args, kwargs))
+
+    adapter.send_target = fake_send_target
+    await adapter.handle_event({
+        "t": "INTERACTION_CREATE",
+        "id": "INTERACTION_CREATE:envelope-123",
+        "d": {
+            "id": "interaction-123",
+            "data": {"resolved": {"button_data": "approve:appr_123:allow-once", "user_id": "user"}},
+        },
+    })
+
+    assert acked == [("interaction-123", 0)]
+    assert sent == []
+    assert "appr_123" not in adapter._approval_contexts
+
+
+@pytest.mark.asyncio
+async def test_interaction_ack_happens_before_approval_response(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+    adapter = QQBotAdapter(db, lambda: None)
+    adapter._approval_contexts["appr_123"] = ("c2c", "user", "user")
+    order = []
+
+    class Gateway:
+        async def acknowledge_interaction(self, interaction_id, code=0):
+            order.append(("ack", interaction_id))
+
+    class Approval:
+        status = "approved"
+
+    class Manager:
+        def respond(self, approval_id, approved):
+            order.append(("respond", approval_id))
+            return Approval()
+
+    adapter._gateway = Gateway()
+    adapter.send_target = lambda *args, **kwargs: asyncio.sleep(0)
+    monkeypatch.setattr("memoria.connectors.host.approval.global_host_approval_manager", Manager())
+
+    await adapter.handle_event({
+        "t": "INTERACTION_CREATE",
+        "id": "INTERACTION_CREATE:envelope-123",
+        "d": {
+            "id": "interaction-123",
+            "data": {"resolved": {"button_data": "approve:appr_123:allow-once", "user_id": "user"}},
+        },
+    })
+
+    assert order == [("ack", "interaction-123"), ("respond", "appr_123")]
+
+
+@pytest.mark.asyncio
+async def test_interaction_ack_failure_does_not_block_business_handling(tmp_path, monkeypatch):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+    adapter = QQBotAdapter(db, lambda: None)
+    adapter._approval_contexts["appr_123"] = ("c2c", "user", "user")
+    handled = []
+
+    class Gateway:
+        async def acknowledge_interaction(self, interaction_id, code=0):
+            raise RuntimeError("ack failed")
+
+    class Approval:
+        status = "approved"
+
+    class Manager:
+        def respond(self, approval_id, approved):
+            handled.append(approval_id)
+            return Approval()
+
+    adapter._gateway = Gateway()
+    adapter.send_target = lambda *args, **kwargs: asyncio.sleep(0)
+    monkeypatch.setattr("memoria.connectors.host.approval.global_host_approval_manager", Manager())
+
+    await adapter.handle_event({
+        "t": "INTERACTION_CREATE",
+        "id": "INTERACTION_CREATE:envelope-123",
+        "d": {
+            "id": "interaction-123",
+            "data": {"resolved": {"button_data": "approve:appr_123:allow-once", "user_id": "user"}},
+        },
+    })
+
+    assert handled == ["appr_123"]
+
+
 def test_gateway_token_invalidation():
     gateway = QQGateway("app", "secret", 0, lambda event: None)
     gateway._token = "token"
@@ -233,6 +399,69 @@ def test_gateway_http_error_preserves_retry_after():
     )
     wrapped = QQGatewayAPIError("rate limited", QQGateway._retry_after(error))
     assert wrapped.retry_after == 12.5
+
+
+@pytest.mark.asyncio
+async def test_gateway_acknowledges_interaction_with_qq_http_api(monkeypatch):
+    gateway = QQGateway("app", "secret", 0, lambda event: None)
+    gateway._token = "token"
+    gateway._token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    requests = []
+
+    class Response:
+        status_code = 200
+        text = ""
+        headers = {}
+
+    class Client:
+        async def put(self, url, **kwargs):
+            requests.append((url, kwargs))
+            return Response()
+
+        async def aclose(self):
+            return None
+
+    client = Client()
+    monkeypatch.setattr(gateway, "_get_http_client", lambda: _completed(client))
+
+    await gateway.acknowledge_interaction("interaction-123")
+
+    url, kwargs = requests[0]
+    assert url == "https://api.sgroup.qq.com/interactions/interaction-123"
+    assert kwargs["headers"]["Content-Type"] == "application/json"
+    assert kwargs["headers"]["Authorization"] == "QQBot token"
+    assert kwargs["headers"]["User-Agent"] == "QQBot (Memoria, 1.0)"
+    assert kwargs["json"] == {"code": 0}
+    assert kwargs["timeout"] == 15.0
+
+
+async def _completed(value):
+    return value
+
+
+@pytest.mark.asyncio
+async def test_gateway_fetch_token_is_shared_by_concurrent_callers(monkeypatch):
+    gateway = QQGateway("app", "secret", 0, lambda event: None)
+    calls = 0
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"access_token":"token","expires_in":7200}'
+
+    def fake_urlopen(request, timeout):
+        nonlocal calls
+        calls += 1
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert await asyncio.gather(gateway.fetch_token(), gateway.fetch_token()) == ["token", "token"]
+    assert calls == 1
 
 
 def test_gateway_reconnect_delay_only_uses_numeric_payload():
@@ -314,6 +543,45 @@ async def test_gateway_eof_requests_reconnect_backoff(monkeypatch):
     )
 
     assert await gateway._run_connection("token", "wss://gateway.example") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_gateway_resume_marks_session_ready(monkeypatch):
+    gateway = QQGateway("app", "secret", 0, lambda event: None)
+    gateway._session_id = "session-1"
+    received = []
+
+    async def on_event(event):
+        received.append(event.get("t"))
+
+    gateway.on_event = on_event
+
+    class ResumedWebSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def recv(self):
+            if not hasattr(self, "sent_hello"):
+                self.sent_hello = True
+                return '{"op": 10, "d": {"heartbeat_interval": 45000}}'
+            if not hasattr(self, "sent_resumed"):
+                self.sent_resumed = True
+                return '{"op": 0, "s": 8, "t": "RESUMED", "d": {}}'
+            return '{"op": 7, "d": 0}'
+
+        async def send(self, message):
+            return None
+
+    monkeypatch.setattr(
+        "memoria.qqbot.gateway.websockets.connect",
+        lambda *args, **kwargs: ResumedWebSocket(),
+    )
+
+    assert await gateway._run_connection("token", "wss://gateway.example") == 0.0
+    assert received == ["RESUMED"]
 
 
 @pytest.mark.asyncio
