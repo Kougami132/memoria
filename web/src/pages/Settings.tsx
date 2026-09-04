@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,6 +10,8 @@ import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquar
 import * as api from '@/api'
 import type { QQSettingsUpdate, SettingsUpdate } from '@/api'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
+import { TagInput } from '@/components/ui/tag-input'
 
 type TestState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
 type FetchState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
@@ -27,12 +29,12 @@ export default function Settings() {
   const [showKey, setShowKey] = useState(false)
   const [showExternalToken, setShowExternalToken] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' })
   const [embedTest, setEmbedTest] = useState<TestState>({ status: 'idle' })
   const [chatTest, setChatTest] = useState<TestState>({ status: 'idle' })
-  const [qqForm, setQQForm] = useState<Partial<Record<string, string | boolean>>>({})
-  const [qqSaved, setQQSaved] = useState(false)
+  const [qqForm, setQQForm] = useState<Partial<Record<string, string | boolean | string[]>>>({})
 
   useEffect(() => {
     if (settings) {
@@ -58,14 +60,15 @@ export default function Settings() {
         allow_unlisted_users: qqSettings.allow_unlisted_users === 'true',
         allow_unlisted_groups: qqSettings.allow_unlisted_groups === 'true',
         group_approval_enabled: qqSettings.group_approval_enabled === 'true',
-        user_allowlist: JSON.parse(qqSettings.user_allowlist || '[]').join('\n'),
-        group_allowlist: JSON.parse(qqSettings.group_allowlist || '[]').join('\n'),
+        user_allowlist: JSON.parse(qqSettings.user_allowlist || '[]'),
+        group_allowlist: JSON.parse(qqSettings.group_allowlist || '[]'),
       })
     }
   }, [qqSettings])
 
-  const update = useMutation({
-    mutationFn: () => {
+  const handleSaveAll = async () => {
+    setIsSaving(true)
+    try {
       const payload: SettingsUpdate = {
         openai_base_url: form.openai_base_url,
         embedding_model: form.embedding_model,
@@ -83,41 +86,44 @@ export default function Settings() {
       if (form.external_api_token !== settings?.external_api_token) {
         payload.external_api_token = form.external_api_token
       }
-      return api.updateSettings(payload)
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings'] })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
-    },
-    onError: () => alert('保存失败，请重试'),
-  })
 
-  const updateQQ = useMutation({
-    mutationFn: () => {
-      const lines = (value: unknown) => String(value || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean)
-      const payload: QQSettingsUpdate = {
-        enabled: Boolean(qqForm.enabled), app_id: String(qqForm.app_id || ''),
-        c2c_enabled: Boolean(qqForm.c2c_enabled), group_enabled: Boolean(qqForm.group_enabled),
-        group_require_mention: Boolean(qqForm.group_require_mention),
-        user_allowlist: lines(qqForm.user_allowlist), group_allowlist: lines(qqForm.group_allowlist),
-        allow_unlisted_users: Boolean(qqForm.allow_unlisted_users),
-        allow_unlisted_groups: Boolean(qqForm.allow_unlisted_groups),
-        group_approval_enabled: Boolean(qqForm.group_approval_enabled),
-        max_queue_size: Number(qqForm.max_queue_size || 32),
-        run_timeout_seconds: Number(qqForm.run_timeout_seconds || 300),
+
+      const tasks: Promise<unknown>[] = [api.updateSettings(payload)]
+
+      if (qqSettings) {
+        const qqPayload: QQSettingsUpdate = {
+          enabled: Boolean(qqForm.enabled),
+          app_id: String(qqForm.app_id || ''),
+          c2c_enabled: Boolean(qqForm.c2c_enabled),
+          group_enabled: Boolean(qqForm.group_enabled),
+          group_require_mention: Boolean(qqForm.group_require_mention),
+          user_allowlist: Array.isArray(qqForm.user_allowlist) ? (qqForm.user_allowlist as string[]) : [],
+          group_allowlist: Array.isArray(qqForm.group_allowlist) ? (qqForm.group_allowlist as string[]) : [],
+          allow_unlisted_users: Boolean(qqForm.allow_unlisted_users),
+          allow_unlisted_groups: Boolean(qqForm.allow_unlisted_groups),
+          group_approval_enabled: Boolean(qqForm.group_approval_enabled),
+          max_queue_size: Number(qqForm.max_queue_size || 32),
+          run_timeout_seconds: Number(qqForm.run_timeout_seconds || 300),
+        }
+        if (qqForm.client_secret) {
+          qqPayload.client_secret = String(qqForm.client_secret)
+        }
+        tasks.push(api.updateQQSettings(qqPayload))
       }
-      if (qqForm.client_secret) payload.client_secret = String(qqForm.client_secret)
-      return api.updateQQSettings(payload)
-    },
-    onSuccess: () => {
+
+      await Promise.all(tasks)
+      qc.invalidateQueries({ queryKey: ['settings'] })
       qc.invalidateQueries({ queryKey: ['qq-settings'] })
       qc.invalidateQueries({ queryKey: ['qq-status'] })
-      setQQSaved(true)
-      setTimeout(() => setQQSaved(false), 3000)
-    },
-    onError: () => alert('QQ 配置保存失败，请重试'),
-  })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      alert(`保存失败: ${msg}`)
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }))
@@ -125,6 +131,8 @@ export default function Settings() {
     setQQForm(f => ({ ...f, [key]: e.target.value }))
   const toggleQQ = (key: string) => (checked: boolean | 'indeterminate') =>
     setQQForm(f => ({ ...f, [key]: checked === true }))
+  const setQQAllowlist = (key: 'user_allowlist' | 'group_allowlist') => (tags: string[]) =>
+    setQQForm(f => ({ ...f, [key]: tags }))
 
   const handleFetchModels = async () => {
     const baseUrl = form.openai_base_url || ''
@@ -201,12 +209,12 @@ export default function Settings() {
           <p className="text-sm text-muted-foreground mt-1">配置大模型服务商、嵌入模型及 RAG 核心管道参数</p>
         </div>
         <Button
-          onClick={() => update.mutate()}
-          disabled={update.isPending}
+          onClick={handleSaveAll}
+          disabled={isSaving}
           className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs"
         >
-          {saved ? <Check className="h-4 w-4 text-green-400" /> : <Save className="h-4 w-4" />}
-          {update.isPending ? '保存中…' : saved ? '已保存设置' : '保存设置'}
+          {saved ? <Check className="h-4 w-4 text-emerald-400" /> : <Save className="h-4 w-4" />}
+          {isSaving ? '保存中…' : saved ? '已保存设置' : '保存设置'}
         </Button>
       </div>
 
@@ -371,9 +379,21 @@ export default function Settings() {
               <Radio className="w-4 h-4 text-foreground" />
               <CardTitle className="text-base font-semibold">QQ Bot 官方通道</CardTitle>
             </div>
-            <div className="flex items-center gap-2 text-xs font-mono px-2.5 py-1 rounded-full bg-secondary/60 border border-border/60" aria-live="polite">
-              <span className={`h-2 w-2 rounded-full ${qqStatusColor[status] || 'bg-muted-foreground'}`} aria-hidden="true" />
-              <span className="text-muted-foreground">{qqStatusLabel[status] || status}</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-xs font-mono px-2.5 py-1 rounded-full bg-secondary/60 border border-border/60" aria-live="polite">
+                <span className={`h-2 w-2 rounded-full ${qqStatusColor[status] || 'bg-muted-foreground'}`} aria-hidden="true" />
+                <span className="text-muted-foreground">{qqStatusLabel[status] || status}</span>
+              </div>
+              <div className="flex items-center gap-2 pl-2 border-l border-border">
+                <Switch
+                  id="qq-enable-switch"
+                  checked={Boolean(qqForm.enabled)}
+                  onCheckedChange={checked => setQQForm(f => ({ ...f, enabled: checked }))}
+                />
+                <Label htmlFor="qq-enable-switch" className="text-xs font-medium cursor-pointer">
+                  {qqForm.enabled ? '通道开启' : '通道关闭'}
+                </Label>
+              </div>
             </div>
           </div>
           <CardDescription>通过 QQ 官方 Bot API 接入系统 Agent。群聊会话按群共享，群审批默认关闭。</CardDescription>
@@ -406,57 +426,88 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="space-y-3 pt-1 border-t border-border">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">通道与权限策略</Label>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {([
-                ['enabled', '启用 QQ 通道', '全局主开关，开启后连接官方网关'],
-                ['c2c_enabled', '启用私聊 (C2C)', '允许用户向机器人发起单聊对话'],
-                ['group_enabled', '启用群聊 (Group)', '允许机器人在加入的 QQ 群中响应'],
-                ['group_require_mention', '群聊要求 @ 机器人', '开启时只有被 @ 时才响应群消息'],
-                ['allow_unlisted_users', '允许未列入白名单的用户', '开启后任意用户均可私聊；关闭后未授权用户将收到自身 OpenID 提示'],
-                ['allow_unlisted_groups', '允许未列入白名单的群', '开启后任意群均可响应；关闭后未授权群将收到群 OpenID 提示'],
-                ['group_approval_enabled', '启用群聊操作审批', '允许群成员直接交互审批敏感操作卡片'],
-              ] as const).map(([key, label, desc]) => (
-                <label
-                  key={key}
-                  className="flex items-start gap-2.5 p-3 rounded-xl border border-border/70 bg-accent/20 hover:bg-accent/40 cursor-pointer transition-colors"
-                >
-                  <Checkbox
-                    checked={Boolean(qqForm[key])}
-                    onCheckedChange={toggleQQ(key)}
-                    className="mt-0.5"
-                  />
-                  <div className="space-y-0.5 select-none">
-                    <span className="text-xs font-medium text-foreground block">{label}</span>
-                    <span className="text-[11px] text-muted-foreground block leading-relaxed">{desc}</span>
-                  </div>
-                </label>
-              ))}
+          <div className="space-y-4 pt-1 border-t border-border">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">通道响应策略</Label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                {([
+                  ['c2c_enabled', '启用私聊 (C2C)', '允许用户向机器人发起单聊对话'],
+                  ['group_enabled', '启用群聊 (Group)', '允许机器人在加入的 QQ 群中响应'],
+                  ['group_require_mention', '群聊要求 @ 机器人', '开启时只有被 @ 时才响应群消息'],
+                ] as const).map(([key, label, desc]) => (
+                  <label
+                    key={key}
+                    className="flex items-start gap-2.5 p-3 rounded-xl border border-border/70 bg-accent/20 hover:bg-accent/40 cursor-pointer transition-colors"
+                  >
+                    <Checkbox
+                      checked={Boolean(qqForm[key])}
+                      onCheckedChange={toggleQQ(key)}
+                      className="mt-0.5"
+                    />
+                    <div className="space-y-0.5 select-none">
+                      <span className="text-xs font-medium text-foreground block">{label}</span>
+                      <span className="text-[11px] text-muted-foreground block leading-relaxed">{desc}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">访问控制与安全审批</Label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                {([
+                  ['allow_unlisted_users', '允许未列入白名单的用户', '开启后任意用户均可私聊；关闭后未授权用户将收到自身 OpenID 提示'],
+                  ['allow_unlisted_groups', '允许未列入白名单的群', '开启后任意群均可响应；关闭后未授权群将收到群 OpenID 提示'],
+                  ['group_approval_enabled', '启用群聊操作审批', '允许群成员直接交互审批敏感操作卡片'],
+                ] as const).map(([key, label, desc]) => (
+                  <label
+                    key={key}
+                    className="flex items-start gap-2.5 p-3 rounded-xl border border-border/70 bg-accent/20 hover:bg-accent/40 cursor-pointer transition-colors"
+                  >
+                    <Checkbox
+                      checked={Boolean(qqForm[key])}
+                      onCheckedChange={toggleQQ(key)}
+                      className="mt-0.5"
+                    />
+                    <div className="space-y-0.5 select-none">
+                      <span className="text-xs font-medium text-foreground block">{label}</span>
+                      <span className="text-[11px] text-muted-foreground block leading-relaxed">{desc}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">用户白名单 (User OpenID)</Label>
-              <Textarea
-                rows={4}
-                value={String(qqForm.user_allowlist || '')}
-                onChange={setQQ('user_allowlist')}
-                placeholder="每行一个 32 位 User OpenID&#10;（QQ 官方已脱敏，不可填写纯数字 QQ 号）"
-                className="rounded-xl border-border bg-background font-mono text-xs leading-relaxed"
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">用户白名单 (User OpenID)</Label>
+                {Boolean(qqForm.allow_unlisted_users) && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">当前允许未列入用户</span>
+                )}
+              </div>
+              <TagInput
+                value={Array.isArray(qqForm.user_allowlist) ? (qqForm.user_allowlist as string[]) : []}
+                onChange={setQQAllowlist('user_allowlist')}
+                placeholder="输入 32 位 User OpenID，回车添加或直接粘贴"
               />
               <p className="text-[11px] text-muted-foreground leading-normal">
                 需关闭「允许未列入白名单的用户」生效。未授权用户私聊时，机器人会自动回复其 OpenID 以便复制添加。
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">群白名单 (Group OpenID)</Label>
-              <Textarea
-                rows={4}
-                value={String(qqForm.group_allowlist || '')}
-                onChange={setQQ('group_allowlist')}
-                placeholder="每行一个 32 位 Group OpenID&#10;（QQ 官方已脱敏，不可填写纯数字群号）"
-                className="rounded-xl border-border bg-background font-mono text-xs leading-relaxed"
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">群白名单 (Group OpenID)</Label>
+                {Boolean(qqForm.allow_unlisted_groups) && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">当前允许未列入群</span>
+                )}
+              </div>
+              <TagInput
+                value={Array.isArray(qqForm.group_allowlist) ? (qqForm.group_allowlist as string[]) : []}
+                onChange={setQQAllowlist('group_allowlist')}
+                placeholder="输入 32 位 Group OpenID，回车添加或直接粘贴"
               />
               <p className="text-[11px] text-muted-foreground leading-normal">
                 需关闭「允许未列入白名单的群」生效。未授权群内 @ 机器人时，机器人会自动回复该群 OpenID。
@@ -474,12 +525,6 @@ export default function Settings() {
               <Input type="number" min="1" value={String(qqForm.run_timeout_seconds || '300')} onChange={setQQ('run_timeout_seconds')} className="rounded-xl border-border bg-background font-mono text-sm" />
               <p className="text-[11px] text-muted-foreground">单条消息调用 Agent/RAG 回复的最大等待时长</p>
             </div>
-          </div>
-          <div className="flex justify-end pt-2">
-            <Button onClick={() => updateQQ.mutate()} disabled={updateQQ.isPending} className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs px-6">
-              {qqSaved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-              {qqSaved ? '已保存 QQ 配置' : '保存 QQ 配置'}
-            </Button>
           </div>
         </CardContent>
       </Card>
