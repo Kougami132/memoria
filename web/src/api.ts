@@ -543,8 +543,39 @@ export const syncVault = (kbId: string) =>
   req<{ status: string }>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'POST' })
 export const cancelVaultSync = (kbId: string): Promise<void> =>
   req<void>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'DELETE' })
-export const updateVault = (kbId: string, body: { auto_sync: boolean }): Promise<Vault> =>
+export interface VaultUpdate {
+  auto_sync?: boolean
+  type?: 'local' | 'webdav'
+  local_path?: string
+  webdav_url?: string
+  webdav_path?: string
+  webdav_username?: string
+  webdav_password?: string
+}
+
+export const updateVault = (kbId: string, body: VaultUpdate): Promise<Vault> =>
   req<Vault>(`/knowledge-bases/${kbId}/vault`, { method: 'PATCH', ...json(body) })
+
+export interface RestoreResult {
+  ok: boolean
+  message: string
+  kbs_count: number
+  vaults_count: number
+  vaults: Vault[]
+}
+
+export const exportBackupUrl = () => `${BASE}/settings/backup/export`
+
+export const importBackup = async (file: File): Promise<RestoreResult> => {
+  const fd = new FormData()
+  fd.append('file', file)
+  const r = await fetch(`${BASE}/settings/backup/import`, {
+    method: 'POST',
+    body: fd,
+  })
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  return r.json()
+}
 
 export interface VaultPathEntry { name: string; path: string; type: 'directory' }
 export interface VaultPathBrowseResult { path: string; parent: string | null; entries: VaultPathEntry[] }

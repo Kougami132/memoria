@@ -181,3 +181,146 @@ def fetch_models(body: Optional[FetchModelsRequest] = None, db: DB = Depends(get
         return {"models": models}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+import os
+import io
+import json
+import zipfile
+import shutil
+import tempfile
+from datetime import datetime, timezone
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import UploadFile, File
+from memoria.config import settings
+
+@router.get("/backup/export")
+def export_backup(db: DB = Depends(get_db)):
+    """Export database, Chroma vector DB, and uploaded files into a zip archive."""
+    temp_dir = tempfile.mkdtemp(prefix="memoria_backup_")
+    try:
+        archive_name = f"memoria_backup_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip"
+        zip_path = os.path.join(temp_dir, archive_name)
+
+        # 1. Backup SQLite database safely
+        db_dump_path = os.path.join(temp_dir, "memoria.db")
+        db.backup_to_file(db_dump_path)
+
+        # 2. Package into zip archive
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            # Add manifest
+            manifest = {
+                "version": "1.0",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "app": "memoria",
+                "kb_count": len(db.list_kbs()),
+                "bot_count": len(db.list_bots()),
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+
+            # Add database
+            if os.path.exists(db_dump_path):
+                zf.write(db_dump_path, arcname="db/memoria.db")
+
+            # Add chroma directory if exists
+            db_dir = os.path.dirname(os.path.abspath(db._db_path)) if getattr(db, "_db_path", None) and db._db_path != ":memory:" else os.path.abspath("./data")
+            chroma_cand = os.path.join(db_dir, "chroma")
+            chroma_dir = chroma_cand if os.path.isdir(chroma_cand) else os.path.abspath(settings.chroma_path)
+            if os.path.isdir(chroma_dir):
+                for root, _, files in os.walk(chroma_dir):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(full_path, chroma_dir)
+                        zf.write(full_path, arcname=os.path.join("chroma", rel_path).replace("\\", "/"))
+
+            # Add uploads directory if exists
+            uploads_cand = os.path.join(db_dir, "uploads")
+            upload_dir = uploads_cand if os.path.isdir(uploads_cand) else os.path.abspath(settings.upload_dir)
+            if os.path.isdir(upload_dir):
+                for root, _, files in os.walk(upload_dir):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(full_path, upload_dir)
+                        zf.write(full_path, arcname=os.path.join("uploads", rel_path).replace("\\", "/"))
+
+        # Return file response with background task to cleanup temp directory
+        from starlette.background import BackgroundTask
+        return FileResponse(
+            zip_path,
+            media_type="application/zip",
+            filename=archive_name,
+            background=BackgroundTask(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        )
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
+@router.post("/backup/import")
+async def import_backup(file: UploadFile = File(...), db: DB = Depends(get_db)):
+    """Restore database, Chroma vector DB, and uploaded files from a zip archive."""
+    if not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip backup archives are supported")
+
+    content = await file.read()
+    temp_dir = tempfile.mkdtemp(prefix="memoria_import_")
+    try:
+        zip_buf = io.BytesIO(content)
+        try:
+            with zipfile.ZipFile(zip_buf, "r") as zf:
+                zf.extractall(temp_dir)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid zip archive: {e}")
+
+        # Validate structure
+        extracted_db = os.path.join(temp_dir, "db", "memoria.db")
+        if not os.path.exists(extracted_db):
+            raise HTTPException(status_code=400, detail="Archive missing db/memoria.db")
+
+        # 1. Disconnect and reset active pipeline
+        reset_pipeline()
+
+        # 2. Restore DB
+        db_target_path = getattr(db, "_db_path", None)
+        dest_db = os.path.abspath(db_target_path) if db_target_path and db_target_path != ":memory:" else os.path.abspath(settings.db_path)
+        os.makedirs(os.path.dirname(dest_db), exist_ok=True)
+        # Close current engine/connections if any by disposing
+        try:
+            db._engine.dispose()
+        except Exception:
+            pass
+
+        shutil.copy2(extracted_db, dest_db)
+
+        # 3. Restore chroma
+        extracted_chroma = os.path.join(temp_dir, "chroma")
+        target_dir = os.path.dirname(dest_db)
+        dest_chroma = os.path.join(target_dir, "chroma") if target_dir != os.path.abspath("./data") else os.path.abspath(settings.chroma_path)
+        if os.path.exists(extracted_chroma):
+            if os.path.exists(dest_chroma):
+                shutil.rmtree(dest_chroma, ignore_errors=True)
+            shutil.copytree(extracted_chroma, dest_chroma, dirs_exist_ok=True)
+
+        # 4. Restore uploads
+        extracted_uploads = os.path.join(temp_dir, "uploads")
+        dest_uploads = os.path.join(target_dir, "uploads") if target_dir != os.path.abspath("./data") else os.path.abspath(settings.upload_dir)
+        if os.path.exists(extracted_uploads):
+            if os.path.exists(dest_uploads):
+                shutil.rmtree(dest_uploads, ignore_errors=True)
+            shutil.copytree(extracted_uploads, dest_uploads, dirs_exist_ok=True)
+
+        # Reset pipeline again with restored data
+        reset_pipeline()
+
+        # Return summary of restored knowledge bases
+        restored_kbs = db.list_kbs()
+        restored_vaults = db.list_vaults()
+        return {
+            "ok": True,
+            "message": "Data restored successfully",
+            "kbs_count": len(restored_kbs),
+            "vaults_count": len(restored_vaults),
+            "vaults": restored_vaults,
+        }
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

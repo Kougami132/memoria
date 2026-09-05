@@ -37,6 +37,9 @@ class VaultSyncer:
 
     def sync(self, vault_id: str, cancel_event: threading.Event | None = None) -> bool:
         vault = self.db.get_vault(vault_id)
+        if not vault:
+            logger.error("vault_sync: vault not found vault_id=%s", vault_id)
+            return False
         connector = self._make_connector(vault)
 
         try:
@@ -46,6 +49,18 @@ class VaultSyncer:
             return False
 
         tracked = {f["rel_path"]: f for f in self.db.list_vault_files(vault_id)}
+
+        # Safety threshold guard:
+        # If tracked had files (>= 3) but connector listed 0 files,
+        # it strongly indicates network failure, auth expiration, or wrong directory.
+        # Abort to prevent accidental purging of existing vectors.
+        if len(tracked) >= 3 and len(current) == 0:
+            logger.warning(
+                "vault_sync: safety guard triggered! tracked has %d files, but connector returned 0 files. "
+                "Aborting sync to prevent accidental deletion of all knowledge base vectors. vault_id=%s",
+                len(tracked), vault_id
+            )
+            return False
 
         new_files = current - tracked.keys()
         present_files = current & tracked.keys()

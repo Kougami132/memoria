@@ -234,6 +234,7 @@ function WebDAVTestButton({ webdavUrl, webdavPath, webdavUser, webdavPass }: {
 function VaultPanel({ kbId }: { kbId: string }) {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
   const [vaultType, setVaultType] = useState<'local' | 'webdav'>('local')
   const [localPath, setLocalPath] = useState('')
   const [webdavUrl, setWebdavUrl] = useState('')
@@ -292,6 +293,34 @@ function VaultPanel({ kbId }: { kbId: string }) {
     onError: () => alert('更新自动同步设置失败，请重试'),
     onSuccess: () => refetchVault(),
   })
+
+  const updateVaultConfig = useMutation({
+    mutationFn: () => api.updateVault(kbId, {
+      type: vaultType,
+      local_path: vaultType === 'local' ? localPath.trim() : undefined,
+      webdav_url: vaultType === 'webdav' ? webdavUrl.trim() : undefined,
+      webdav_path: vaultType === 'webdav' ? (webdavPath.trim() || '/') : undefined,
+      webdav_username: vaultType === 'webdav' ? webdavUser.trim() : undefined,
+      webdav_password: vaultType === 'webdav' && webdavPass ? webdavPass : undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vault', kbId] })
+      setIsEditing(false)
+      setWebdavPass('')
+    },
+    onError: (err: any) => alert(err.message || '更新仓库配置失败'),
+  })
+
+  const startEditing = () => {
+    if (!vault) return
+    setVaultType((vault.type as any) || 'local')
+    setLocalPath(vault.local_path || '')
+    setWebdavUrl(vault.webdav_url || '')
+    setWebdavPath(vault.webdav_path || '/')
+    setWebdavUser(vault.webdav_username || '')
+    setWebdavPass('')
+    setIsEditing(true)
+  }
 
   if (isLoading) return null
 
@@ -375,6 +404,16 @@ function VaultPanel({ kbId }: { kbId: string }) {
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            onClick={startEditing}
+            title="修改仓库连接配置（不删除已有向量索引）"
+          >
+            <Pencil className="h-3 w-3" />
+            配置
+          </Button>
+          <Button
             variant={isSyncing ? 'destructive' : 'outline'}
             size="sm"
             className="h-7 gap-1 text-xs"
@@ -388,14 +427,50 @@ function VaultPanel({ kbId }: { kbId: string }) {
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            title="解除关联并清除所有相关向量"
             onClick={() => {
-              if (confirm('断开连接将删除所有 vault 来源文档，确认？')) unbindVault.mutate()
+              if (confirm('断开连接将删除所有 vault 来源文档及向量数据，确认？若仅需要更换机器或路径，请使用左侧“配置”按钮直接修改。')) unbindVault.mutate()
             }}
           >
             <Unlink className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
+
+      {isEditing && (
+        <div className="mt-3 pt-3 border-t border-border/60 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-foreground">修改仓库连接参数（原位更新，避免重新 Embedding）</span>
+            <span className="text-[11px] text-muted-foreground">哈希一致的文件将跳过切片与向量化</span>
+          </div>
+          <div className="flex gap-1.5">
+            <Button size="sm" variant={vaultType === 'local' ? 'default' : 'outline'} className="h-6 text-xs" onClick={() => setVaultType('local')}>本地文件夹</Button>
+            <Button size="sm" variant={vaultType === 'webdav' ? 'default' : 'outline'} className="h-6 text-xs" onClick={() => setVaultType('webdav')}>WebDAV</Button>
+          </div>
+          {vaultType === 'local' ? (
+            <LocalPathPicker value={localPath} onChange={setLocalPath} />
+          ) : (
+            <>
+              <Input placeholder="https://dav.example.com" value={webdavUrl} onChange={e => setWebdavUrl(e.target.value)} className="h-7 text-sm" />
+              <WebDAVPathPicker value={webdavPath} onChange={setWebdavPath} webdavUrl={webdavUrl} webdavUser={webdavUser} webdavPass={webdavPass} />
+              <Input placeholder="用户名" value={webdavUser} onChange={e => setWebdavUser(e.target.value)} className="h-7 text-sm" />
+              <Input placeholder="新密码（留空保留原密码）" type="password" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
+              <WebDAVTestButton webdavUrl={webdavUrl} webdavPath={webdavPath} webdavUser={webdavUser} webdavPass={webdavPass} />
+            </>
+          )}
+          <div className="flex gap-1.5 pt-1">
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              disabled={updateVaultConfig.isPending || (vaultType === 'local' ? !localPath.trim() : !webdavUrl.trim())}
+              onClick={() => updateVaultConfig.mutate()}
+            >
+              {updateVaultConfig.isPending ? '保存中…' : '保存配置'}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setIsEditing(false)}>取消</Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

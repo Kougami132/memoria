@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download, ShieldAlert, Radio } from 'lucide-react'
+import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download, ShieldAlert, Radio, Database, Upload, AlertCircle } from 'lucide-react'
 import * as api from '@/api'
 import type { QQSettingsUpdate, SettingsUpdate } from '@/api'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -33,6 +33,7 @@ export default function Settings() {
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' })
   const [embedTest, setEmbedTest] = useState<TestState>({ status: 'idle' })
+  const [backupRestoreState, setBackupRestoreState] = useState<{ status: 'idle' | 'loading' | 'success' | 'error'; msg: string }>({ status: 'idle', msg: '' })
   const [chatTest, setChatTest] = useState<TestState>({ status: 'idle' })
   const [qqForm, setQQForm] = useState<Partial<Record<string, string | boolean | string[]>>>({})
 
@@ -122,6 +123,28 @@ export default function Settings() {
       alert(`保存失败: ${msg}`)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!confirm('恢复备份将覆盖当前系统的数据库、向量库(Chroma)及上传文件。确认继续导入？')) {
+      e.target.value = ''
+      return
+    }
+    setBackupRestoreState({ status: 'loading', msg: '正在导入恢复数据包…' })
+    try {
+      const res = await api.importBackup(file)
+      setBackupRestoreState({
+        status: 'success',
+        msg: `恢复成功！恢复了 ${res.kbs_count} 个知识库，${res.vaults_count} 个笔记仓库。若新机网络或挂载路径变动，请至知识库管理页修改 Vault 配置。`
+      })
+      qc.invalidateQueries()
+    } catch (err: any) {
+      setBackupRestoreState({ status: 'error', msg: `导入失败: ${err.message || err}` })
+    } finally {
+      e.target.value = ''
     }
   }
 
@@ -648,6 +671,76 @@ export default function Settings() {
             className="rounded-xl border-border bg-background font-mono text-xs leading-relaxed"
           />
           <p className="text-[11px] text-muted-foreground">支持标准正则表达式，用于严格拦截 rm -rf /、mkfs、dd、reboot 等毁灭性系统指令。</p>
+        </CardContent>
+      </Card>
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
+        <CardHeader className="pb-4">
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">系统数据迁移与冷备份</CardTitle>
+          </div>
+          <CardDescription>
+            完整打包 SQLite 数据库、向量数据库(Chroma)和上传文档，用于跨机器无损迁移并保留 Embedding 结果
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2 rounded-xl h-8 text-xs"
+              onClick={() => {
+                window.location.href = api.exportBackupUrl()
+              }}
+            >
+              <Download className="w-3.5 h-3.5" />
+              导出完整备份包 (.zip)
+            </Button>
+
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".zip"
+                className="hidden"
+                onChange={handleImportBackup}
+                disabled={backupRestoreState.status === 'loading'}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2 rounded-xl h-8 text-xs pointer-events-none"
+                disabled={backupRestoreState.status === 'loading'}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                {backupRestoreState.status === 'loading' ? '正在恢复导入…' : '导入并恢复备份 (.zip)'}
+              </Button>
+            </label>
+          </div>
+
+          {backupRestoreState.status !== 'idle' && (
+            <div className={`p-3 rounded-xl text-xs border flex items-start gap-2 ${
+              backupRestoreState.status === 'loading'
+                ? 'bg-muted/50 border-border text-foreground'
+                : backupRestoreState.status === 'success'
+                ? 'bg-emerald-50/50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800 dark:text-emerald-300'
+                : 'bg-destructive/10 border-destructive/30 text-destructive'
+            }`}>
+              {backupRestoreState.status === 'success' ? (
+                <Check className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : backupRestoreState.status === 'error' ? (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <RefreshCw className="w-4 h-4 shrink-0 mt-0.5 animate-spin" />
+              )}
+              <span>{backupRestoreState.msg}</span>
+            </div>
+          )}
+
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            提示：迁移至新机器后，若另一台机器上由于网络代理、WebDAV 地址或本地文件夹路径变化，可在<b>「知识库」</b>列表中直接点击<b>「配置」</b>进行原位修改，系统将自动校验哈希并跳过已有文档，无需重新消耗 Token 计算向量。
+          </p>
         </CardContent>
       </Card>
     </div>

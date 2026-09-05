@@ -255,6 +255,12 @@ def cancel_vault_sync(kb_id: str, db: DB = Depends(get_db)):
 
 class VaultUpdate(BaseModel):
     auto_sync: Optional[bool] = None
+    type: Optional[str] = None
+    local_path: Optional[str] = None
+    webdav_url: Optional[str] = None
+    webdav_path: Optional[str] = None
+    webdav_username: Optional[str] = None
+    webdav_password: Optional[str] = None
 
 
 @router.patch("/knowledge-bases/{kb_id}/vault")
@@ -262,8 +268,28 @@ def update_vault(kb_id: str, body: VaultUpdate, db: DB = Depends(get_db)):
     vault = db.get_vault_by_kb(kb_id)
     if vault is None:
         raise HTTPException(status_code=404, detail="No vault bound to this knowledge base")
+
+    update_kwargs = {}
     if body.auto_sync is not None:
-        db.update_vault_auto_sync(vault["id"], body.auto_sync)
+        update_kwargs["auto_sync"] = body.auto_sync
+    if body.type is not None:
+        if body.type not in ("local", "webdav"):
+            raise HTTPException(status_code=422, detail="type must be 'local' or 'webdav'")
+        update_kwargs["type"] = body.type
+    if body.local_path is not None:
+        update_kwargs["local_path"] = body.local_path
+    if body.webdav_url is not None:
+        update_kwargs["webdav_url"] = body.webdav_url
+    if body.webdav_path is not None:
+        update_kwargs["webdav_path"] = body.webdav_path
+    if body.webdav_username is not None:
+        update_kwargs["webdav_username"] = body.webdav_username
+    if body.webdav_password is not None and body.webdav_password != "********":
+        update_kwargs["webdav_password"] = body.webdav_password
+
+    if update_kwargs:
+        db.update_vault_config(vault["id"], **update_kwargs)
+
     return _mask_vault(db.get_vault_by_kb(kb_id))
 
 

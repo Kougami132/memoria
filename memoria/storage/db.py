@@ -928,6 +928,22 @@ class DB:
                         pass
             return updated
 
+    # -- Database Backup -----------------------------------------------------
+
+    def backup_to_file(self, target_path: str) -> None:
+        """Safely backup SQLite database using SQLite online backup API."""
+        import sqlite3
+        with self._s() as s:
+            raw_conn = s.connection().connection.dbapi_connection if hasattr(s.connection().connection, "dbapi_connection") else s.connection().connection
+            if hasattr(raw_conn, "backup"):
+                dest_conn = sqlite3.connect(target_path)
+                try:
+                    raw_conn.backup(dest_conn)
+                finally:
+                    dest_conn.close()
+            else:
+                s.execute(text("VACUUM INTO :path"), {"path": target_path})
+
     # -- Runtime Settings ---------------------------------------------------
 
     def get_setting(self, key: str) -> str | None:
@@ -1140,6 +1156,28 @@ class DB:
             row = s.get(VaultRow, vault_id)
             if row:
                 row.auto_sync = int(auto_sync)
+
+    def update_vault_config(self, vault_id: str, **kwargs) -> dict | None:
+        with self._s() as s:
+            row = s.get(VaultRow, vault_id)
+            if not row:
+                return None
+            if "type" in kwargs and kwargs["type"] is not None:
+                row.type = kwargs["type"]
+            if "local_path" in kwargs:
+                row.local_path = kwargs["local_path"]
+            if "webdav_url" in kwargs:
+                row.webdav_url = kwargs["webdav_url"]
+            if "webdav_path" in kwargs:
+                row.webdav_path = kwargs["webdav_path"]
+            if "webdav_username" in kwargs:
+                row.webdav_username = kwargs["webdav_username"]
+            if "webdav_password" in kwargs and kwargs["webdav_password"] is not None:
+                row.webdav_password = kwargs["webdav_password"]
+            if "auto_sync" in kwargs and kwargs["auto_sync"] is not None:
+                row.auto_sync = int(kwargs["auto_sync"])
+            s.flush()
+            return self._vault_dict(row)
 
     # ── Vault Files ──────────────────────────────────────────────────────────
 
