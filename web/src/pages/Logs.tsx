@@ -333,32 +333,48 @@ export default function Logs() {
                 200 OK 正常
               </span>
             ) : activeTab === 'qqbot' ? (
-              <span
-                className={`flex items-center gap-1.5 font-mono text-xs ${
-                  qqbotStatus?.status === 'CONNECTED'
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : qqbotStatus?.status === 'CONNECTING'
-                    ? 'text-amber-500 dark:text-amber-400'
-                    : 'text-zinc-500 dark:text-zinc-400'
-                }`}
-              >
-                {qqbotStatus?.status === 'CONNECTED' ? (
-                  <>
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    已连接 (Connected)
-                  </>
-                ) : qqbotStatus?.status === 'CONNECTING' ? (
-                  <>
-                    <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />
-                    连接中...
-                  </>
-                ) : (
-                  <>
-                    <span className="h-2 w-2 rounded-full bg-zinc-400" />
-                    {qqbotStatus?.status || '离线 / 未启动'}
-                  </>
-                )}
-              </span>
+              (() => {
+                const rawStatus = (qqbotStatus?.status || '').toLowerCase()
+                const isConnected = rawStatus === 'connected'
+                const isConnecting = rawStatus === 'connecting'
+                const isError = rawStatus === 'error'
+
+                return (
+                  <span
+                    className={`flex items-center gap-1.5 font-mono text-xs ${
+                      isConnected
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : isConnecting
+                        ? 'text-amber-500 dark:text-amber-400'
+                        : isError
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-zinc-500 dark:text-zinc-400'
+                    }`}
+                  >
+                    {isConnected ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse" />
+                        已连接 (Connected)
+                      </>
+                    ) : isConnecting ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />
+                        连接中...
+                      </>
+                    ) : isError ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        连接异常 ({qqbotStatus?.last_error ? String(qqbotStatus.last_error).slice(0, 20) : 'Error'})
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-zinc-400" />
+                        {rawStatus === 'disabled' ? '已禁用 / 未启动' : (qqbotStatus?.status || '离线 / 未启动')}
+                      </>
+                    )}
+                  </span>
+                )
+              })()
             ) : (
               <span className="flex items-center gap-1.5 font-mono text-xs text-zinc-700 dark:text-zinc-300">
                 <span

@@ -81,9 +81,9 @@ class QQBotAdapter:
             return
         if self._running and self._gateway_task and not self._gateway_task.done():
             return
-       self.last_error = None
-       self.status = "connecting"
-       self._running = True
+        self.last_error = None
+        self.status = "connecting"
+        self._running = True
         try:
             self.db.log_qqbot_event(
                 category="connection",
@@ -93,8 +93,8 @@ class QQBotAdapter:
             )
         except Exception:
             logger.warning("Failed to log qqbot connecting event", exc_info=True)
-       self._gateway = QQGateway(
-           policy.app_id,
+        self._gateway = QQGateway(
+            policy.app_id,
             policy.client_secret,
             0,
             self.handle_event,
@@ -123,9 +123,9 @@ class QQBotAdapter:
             await asyncio.gather(self._gateway_task, return_exceptions=True)
         for task in self._workers.values():
             task.cancel()
-       self._workers.clear()
-       self._queues.clear()
-       self.status = "disabled"
+        self._workers.clear()
+        self._queues.clear()
+        self.status = "disabled"
         try:
             self.db.log_qqbot_event(
                 category="connection",
@@ -136,12 +136,12 @@ class QQBotAdapter:
         except Exception:
             logger.warning("Failed to log qqbot disconnected event", exc_info=True)
 
-   async def _handle_gateway_error(self, error: Exception) -> None:
+    async def _handle_gateway_error(self, error: Exception) -> None:
         if not self._running:
             return
-       self.status = "error"
-       self.last_error = str(error)
-       logger.error("QQ Gateway connection failed: %s", error)
+        self.status = "error"
+        self.last_error = str(error)
+        logger.error("QQ Gateway connection failed: %s", error)
         try:
             self.db.log_qqbot_event(
                 category="connection",
@@ -153,16 +153,16 @@ class QQBotAdapter:
         except Exception:
             logger.warning("Failed to log qqbot error event", exc_info=True)
 
-   async def reload(self) -> None:
+    async def reload(self) -> None:
         async with self._lifecycle_lock:
             await self._stop_locked()
             self.last_error = None
             await self._start_locked()
 
     async def handle_event(self, event: dict) -> None:
-       event_type = event.get("t")
-       if event.get("t") in {"READY", "RESUMED"}:
-           self.status = "connected"
+        event_type = event.get("t")
+        if event.get("t") in {"READY", "RESUMED"}:
+            self.status = "connected"
             try:
                 self.db.log_qqbot_event(
                     category="connection",
@@ -172,8 +172,8 @@ class QQBotAdapter:
                 )
             except Exception:
                 logger.warning("Failed to log qqbot connected event", exc_info=True)
-           return
-       if event.get("t") == "INTERACTION_CREATE":
+            return
+        if event.get("t") == "INTERACTION_CREATE":
             # Gateway wraps the interaction payload in an event envelope. The
             # ACK endpoint expects the interaction payload id from d.id, not
             # the envelope id (which may look like INTERACTION_CREATE:<uuid>).
@@ -320,7 +320,7 @@ class QQBotAdapter:
             finally:
                 queue.task_done()
 
-   async def _process(self, message: QQInboundMessage) -> None:
+    async def _process(self, message: QQInboundMessage) -> None:
         t0 = time.time()
         try:
             self.db.log_qqbot_event(
@@ -335,31 +335,31 @@ class QQBotAdapter:
         except Exception:
             logger.warning("Failed to log qqbot recv event", exc_info=True)
 
-       session = self.db.get_or_create_qq_session(
-           self._policy().app_id, message.context_type, message.context_id, message.content,
-       )
-       prompt = message.content
-       if message.context_type == "group" and message.group_member_openid:
-           prompt = f"[QQ 群成员 {message.group_member_openid}]\n{prompt}"
-       stream = self._get_engine().run_stream(prompt, session_id=session["id"], bot_id=None)
-       events: list[dict] = []
-       while True:
-           event, finished = await asyncio.to_thread(self._next_stream_event, stream)
-           if finished:
-               break
-           events.append(event)
-           if event.get("type") == "approval_required":
-               approval_id = str(event.get("approval_id") or "")
-               if approval_id:
-                   self._approval_contexts[approval_id] = (
-                       message.context_type, message.context_id, message.user_openid,
-                   )
-                   await self.send_approval(message, event)
-       answer = next((str(event.get("answer") or "") for event in reversed(events) if event.get("type") == "done"), "")
+        session = self.db.get_or_create_qq_session(
+            self._policy().app_id, message.context_type, message.context_id, message.content,
+        )
+        prompt = message.content
+        if message.context_type == "group" and message.group_member_openid:
+            prompt = f"[QQ 群成员 {message.group_member_openid}]\n{prompt}"
+        stream = self._get_engine().run_stream(prompt, session_id=session["id"], bot_id=None)
+        events: list[dict] = []
+        while True:
+            event, finished = await asyncio.to_thread(self._next_stream_event, stream)
+            if finished:
+                break
+            events.append(event)
+            if event.get("type") == "approval_required":
+                approval_id = str(event.get("approval_id") or "")
+                if approval_id:
+                    self._approval_contexts[approval_id] = (
+                        message.context_type, message.context_id, message.user_openid,
+                    )
+                    await self.send_approval(message, event)
+        answer = next((str(event.get("answer") or "") for event in reversed(events) if event.get("type") == "done"), "")
         duration_ms = int((time.time() - t0) * 1000)
-       if answer:
-           logger.info("QQ agent response ready: event_id=%s answer_length=%d", message.event_id, len(answer))
-           await self.send_message(message, answer)
+        if answer:
+            logger.info("QQ agent response ready: event_id=%s answer_length=%d", message.event_id, len(answer))
+            await self.send_message(message, answer)
             try:
                 self.db.log_qqbot_event(
                     category="message",
@@ -373,8 +373,8 @@ class QQBotAdapter:
                 )
             except Exception:
                 logger.warning("Failed to log qqbot sent event", exc_info=True)
-       else:
-           logger.warning("QQ agent returned no final answer: event_id=%s", message.event_id)
+        else:
+            logger.warning("QQ agent returned no final answer: event_id=%s", message.event_id)
             try:
                 self.db.log_qqbot_event(
                     category="message",
