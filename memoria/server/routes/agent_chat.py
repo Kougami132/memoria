@@ -39,8 +39,11 @@ def agent_chat(body: AgentChatRequest, engine: AgenticRagEngine = Depends(get_ag
     except APIConnectionError as e:
         raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
     except (AgenticSdkUnavailable, APIError, RuntimeError) as e:
-        logger.error("Agentic chat 502: %s: %s", type(e).__name__, e)
-        raise HTTPException(status_code=502, detail=str(e))
+        status_code = getattr(e, "status_code", 502)
+        if not isinstance(status_code, int) or not (400 <= status_code < 600):
+            status_code = 502
+        logger.error("Agentic chat %d: %s: %s", status_code, type(e).__name__, e)
+        raise HTTPException(status_code=status_code, detail=str(e))
 
 
 @router.post("/agent-chat/stream")

@@ -351,11 +351,12 @@ export function AgenticChat() {
           setStreamState(null)
           break
         } else if (event.type === 'error') {
-          setStreamState((prev) => prev ? {
+          setStreamState((prev) => (prev ? {
             ...prev,
             isStreaming: false,
             error: event.detail || '处理失败',
-          } : null)
+          } : null))
+          break
         }
       }
    } catch (err: any) {

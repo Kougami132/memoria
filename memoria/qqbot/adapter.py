@@ -335,59 +335,104 @@ class QQBotAdapter:
         except Exception:
             logger.warning("Failed to log qqbot recv event", exc_info=True)
 
-        session = self.db.get_or_create_qq_session(
-            self._policy().app_id, message.context_type, message.context_id, message.content,
-        )
-        prompt = message.content
-        if message.context_type == "group" and message.group_member_openid:
-            prompt = f"[QQ 群成员 {message.group_member_openid}]\n{prompt}"
-        stream = self._get_engine().run_stream(prompt, session_id=session["id"], bot_id=None)
-        events: list[dict] = []
-        while True:
-            event, finished = await asyncio.to_thread(self._next_stream_event, stream)
-            if finished:
-                break
-            events.append(event)
-            if event.get("type") == "approval_required":
-                approval_id = str(event.get("approval_id") or "")
-                if approval_id:
-                    self._approval_contexts[approval_id] = (
-                        message.context_type, message.context_id, message.user_openid,
+        try:
+            session = self.db.get_or_create_qq_session(
+                self._policy().app_id, message.context_type, message.context_id, message.content,
+            )
+            prompt = message.content
+            if message.context_type == "group" and message.group_member_openid:
+                prompt = f"[QQ 群成员 {message.group_member_openid}]\n{prompt}"
+            stream = self._get_engine().run_stream(prompt, session_id=session["id"], bot_id=None)
+            events: list[dict] = []
+            while True:
+                event, finished = await asyncio.to_thread(self._next_stream_event, stream)
+                if finished:
+                    break
+                events.append(event)
+                if event.get("type") == "approval_required":
+                    approval_id = str(event.get("approval_id") or "")
+                    if approval_id:
+                        self._approval_contexts[approval_id] = (
+                            message.context_type, message.context_id, message.user_openid,
+                        )
+                        await self.send_approval(message, event)
+            duration_ms = int((time.time() - t0) * 1000)
+            error_event = next((e for e in reversed(events) if e.get("type") == "error"), None)
+            answer = next((str(event.get("answer") or "") for event in reversed(events) if event.get("type") == "done"), "")
+            if error_event:
+                error_detail = str(error_event.get("detail") or "模型服务不可用")
+                logger.error("QQ agent execution error: event_id=%s detail=%s", message.event_id, error_detail)
+                err_reply = f"抱歉，模型调用失败：{error_detail}\n请检查模型配置或稍后重试。"
+                await self.send_message(message, err_reply)
+                try:
+                    self.db.log_qqbot_event(
+                        category="message",
+                        event_type="MSG_ERROR",
+                        summary=f"模型调用失败: {error_detail[:60]}",
+                        level="ERROR",
+                        source_type=message.context_type,
+                        source_id=message.context_id,
+                        user_name=message.group_member_openid or message.user_openid,
+                        duration_ms=duration_ms,
+                        details=error_detail,
                     )
-                    await self.send_approval(message, event)
-        answer = next((str(event.get("answer") or "") for event in reversed(events) if event.get("type") == "done"), "")
-        duration_ms = int((time.time() - t0) * 1000)
-        if answer:
-            logger.info("QQ agent response ready: event_id=%s answer_length=%d", message.event_id, len(answer))
-            await self.send_message(message, answer)
+                except Exception:
+                    logger.warning("Failed to log qqbot error event", exc_info=True)
+            elif answer:
+                logger.info("QQ agent response ready: event_id=%s answer_length=%d", message.event_id, len(answer))
+                await self.send_message(message, answer)
+                try:
+                    self.db.log_qqbot_event(
+                        category="message",
+                        event_type="MSG_SENT",
+                        summary=f"回复消息: {answer[:60]}",
+                        level="INFO",
+                        source_type=message.context_type,
+                        source_id=message.context_id,
+                        user_name=message.group_member_openid or message.user_openid,
+                        duration_ms=duration_ms,
+                    )
+                except Exception:
+                    logger.warning("Failed to log qqbot sent event", exc_info=True)
+            else:
+                logger.warning("QQ agent returned no final answer: event_id=%s", message.event_id)
+                empty_reply = "抱歉，模型未能生成有效回复，请稍后重试。"
+                await self.send_message(message, empty_reply)
+                try:
+                    self.db.log_qqbot_event(
+                        category="message",
+                        event_type="MSG_EMPTY",
+                        summary="Agent 未返回最终回复",
+                        level="WARN",
+                        source_type=message.context_type,
+                        source_id=message.context_id,
+                        user_name=message.group_member_openid or message.user_openid,
+                        duration_ms=duration_ms,
+                    )
+                except Exception:
+                    logger.warning("Failed to log qqbot empty answer event", exc_info=True)
+        except Exception as e:
+            duration_ms = int((time.time() - t0) * 1000)
+            logger.exception("QQ message processing failed in _process: event_id=%s context=%s", message.event_id, message.context_id)
+            err_reply = f"抱歉，服务处理异常：{e}\n请稍后重试。"
+            try:
+                await self.send_message(message, err_reply)
+            except Exception:
+                logger.warning("Failed to send error reply to QQ: event_id=%s", message.event_id, exc_info=True)
             try:
                 self.db.log_qqbot_event(
                     category="message",
-                    event_type="MSG_SENT",
-                    summary=f"回复消息: {answer[:60]}",
-                    level="INFO",
+                    event_type="MSG_ERROR",
+                    summary=f"消息处理异常: {str(e)[:60]}",
+                    level="ERROR",
                     source_type=message.context_type,
                     source_id=message.context_id,
                     user_name=message.group_member_openid or message.user_openid,
                     duration_ms=duration_ms,
+                    details=str(e),
                 )
             except Exception:
-                logger.warning("Failed to log qqbot sent event", exc_info=True)
-        else:
-            logger.warning("QQ agent returned no final answer: event_id=%s", message.event_id)
-            try:
-                self.db.log_qqbot_event(
-                    category="message",
-                    event_type="MSG_EMPTY",
-                    summary="Agent 未返回最终回复",
-                    level="WARN",
-                    source_type=message.context_type,
-                    source_id=message.context_id,
-                    user_name=message.group_member_openid or message.user_openid,
-                    duration_ms=duration_ms,
-                )
-            except Exception:
-                logger.warning("Failed to log qqbot empty answer event", exc_info=True)
+                logger.warning("Failed to log qqbot exception event", exc_info=True)
 
     @staticmethod
     def _next_stream_event(stream: Any) -> tuple[dict, bool]:
@@ -541,4 +586,3 @@ class QQBotAdapter:
         except OSError:
             return "<unavailable>"
         return body[:1000] or "<empty>"
-

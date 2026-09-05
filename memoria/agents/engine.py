@@ -1447,6 +1447,7 @@ class AgenticRagEngine:
         final_answer = ""
         final_trace = None
         message_persisted = False
+        has_error = False
         completed = False
 
         try:
@@ -1470,8 +1471,10 @@ class AgenticRagEngine:
                         if event.get("answer") is not None:
                             final_answer = event.get("answer") or ""
                         final_trace = event.get("trace")
+                    elif event_type == "error":
+                        has_error = True
                     yield event
-                completed = True
+                completed = not has_error
             else:
                 runner_output = runner.run(
                     prompt,
@@ -1507,6 +1510,9 @@ class AgenticRagEngine:
                     )
                     if final_trace and not curr_msg:
                         self.db.add_message_trace(session_id, message_id, final_trace)
+
+        if has_error:
+            return
 
         sources = collector.list_sources()
         used_kbs = collector.used_kbs()

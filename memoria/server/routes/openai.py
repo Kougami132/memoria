@@ -178,6 +178,7 @@ def chat_completions(
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     elif event_type == "error":
                         error_msg = event.get("detail", "Error occurred during execution")
+                        status_code = 502
                         err_chunk = {
                             "id": req_id,
                             "object": "chat.completion.chunk",
@@ -193,20 +194,21 @@ def chat_completions(
                         }
                         yield f"data: {json.dumps(err_chunk, ensure_ascii=False)}\n\n"
 
-                last_chunk = {
-                    "id": req_id,
-                    "object": "chat.completion.chunk",
-                    "created": created_ts,
-                    "model": body.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {},
-                            "finish_reason": "stop" if not error_msg else "error",
-                        }
-                    ],
-                }
-                yield f"data: {json.dumps(last_chunk, ensure_ascii=False)}\n\n"
+                if not error_msg:
+                    last_chunk = {
+                        "id": req_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": body.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(last_chunk, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
 
             except Exception as e:
@@ -322,6 +324,37 @@ def chat_completions(
                 error_msg=str(e),
             )
         raise HTTPException(status_code=404, detail=str(e))
+    except APIConnectionError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        if not is_web_client:
+            db.log_api_invocation(
+                endpoint="/v1/chat/completions",
+                method="POST",
+                model=log_model,
+                status_code=503,
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                session_id=session_id,
+                error_msg=str(e),
+            )
+        raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
+    except (APIError, RuntimeError) as e:
+        status_code = getattr(e, "status_code", 502)
+        if not isinstance(status_code, int) or not (400 <= status_code < 600):
+            status_code = 502
+        duration_ms = int((time.time() - start_time) * 1000)
+        if not is_web_client:
+            db.log_api_invocation(
+                endpoint="/v1/chat/completions",
+                method="POST",
+                model=log_model,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                session_id=session_id,
+                error_msg=str(e),
+            )
+        raise HTTPException(status_code=status_code, detail=f"Model error: {e}")
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         if not is_web_client:
@@ -523,6 +556,7 @@ def create_response(
 
                     elif event_type == "error":
                         error_msg = event.get("detail", "Error occurred")
+                        status_code = 502
                         err_event = {
                             "type": "response.error",
                             "response_id": response_id,
@@ -677,6 +711,37 @@ def create_response(
                 error_msg=str(e),
             )
         raise HTTPException(status_code=404, detail=str(e))
+    except APIConnectionError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        if not is_web_client:
+            db.log_api_invocation(
+                endpoint="/v1/responses",
+                method="POST",
+                model=log_model,
+                status_code=503,
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                session_id=session_id,
+                error_msg=str(e),
+            )
+        raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
+    except (APIError, RuntimeError) as e:
+        status_code = getattr(e, "status_code", 502)
+        if not isinstance(status_code, int) or not (400 <= status_code < 600):
+            status_code = 502
+        duration_ms = int((time.time() - start_time) * 1000)
+        if not is_web_client:
+            db.log_api_invocation(
+                endpoint="/v1/responses",
+                method="POST",
+                model=log_model,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                session_id=session_id,
+                error_msg=str(e),
+            )
+        raise HTTPException(status_code=status_code, detail=f"Model error: {e}")
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         if not is_web_client:

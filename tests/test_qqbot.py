@@ -681,3 +681,120 @@ async def test_gateway_invalid_session_stops_without_retry(monkeypatch):
     assert isinstance(errors[0], QQGatewayConfigurationError)
     assert "4013 invalid intents" in str(errors[0])
     assert gateway._stop.is_set()
+
+
+@pytest.mark.asyncio
+async def test_adapter_handles_model_stream_error_and_replies_to_user(tmp_path):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+
+    class MockEngine:
+        def run_stream(self, prompt, session_id=None, bot_id=None):
+            yield {"type": "init", "session_id": session_id}
+            yield {"type": "error", "detail": "Connection to upstream model timed out"}
+
+    adapter = QQBotAdapter(db, lambda: MockEngine())
+    await adapter.start()
+
+    sent = []
+
+    async def fake_send_message(message, content):
+        sent.append((message, content))
+
+    adapter.send_message = fake_send_message
+
+    await adapter.handle_event({
+        "t": "C2C_MESSAGE_CREATE",
+        "d": {"id": "event-err-1", "author": {"user_openid": "user"}, "content": "hello model"},
+    })
+    await asyncio.wait_for(adapter._queues["app:c2c:user"].join(), timeout=2)
+
+    assert len(sent) == 1
+    msg, content = sent[0]
+    assert msg.content == "hello model"
+    assert "抱歉，模型调用失败：Connection to upstream model timed out" in content
+    assert "请检查模型配置或稍后重试" in content
+
+    events = db.list_qqbot_logs(limit=10)
+    error_events = [e for e in events if e.get("event_type") == "MSG_ERROR"]
+    assert len(error_events) >= 1
+    assert "Connection to upstream model timed out" in error_events[0].get("details", "")
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_adapter_handles_engine_exception_and_replies_to_user(tmp_path):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+
+    class MockCrashingEngine:
+        def run_stream(self, prompt, session_id=None, bot_id=None):
+            raise RuntimeError("API key quota exhausted")
+
+    adapter = QQBotAdapter(db, lambda: MockCrashingEngine())
+    await adapter.start()
+
+    sent = []
+
+    async def fake_send_message(message, content):
+        sent.append((message, content))
+
+    adapter.send_message = fake_send_message
+
+    await adapter.handle_event({
+        "t": "C2C_MESSAGE_CREATE",
+        "d": {"id": "event-err-2", "author": {"user_openid": "user"}, "content": "quota test"},
+    })
+    await asyncio.wait_for(adapter._queues["app:c2c:user"].join(), timeout=2)
+
+    assert len(sent) == 1
+    msg, content = sent[0]
+    assert "抱歉，服务处理异常：API key quota exhausted" in content
+
+    events = db.list_qqbot_logs(limit=10)
+    error_events = [e for e in events if e.get("event_type") == "MSG_ERROR"]
+    assert len(error_events) >= 1
+    assert "API key quota exhausted" in error_events[0].get("details", "")
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_adapter_handles_empty_model_response_with_fallback(tmp_path):
+    db = DB(str(tmp_path / "qq.db"))
+    db.set_setting("qq_enabled", "true")
+    db.set_setting("qq_app_id", "app")
+    db.set_setting("qq_user_allowlist", '["user"]')
+
+    class MockEmptyEngine:
+        def run_stream(self, prompt, session_id=None, bot_id=None):
+            yield {"type": "init", "session_id": session_id}
+            # Finishes without answer
+
+    adapter = QQBotAdapter(db, lambda: MockEmptyEngine())
+    await adapter.start()
+
+    sent = []
+
+    async def fake_send_message(message, content):
+        sent.append((message, content))
+
+    adapter.send_message = fake_send_message
+
+    await adapter.handle_event({
+        "t": "C2C_MESSAGE_CREATE",
+        "d": {"id": "event-empty-1", "author": {"user_openid": "user"}, "content": "silent test"},
+    })
+    await asyncio.wait_for(adapter._queues["app:c2c:user"].join(), timeout=2)
+
+    assert len(sent) == 1
+    msg, content = sent[0]
+    assert "抱歉，模型未能生成有效回复，请稍后重试。" in content
+
+    events = db.list_qqbot_logs(limit=10)
+    empty_events = [e for e in events if e.get("event_type") == "MSG_EMPTY"]
+    assert len(empty_events) >= 1
+    await adapter.stop()
