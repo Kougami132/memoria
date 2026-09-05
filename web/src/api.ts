@@ -235,7 +235,7 @@ export const agentChat = (message: string, sessionId?: string) =>
   })
 
 export interface AgentStreamEvent {
-  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'sources' | 'done' | 'error'
+  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'sources' | 'tool_start' | 'tool_end' | 'done' | 'error'
   phase?: 'start' | 'end'
   session_id?: string
   message_id?: string
@@ -251,6 +251,11 @@ export interface AgentStreamEvent {
   host_id?: string
   host_name?: string
   command?: string
+  tool_name?: string
+  tool_agent?: string
+  duration_ms?: number
+  error?: string
+  args?: Record<string, any>
 }
 
 export async function* streamResponses(
@@ -322,6 +327,21 @@ export async function* streamResponses(
               host_id: parsed.host_id,
               host_name: parsed.host_name,
               command: parsed.command,
+            }
+          } else if (parsed.type === 'response.tool.start') {
+            yield {
+              type: 'tool_start',
+              tool_name: parsed.tool_name,
+              tool_agent: parsed.tool_agent,
+              args: parsed.args,
+            }
+          } else if (parsed.type === 'response.tool.end') {
+            yield {
+              type: 'tool_end',
+              tool_name: parsed.tool_name,
+              tool_agent: parsed.tool_agent,
+              duration_ms: parsed.duration_ms,
+              error: parsed.error,
             }
           } else if (parsed.type === 'response.text.delta') {
             yield {

@@ -12,7 +12,7 @@ DEFAULT_HOST_DANGEROUS_PATTERNS = [
 
 from pydantic_settings import BaseSettings
 
-DEFAULT_SYSTEM_PROMPT = """你是一个专业的智能助手，请始终用用户所使用的语言回复。
+DEFAULT_SYSTEM_PROMPT = """你是一个专业的智能助手。请全程使用简体中文进行思考（包括思维链/CoT推理）与回答。
 
 如果系统提供了参考资料，请优先基于参考资料回答问题，并保持回答简洁准确。若参考资料不足以回答问题，可结合自身知识补充，但需说明哪部分来自推断而非资料。"""
 

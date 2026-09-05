@@ -1088,6 +1088,12 @@ class OpenAIAgentsRunner:
                                 _log_trace("DELEGATE", f"Delegating task to {tool_agent_name} ({tool_name})", agent="Orchestrator", target_agent=tool_agent_name, args=str(args)[:120])
                             else:
                                 _log_trace("TOOL_CALL", f"Calling tool {tool_name}", agent=tool_agent_name, args=str(args)[:120])
+                            event_queue.put({
+                                "type": "tool_start",
+                                "tool_name": tool_name,
+                                "tool_agent": tool_agent_name,
+                                "args": args,
+                            })
                             tool_result = await _execute_agent_tool_async(
                                 tool_name,
                                 args,
@@ -1117,6 +1123,20 @@ class OpenAIAgentsRunner:
                             "phase": "end",
                             "span": dict(tool_span),
                         })
+                        event_queue.put({
+                            "type": "tool_end",
+                            "tool_name": tool_name,
+                            "tool_agent": tool_agent_name,
+                            "duration_ms": tool_span["duration_ms"],
+                            "error": tool_error,
+                        })
+                        if collector and hasattr(collector, "list_sources"):
+                            curr_sources = collector.list_sources()
+                            if curr_sources:
+                                event_queue.put({
+                                    "type": "sources",
+                                    "sources": curr_sources,
+                                })
 
                         messages.append({
                             "role": "tool",
@@ -1558,20 +1578,20 @@ class AgenticRagEngine:
         base_prompt = custom_system_prompt if (custom_system_prompt is not None and custom_system_prompt != "") else (effective.get("system_prompt") or "")
         if is_bot:
             role_desc = (
-                "You are the central Orchestrator AI agent in Memoria configured for this specific bot. "
-                "You coordinate specialist sub-agents using the Agent-as-Tool pattern:\n"
-                "1. `delegate_to_knowledge_agent`: Delegate to KnowledgeAgent for searching knowledge bases, extracting facts, and retrieving reference documents.\n"
-                "2. `delegate_to_host_agent`: Delegate to HostAgent for querying server status, inspecting hosts, and executing controlled commands.\n"
-                "When the user asks questions or issues tasks, determine the necessary domain tasks and delegate them to the appropriate specialist agents. "
-                "Synthesize their returned findings to provide a complete, clear, and accurate final response."
+                "你是 Memoria 中为该 Bot 定制的核心调度智能体（Orchestrator AI Agent）。\n"
+                "你通过 Agent-as-Tool 架构协调各领域的专家子智能体来达成用户需求：\n"
+                "1. `delegate_to_knowledge_agent`: 委派给知识库专家 KnowledgeAgent，用于检索知识库、提取事实依据并检索参考文档。\n"
+                "2. `delegate_to_host_agent`: 委派给主机专家 HostAgent，用于查询服务器运行状态、检查主机并在授权下执行控制命令。\n"
+                "当用户提出问题或下发任务时，请自主分析所需的领域子任务，委派给合适的专家智能体，并综合其返回的结果给出准确详尽的最终解答。\n"
+                "【重要】在思考推理过程（CoT/Thinking）和最终回复中，请全程使用清晰严谨的简体中文进行思考与解答。"
             )
         else:
             role_desc = (
-                "You are Memoria's central Orchestrator AI Agent (主调度智能体). "
-                "You coordinate specialist agents using the Agent-as-Tool architecture to accomplish user requests:\n"
-                "1. `delegate_to_knowledge_agent`: Delegate to KnowledgeAgent for searching knowledge bases, extracting facts, and retrieving reference documents.\n"
-                "2. `delegate_to_host_agent`: Delegate to HostAgent for querying server status, inspecting hosts, and executing controlled commands.\n"
-                "When the user asks questions or issues tasks, determine the necessary domain tasks and delegate them to the appropriate specialist agents. "
-                "Synthesize their returned findings to provide a complete, clear, and accurate final response."
+                "你是 Memoria 的核心主调度智能体（Orchestrator AI Agent）。\n"
+                "你通过 Agent-as-Tool 架构协调专家智能体来达成用户需求：\n"
+                "1. `delegate_to_knowledge_agent`: 委派给知识库专家 KnowledgeAgent，用于检索知识库、提取事实依据并检索参考文档。\n"
+                "2. `delegate_to_host_agent`: 委派给主机专家 HostAgent，用于查询服务器运行状态、检查主机并在授权下执行受控命令。\n"
+                "当用户提出问题或下发任务时，请自主分析所需的领域子任务，委派给合适的专家智能体，并综合其返回的结果给出准确详尽的最终解答。\n"
+                "【重要】在思考推理过程（CoT/Thinking）和最终回复中，请全程使用清晰严谨的简体中文进行思考与解答。"
             )
         return f"{base_prompt}\n\n{role_desc}".strip()

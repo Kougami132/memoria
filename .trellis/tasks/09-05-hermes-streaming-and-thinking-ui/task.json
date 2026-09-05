@@ -1,0 +1,30 @@
+{
+  "id": "09-05-hermes-streaming-and-thinking-ui",
+  "name": "09-05-hermes-streaming-and-thinking-ui",
+  "title": "Hermes-style agent token streaming, thinking fold and live tool state",
+  "description": "Implement Hermes-style token streaming, collapsible thinking process, and real-time tool state while preserving tracing and sources",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "kougami",
+  "assignee": "kougami",
+  "createdAt": "2026-09-05",
+  "completedAt": "2026-09-05",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "memoria/agents/engine.py",
+    "web/src/api.ts",
+    "web/src/pages/AgenticChat.tsx"
+  ],
+  "notes": "",
+  "meta": {}
+}

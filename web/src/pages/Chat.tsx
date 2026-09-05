@@ -986,27 +986,6 @@ function ChatMessageItem({
           )
         ) : (
           <div className="w-full space-y-3">
-            {/* Thought Chain (if exists) */}
-            {thought && (
-              <div className="rounded-lg border border-primary/20 bg-primary/5 text-xs overflow-hidden">
-                <button
-                  onClick={() => setThoughtExpanded(!thoughtExpanded)}
-                  className="w-full flex items-center justify-between px-3 py-2 text-primary font-medium hover:bg-primary/10 transition-colors"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>模型思考过程 (CoT)</span>
-                  </div>
-                  {thoughtExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-                {thoughtExpanded && (
-                  <div className="p-3 pt-1 text-muted-foreground border-t border-primary/10 whitespace-pre-wrap leading-relaxed">
-                    {thought}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Traces / Steps if available */}
             {trace && trace.spans && trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length > 0 && (
               <div className="rounded-lg border border-border bg-muted/30 text-xs overflow-hidden">
@@ -1039,6 +1018,27 @@ function ChatMessageItem({
                     {trace.spans.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).map((span, idx) => (
                       <TraceSpanCard key={span.id || idx} span={span} />
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Thought Chain (if exists) */}
+            {thought && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 text-xs overflow-hidden">
+                <button
+                  onClick={() => setThoughtExpanded(!thoughtExpanded)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-primary font-medium hover:bg-primary/10 transition-colors"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>模型思考过程 (CoT)</span>
+                  </div>
+                  {thoughtExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                {thoughtExpanded && (
+                  <div className="p-3 pt-1 text-muted-foreground border-t border-primary/10 whitespace-pre-wrap leading-relaxed">
+                    {thought}
                   </div>
                 )}
               </div>
@@ -1168,27 +1168,6 @@ function StreamingMessageItem({
       </div>
 
       <div className="flex flex-col gap-2.5 max-w-[85%] w-full">
-        {/* Real-time Thought Chain */}
-        {state.thought && (
-          <div className="rounded-lg border border-primary/30 bg-primary/5 text-xs overflow-hidden">
-            <button
-              onClick={() => setThoughtExpanded(!thoughtExpanded)}
-              className="w-full flex items-center justify-between px-3 py-2 text-primary font-medium hover:bg-primary/10 transition-colors"
-            >
-              <div className="flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 animate-spin text-primary" />
-                <span>模型思考过程 (CoT)</span>
-              </div>
-              {thoughtExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-            {thoughtExpanded && (
-              <div className="p-3 pt-1 text-muted-foreground border-t border-primary/10 whitespace-pre-wrap leading-relaxed">
-                {state.thought}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Real-time Tool Execution Traces */}
         {state.traces && state.traces.filter((s) => !(s.type === 'agent' && !s.parent_id && (s.name === 'Memoria AI Agent' || s.name === 'Orchestrator'))).length > 0 && (
           <div className="rounded-lg border border-border bg-muted/30 text-xs overflow-hidden">
@@ -1223,6 +1202,27 @@ function StreamingMessageItem({
                 ))}
               </div>
             )}
+
+        {/* Real-time Thought Chain */}
+        {state.thought && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 text-xs overflow-hidden">
+            <button
+              onClick={() => setThoughtExpanded(!thoughtExpanded)}
+              className="w-full flex items-center justify-between px-3 py-2 text-primary font-medium hover:bg-primary/10 transition-colors"
+            >
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 animate-spin text-primary" />
+                <span>模型思考过程 (CoT)</span>
+              </div>
+              {thoughtExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {thoughtExpanded && (
+              <div className="p-3 pt-1 text-muted-foreground border-t border-primary/10 whitespace-pre-wrap leading-relaxed">
+                {state.thought}
+              </div>
+            )}
+          </div>
+        )}
           </div>
         )}
 

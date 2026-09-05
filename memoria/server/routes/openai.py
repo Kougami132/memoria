@@ -534,7 +534,7 @@ def create_response(
                             "duration_ms": span.get("duration_ms"),
                             "data": span.get("data", {}),
                             "error": span.get("error"),
-                        }
+                         }
                         span_event = {
                             "type": "response.output_item.added" if phase == "start" else "response.output_item.done",
                             "response_id": response_id,
@@ -542,6 +542,37 @@ def create_response(
                             "span": span_item,
                         }
                         yield f"event: response.output_item.{'added' if phase == 'start' else 'done'}\ndata: {json.dumps(span_event, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "tool_start":
+                        tool_start_event = {
+                            "type": "response.tool.start",
+                            "response_id": response_id,
+                            "tool_name": event.get("tool_name"),
+                            "tool_agent": event.get("tool_agent"),
+                            "args": event.get("args"),
+                        }
+                        yield f"event: response.tool.start\ndata: {json.dumps(tool_start_event, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "tool_end":
+                        tool_end_event = {
+                            "type": "response.tool.end",
+                            "response_id": response_id,
+                            "tool_name": event.get("tool_name"),
+                            "tool_agent": event.get("tool_agent"),
+                            "duration_ms": event.get("duration_ms"),
+                            "error": event.get("error"),
+                        }
+                        yield f"event: response.tool.end\ndata: {json.dumps(tool_end_event, ensure_ascii=False)}\n\n"
+
+                    elif event_type == "sources":
+                        sources = event.get("sources", [])
+                        if sources:
+                            sources_event = {
+                                "type": "response.sources",
+                                "response_id": response_id,
+                                "sources": sources,
+                            }
+                            yield f"event: response.sources\ndata: {json.dumps(sources_event, ensure_ascii=False)}\n\n"
 
                     elif event_type == "done":
                         done_trace = event.get("trace")
