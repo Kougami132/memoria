@@ -110,9 +110,54 @@ export interface InvocationLogsResponse {
 
 export interface SystemLogsResponse {
   status: string
-  placeholder: boolean
+  file_exists: boolean
+  file_size?: number
+  total: number
+  items: SystemLogItem[]
+  message?: string
+}
+
+export interface SystemLogItem {
+  timestamp: string
+  level: string
+  component: string
   message: string
-  items: any[]
+  raw: string
+}
+
+export interface QQBotLog {
+  id: string
+  timestamp: string
+  category: 'connection' | 'message' | string
+  level: 'INFO' | 'WARN' | 'ERROR' | string
+  event_type: string
+  source_type?: string | null
+  source_id?: string | null
+  user_name?: string | null
+  summary: string
+  duration_ms: number
+  details?: string | null
+}
+
+export interface QQBotStats {
+  total_events: number
+  message_count: number
+  connection_count: number
+  error_count: number
+  last_event_time?: string | null
+}
+
+export interface QQBotStatusResponse {
+  status: string
+  last_error?: string | null
+  stats: QQBotStats
+}
+
+export interface QQBotEventsResponse {
+  items: QQBotLog[]
+  limit: number
+  offset: number
+  stats: QQBotStats
 }
 
 export interface AgentTrace {
@@ -556,5 +601,29 @@ export const logsApi = {
     return req<InvocationLogsResponse>(`/logs/invocations${queryStr}`)
   },
   clearInvocations: () => req<void>('/logs/invocations', { method: 'DELETE' }),
-  getSystemLogs: () => req<SystemLogsResponse>('/logs/system'),
+  getQQBotStatus: () => req<QQBotStatusResponse>('/logs/qqbot/status'),
+  listQQBotEvents: (params?: { category?: string; level?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.category) q.set('category', params.category)
+    if (params?.level) q.set('level', params.level)
+    if (params?.limit) q.set('limit', String(params.limit))
+    if (params?.offset) q.set('offset', String(params.offset))
+    const queryStr = q.toString() ? `?${q.toString()}` : ''
+    return req<QQBotEventsResponse>(`/logs/qqbot/events${queryStr}`)
+  },
+  clearQQBotEvents: (category?: string) => {
+    const q = new URLSearchParams()
+    if (category) q.set('category', category)
+    const queryStr = q.toString() ? `?${q.toString()}` : ''
+    return req<void>(`/logs/qqbot/events${queryStr}`, { method: 'DELETE' })
+  },
+  getSystemLogs: (params?: { lines?: number; level?: string; search?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.lines) q.set('lines', String(params.lines))
+    if (params?.level) q.set('level', params.level)
+    if (params?.search) q.set('search', params.search)
+    const queryStr = q.toString() ? `?${q.toString()}` : ''
+    return req<SystemLogsResponse>(`/logs/system${queryStr}`)
+  },
+  getSystemLogDownloadUrl: () => `${BASE}/logs/system/download`,
 }

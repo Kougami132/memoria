@@ -121,6 +121,20 @@ class ApiInvocationLogRow(Base):
     session_id = Column(String, nullable=True)
     error_msg = Column(Text, nullable=True)
 
+class QqbotLogRow(Base):
+    __tablename__ = "qqbot_logs"
+    id = Column(String, primary_key=True)
+    timestamp = Column(String, nullable=False)
+    category = Column(String, nullable=False)  # "connection" | "message"
+    level = Column(String, nullable=False, default="INFO")  # "INFO" | "WARN" | "ERROR"
+    event_type = Column(String, nullable=False)  # CONNECTED, DISCONNECTED, HEARTBEAT, RECONNECT, RATE_LIMIT, MSG_RECV, MSG_SENT, EXEC_ERROR
+    source_type = Column(String, nullable=True)  # "c2c" | "group" | "system"
+    source_id = Column(String, nullable=True)
+    user_name = Column(String, nullable=True)
+    summary = Column(Text, nullable=False)
+    duration_ms = Column(Integer, nullable=False, default=0)
+    details = Column(Text, nullable=True)
+
 class SessionRow(Base):
     __tablename__ = "sessions"
     id = Column(String, primary_key=True)
@@ -1244,3 +1258,113 @@ class DB:
         with self._s() as s:
             count = s.query(ApiInvocationLogRow).delete()
             return count
+
+    # ------------------------------------------------------------------
+    # QQBot Logs & Stats
+    # ------------------------------------------------------------------
+
+    def log_qqbot_event(
+        self,
+        category: str,
+        event_type: str,
+        summary: str,
+        level: str = "INFO",
+        source_type: str | None = None,
+        source_id: str | None = None,
+        user_name: str | None = None,
+        duration_ms: int = 0,
+        details: str | None = None,
+    ) -> dict:
+        log_id = f"qqlog-{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        row = QqbotLogRow(
+            id=log_id,
+            timestamp=now,
+            category=category,
+            level=level.upper(),
+            event_type=event_type,
+            source_type=source_type,
+            source_id=source_id,
+            user_name=user_name,
+            summary=summary,
+            duration_ms=duration_ms,
+            details=details,
+        )
+        with self._s() as s:
+            s.add(row)
+        return {
+            "id": log_id,
+            "timestamp": now,
+            "category": category,
+            "level": level.upper(),
+            "event_type": event_type,
+            "source_type": source_type,
+            "source_id": source_id,
+            "user_name": user_name,
+            "summary": summary,
+            "duration_ms": duration_ms,
+            "details": details,
+        }
+
+    def list_qqbot_logs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        category: str | None = None,
+        level: str | None = None,
+    ) -> list[dict]:
+        with self._s() as s:
+            q = s.query(QqbotLogRow)
+            if category:
+                q = q.filter(QqbotLogRow.category == category)
+            if level:
+                q = q.filter(QqbotLogRow.level == level.upper())
+            rows = (
+                q.order_by(desc(QqbotLogRow.timestamp))
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": r.id,
+                    "timestamp": r.timestamp,
+                    "category": r.category,
+                    "level": r.level,
+                    "event_type": r.event_type,
+                    "source_type": r.source_type,
+                    "source_id": r.source_id,
+                    "user_name": r.user_name,
+                    "summary": r.summary,
+                    "duration_ms": r.duration_ms,
+                    "details": r.details,
+                }
+                for r in rows
+            ]
+
+    def clear_qqbot_logs(self, category: str | None = None) -> int:
+        with self._s() as s:
+            q = s.query(QqbotLogRow)
+            if category:
+                q = q.filter(QqbotLogRow.category == category)
+            count = q.delete()
+            return count
+
+    def get_qqbot_stats(self) -> dict:
+        with self._s() as s:
+            total_events = s.query(QqbotLogRow).count()
+            msg_count = s.query(QqbotLogRow).filter(QqbotLogRow.category == "message").count()
+            conn_count = s.query(QqbotLogRow).filter(QqbotLogRow.category == "connection").count()
+            error_count = s.query(QqbotLogRow).filter(QqbotLogRow.level == "ERROR").count()
+            last_event = (
+                s.query(QqbotLogRow)
+                .order_by(desc(QqbotLogRow.timestamp))
+                .first()
+            )
+            return {
+                "total_events": total_events,
+                "message_count": msg_count,
+                "connection_count": conn_count,
+                "error_count": error_count,
+                "last_event_time": last_event.timestamp if last_event else None,
+            }
