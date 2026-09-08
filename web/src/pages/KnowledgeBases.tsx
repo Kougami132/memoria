@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Plus, ChevronDown, ChevronRight, FileText, Trash2, Upload, Database, FolderOpen, RefreshCw, Unlink, Pencil, Check, X } from 'lucide-react'
 import * as api from '@/api'
@@ -393,12 +394,13 @@ function VaultPanel({ kbId }: { kbId: string }) {
             )}
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
               <span>自动同步</span>
-              <button
-                className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${vault.auto_sync ? 'bg-primary' : 'bg-muted-foreground/30'}`}
-                onClick={() => toggleAutoSync.mutate(!vault.auto_sync)}
-              >
-                <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${vault.auto_sync ? 'translate-x-4' : 'translate-x-0.5'}`} />
-              </button>
+              <Switch
+                className="h-4 w-8"
+                checked={Boolean(vault.auto_sync)}
+                onCheckedChange={(checked) => toggleAutoSync.mutate(checked)}
+                disabled={toggleAutoSync.isPending}
+                aria-label="自动同步"
+              />
             </div>
           </div>
         </div>
