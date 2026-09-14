@@ -350,7 +350,15 @@ export default function Settings() {
                   size="sm"
                   className="shrink-0 gap-1.5 rounded-xl border-border text-xs h-9"
                   disabled={embedTest.status === 'loading' || !form.embedding_model}
-                  onClick={runTest(api.testEmbedding, setEmbedTest)}
+                  onClick={runTest(
+                    () =>
+                      api.testEmbedding({
+                        openai_base_url: form.openai_base_url,
+                        api_key: form.openai_api_key !== settings?.openai_api_key ? form.openai_api_key : undefined,
+                        embedding_model: form.embedding_model,
+                      }),
+                    setEmbedTest
+                  )}
                 >
                   <FlaskConical className="h-3.5 w-3.5" />
                   测试
@@ -384,7 +392,15 @@ export default function Settings() {
                   size="sm"
                   className="shrink-0 gap-1.5 rounded-xl border-border text-xs h-9"
                   disabled={chatTest.status === 'loading' || !form.llm_model}
-                  onClick={runTest(api.testChat, setChatTest)}
+                  onClick={runTest(
+                    () =>
+                      api.testChat({
+                        openai_base_url: form.openai_base_url,
+                        api_key: form.openai_api_key !== settings?.openai_api_key ? form.openai_api_key : undefined,
+                        llm_model: form.llm_model,
+                      }),
+                    setChatTest
+                  )}
                 >
                   <FlaskConical className="h-3.5 w-3.5" />
                   测试

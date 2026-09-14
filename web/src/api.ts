@@ -498,10 +498,24 @@ export const fetchModels = (data?: { openai_base_url?: string; api_key?: string 
     method: 'POST',
     ...json(data || {}),
   })
-export const testEmbedding = () =>
-  req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', { method: 'POST' })
-export const testChat = () =>
-  req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', { method: 'POST' })
+export const testEmbedding = (data?: {
+  openai_base_url?: string;
+  api_key?: string;
+  embedding_model?: string;
+}) =>
+  req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', {
+    method: 'POST',
+    ...json(data || {}),
+  })
+export const testChat = (data?: {
+  openai_base_url?: string;
+  api_key?: string;
+  llm_model?: string;
+}) =>
+  req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', {
+    method: 'POST',
+    ...json(data || {}),
+  })
 export const getQQSettings = () => req<QQSettings>('/settings/qq')
 export const updateQQSettings = (data: QQSettingsUpdate) =>
   req<QQSettings>('/settings/qq', { method: 'PUT', ...json(data) })

@@ -651,3 +651,85 @@ def test_api_logs_and_clear(client):
 
     logs_after = client.get("/api/logs/invocations").json()
     assert len(logs_after["items"]) == 0
+
+
+def test_settings_test_chat_override_model(client):
+    from unittest.mock import MagicMock, patch
+    with patch("memoria.server.routes.settings.LLMCaller") as mock_caller_cls:
+        mock_instance = MagicMock()
+        mock_instance.call.return_value = "hello"
+        mock_caller_cls.return_value = mock_instance
+
+        # 1. 默认无 body，使用 effective settings
+        res = client.post("/api/settings/test-chat")
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+        default_base_url, default_api_key, default_model = mock_caller_cls.call_args[0]
+        assert default_base_url
+        assert default_api_key
+        assert default_model
+
+        # 2. 传入当前配置（例如换成了 gemini，修改了 base_url 等），应该使用传入的参数
+        res2 = client.post("/api/settings/test-chat", json={
+            "llm_model": "gemini-2.5-flash",
+            "openai_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "api_key": "custom-key",
+        })
+        assert res2.status_code == 200
+        assert res2.json()["ok"] is True
+        mock_caller_cls.assert_called_with(
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "custom-key",
+            "gemini-2.5-flash",
+        )
+
+        # 3. 传入模型但未传 api_key（例如空字符串或 None），回退使用 effective api_key
+        res3 = client.post("/api/settings/test-chat", json={
+            "llm_model": "deepseek-chat",
+            "api_key": "",
+        })
+        assert res3.status_code == 200
+        mock_caller_cls.assert_called_with(default_base_url, default_api_key, "deepseek-chat")
+
+
+def test_settings_test_embedding_override_model(client):
+    from unittest.mock import MagicMock, patch
+    with patch("memoria.server.routes.settings.Embedder") as mock_embedder_cls:
+        mock_instance = MagicMock()
+        mock_instance.embed.return_value = [[0.1, 0.2, 0.3]]
+        mock_embedder_cls.return_value = mock_instance
+
+        # 1. 默认无 body，使用 effective settings
+        res = client.post("/api/settings/test-embedding")
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+        assert res.json()["dimensions"] == 3
+        default_base_url, default_api_key, default_model = mock_embedder_cls.call_args[0]
+        assert default_base_url
+        assert default_api_key
+        assert default_model
+
+        # 2. 传入当前配置
+        res2 = client.post("/api/settings/test-embedding", json={
+            "embedding_model": "text-embedding-3-large",
+            "openai_base_url": "https://custom.embed.api/v1",
+            "api_key": "embed-key",
+        })
+        assert res2.status_code == 200
+        assert res2.json()["dimensions"] == 3
+        mock_embedder_cls.assert_called_with(
+            "https://custom.embed.api/v1",
+            "embed-key",
+            "text-embedding-3-large",
+        )
+
+        # 3. 传入模型但未传 api_key，回退使用 effective api_key
+        res3 = client.post("/api/settings/test-embedding", json={
+            "embedding_model": "bge-m3",
+            "api_key": "",
+        })
+        assert res3.status_code == 200
+        mock_embedder_cls.assert_called_with(default_base_url, default_api_key, "bge-m3")
+
+
+

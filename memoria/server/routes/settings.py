@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+class TestEmbeddingRequest(BaseModel):
+    openai_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+
+class TestChatRequest(BaseModel):
+    openai_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    llm_model: Optional[str] = None
+
+
 class FetchModelsRequest(BaseModel):
     openai_base_url: Optional[str] = None
     api_key: Optional[str] = None
@@ -140,10 +152,12 @@ def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get
 
 
 @router.post("/test-embedding")
-def test_embedding(db: DB = Depends(get_db)):
+def test_embedding(body: Optional[TestEmbeddingRequest] = None, db: DB = Depends(get_db)):
     effective = get_effective_settings(db)
-    embedder = Embedder(effective["openai_base_url"], effective["openai_api_key"],
-                        effective["embedding_model"])
+    base_url = (body.openai_base_url if body and body.openai_base_url else None) or effective["openai_base_url"]
+    api_key = (body.api_key if body and body.api_key else None) or effective["openai_api_key"]
+    model = (body.embedding_model if body and body.embedding_model else None) or effective["embedding_model"]
+    embedder = Embedder(base_url, api_key, model)
     try:
         vec = embedder.embed(["test"])
         return {"ok": True, "dimensions": len(vec[0])}
@@ -152,11 +166,13 @@ def test_embedding(db: DB = Depends(get_db)):
 
 
 @router.post("/test-chat")
-def test_chat(db: DB = Depends(get_db)):
+def test_chat(body: Optional[TestChatRequest] = None, db: DB = Depends(get_db)):
     import time
     effective = get_effective_settings(db)
-    llm = LLMCaller(effective["openai_base_url"], effective["openai_api_key"],
-                    effective["llm_model"])
+    base_url = (body.openai_base_url if body and body.openai_base_url else None) or effective["openai_base_url"]
+    api_key = (body.api_key if body and body.api_key else None) or effective["openai_api_key"]
+    model = (body.llm_model if body and body.llm_model else None) or effective["llm_model"]
+    llm = LLMCaller(base_url, api_key, model)
     try:
         t0 = time.monotonic()
         llm.call([{"role": "user", "content": "hi"}])
