@@ -260,8 +260,8 @@ def _normalize_span(exported: dict[str, Any]) -> dict:
         agent_role = "orchestrator"
         parent_agent_id = None
     else:
-        agent_id = exported.get("agent_id") or span_data.get("agent_id") or meta.get("agent_id") or ("knowledge_agent" if tool_name and "knowledge" in tool_name else "host_agent" if tool_name and "host" in tool_name else "specialist")
-        agent_name = exported.get("agent_name") or span_data.get("agent_name") or meta.get("agent_name") or ("KnowledgeAgent" if agent_id == "knowledge_agent" else "HostAgent" if agent_id == "host_agent" else "SpecialistAgent")
+        agent_id = exported.get("agent_id") or span_data.get("agent_id") or meta.get("agent_id") or ("knowledge_agent" if tool_name and "knowledge" in tool_name else "host_agent" if tool_name and "host" in tool_name else "web_agent" if tool_name and "web" in tool_name else "specialist")
+        agent_name = exported.get("agent_name") or span_data.get("agent_name") or meta.get("agent_name") or ("KnowledgeAgent" if agent_id == "knowledge_agent" else "HostAgent" if agent_id == "host_agent" else "WebAgent" if agent_id == "web_agent" else "SpecialistAgent")
         agent_role = "specialist"
         parent_agent_id = exported.get("parent_agent_id") or span_data.get("parent_agent_id") or "orchestrator"
 
@@ -338,7 +338,11 @@ def _ensure_local_trace_processor(set_trace_processors: Any) -> None:
 
 
 
-def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) -> list[dict]:
+def _get_agent_tools_schema(
+    include_kb: bool = True,
+    include_host: bool = True,
+    include_web: bool = False,
+) -> list[dict]:
     schemas = []
     if include_kb:
         schemas.extend([
@@ -399,6 +403,32 @@ def _get_agent_tools_schema(include_kb: bool = True, include_host: bool = True) 
                 },
             },
         ])
+    if include_web:
+        schemas.extend([
+            {
+                "type": "function",
+                "function": {
+                    "name": "delegate_to_web_agent",
+                    "description": "【多 Agent 委派】委派网页联网检索专家 WebAgent 查询互联网实时公开信息、技术资讯或外部知识。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "联网搜索查询词或关键问题",
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "返回的搜索结果最大数量，默认5",
+                                "default": 5,
+                            },
+                        },
+                        "required": ["query"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        ])
     return schemas
 
 
@@ -451,6 +481,10 @@ async def _execute_agent_tool_async(
                 db=db,
             )
         return tools.delegate_to_host_agent(instruction=instruction, host_id=host_id, command=command)
+    elif name == "delegate_to_web_agent":
+        query = str(args.get("query") or "")
+        max_results = int(args.get("max_results") or 5)
+        return tools.delegate_to_web_agent(query=query, max_results=max_results)
     elif name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
     elif name == "search_knowledge_base":
@@ -458,11 +492,21 @@ async def _execute_agent_tool_async(
         query = str(args.get("query") or "")
         top_k = int(args.get("top_k") or 5)
         return tools.search_knowledge_base(kb_id, query, top_k)
+    elif name == "read_knowledge_document":
+        doc_id = str(args.get("doc_id") or "")
+        start_line = int(args.get("start_line") or 1)
+        max_lines = int(args.get("max_lines") or 300)
+        return tools.read_knowledge_document(doc_id=doc_id, start_line=start_line, max_lines=max_lines)
     elif name == "list_hosts":
         return tools.list_hosts()
     elif name == "get_host_info":
         host_id = str(args.get("host_id") or "")
         return tools.get_host_info(host_id)
+    elif name == "read_host_log_tail":
+        host_id = str(args.get("host_id") or "")
+        path = str(args.get("path") or "")
+        lines = int(args.get("lines") or 50)
+        return tools.read_host_log_tail(host_id=host_id, path=path, lines=lines)
     elif name == "run_host_command":
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")
@@ -692,6 +736,10 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
         if command and host_id:
             return sync_host_command(str(host_id), str(command))
         return tools.delegate_to_host_agent(instruction=instruction, host_id=host_id, command=command)
+    elif name == "delegate_to_web_agent":
+        query = str(args.get("query") or "")
+        max_results = int(args.get("max_results") or 5)
+        return tools.delegate_to_web_agent(query=query, max_results=max_results)
     if name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
     elif name == "search_knowledge_base":
@@ -699,11 +747,21 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
         query = str(args.get("query") or "")
         top_k = int(args.get("top_k") or 5)
         return tools.search_knowledge_base(kb_id, query, top_k)
+    elif name == "read_knowledge_document":
+        doc_id = str(args.get("doc_id") or "")
+        start_line = int(args.get("start_line") or 1)
+        max_lines = int(args.get("max_lines") or 300)
+        return tools.read_knowledge_document(doc_id=doc_id, start_line=start_line, max_lines=max_lines)
     elif name == "list_hosts":
         return tools.list_hosts()
     elif name == "get_host_info":
         host_id = str(args.get("host_id") or "")
         return tools.get_host_info(host_id)
+    elif name == "read_host_log_tail":
+        host_id = str(args.get("host_id") or "")
+        path = str(args.get("path") or "")
+        lines = int(args.get("lines") or 50)
+        return tools.read_host_log_tail(host_id=host_id, path=path, lines=lines)
     elif name == "run_host_command":
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")
@@ -1272,7 +1330,6 @@ class MockAgentRunner:
             tools.search_knowledge_base(kb["id"], message, top_k=3)
         if hasattr(tools, "list_hosts"):
             for host in tools.list_hosts():
-                tools.get_host_info(host["id"])
                 break
         return AgentRunnerOutput(answer="[mock agentic response]")
 
@@ -1345,6 +1402,7 @@ class AgentEngine:
         tools_schema = _get_agent_tools_schema(
             include_kb=bool(allowed_kb_ids),
             include_host=bool(allowed_host_ids),
+            include_web=bool(effective.get("enable_web_search")),
         )
 
         history = self.db.get_messages(session_id, limit=self.history_limit)
@@ -1436,6 +1494,7 @@ class AgentEngine:
         tools_schema = _get_agent_tools_schema(
             include_kb=bool(allowed_kb_ids),
             include_host=bool(allowed_host_ids),
+            include_web=bool(effective.get("enable_web_search")),
         )
         history = self.db.get_messages(session_id, limit=self.history_limit)
         prompt = self._build_prompt(message, history)
@@ -1575,6 +1634,13 @@ class AgentEngine:
         custom_system_prompt: str | None = None,
         is_bot: bool = False,
     ) -> str:
+        from memoria.agents.temporal import get_current_temporal_context
+        temporal_info = get_current_temporal_context()
+        time_banner = f"【当前系统时间】{temporal_info['formatted']} (ISO: {temporal_info['iso']})。在回答涉及时间、最新信息或历史对比的问题时，请严格以该时间为现实时间基准。"
+
+        enable_web = bool(effective.get("enable_web_search"))
+        web_desc = "3. `delegate_to_web_agent`: 委派给网页联网检索专家 WebAgent，用于查询实时外部资讯、互联网公开资料与时效性信息。\n" if enable_web else ""
+
         base_prompt = custom_system_prompt if (custom_system_prompt is not None and custom_system_prompt != "") else (effective.get("system_prompt") or "")
         if is_bot:
             role_desc = (
@@ -1582,6 +1648,7 @@ class AgentEngine:
                 "你通过 Agent-as-Tool 架构协调各领域的专家子智能体来达成用户需求：\n"
                 "1. `delegate_to_knowledge_agent`: 委派给知识库专家 KnowledgeAgent，用于检索知识库、提取事实依据并检索参考文档。\n"
                 "2. `delegate_to_host_agent`: 委派给主机专家 HostAgent，用于查询服务器运行状态、检查主机并在授权下执行控制命令。\n"
+                f"{web_desc}"
                 "当用户提出问题或下发任务时，请自主分析所需的领域子任务，委派给合适的专家智能体，并综合其返回的结果给出准确详尽的最终解答。\n"
                 "【重要】在思考推理过程（CoT/Thinking）和最终回复中，请全程使用清晰严谨的简体中文进行思考与解答。"
             )
@@ -1591,10 +1658,12 @@ class AgentEngine:
                 "你通过 Agent-as-Tool 架构协调专家智能体来达成用户需求：\n"
                 "1. `delegate_to_knowledge_agent`: 委派给知识库专家 KnowledgeAgent，用于检索知识库、提取事实依据并检索参考文档。\n"
                 "2. `delegate_to_host_agent`: 委派给主机专家 HostAgent，用于查询服务器运行状态、检查主机并在授权下执行受控命令。\n"
+                f"{web_desc}"
                 "当用户提出问题或下发任务时，请自主分析所需的领域子任务，委派给合适的专家智能体，并综合其返回的结果给出准确详尽的最终解答。\n"
                 "【重要】在思考推理过程（CoT/Thinking）和最终回复中，请全程使用清晰严谨的简体中文进行思考与解答。"
             )
-        return f"{base_prompt}\n\n{role_desc}".strip()
+        combined = f"{base_prompt}\n\n{role_desc}".strip()
+        return f"{time_banner}\n\n{combined}".strip()
 
 
 # Backward compatibility alias

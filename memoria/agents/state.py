@@ -11,6 +11,27 @@ class SourceCollector:
 
     def __post_init__(self) -> None:
         self._items: dict[tuple[str, str, str, str], dict] = {}
+        self._web_items: list[dict] = []
+
+    def add_web_result(self, result: dict) -> dict:
+        url = str(result.get("url") or "")
+        title = str(result.get("title") or "")
+        snippet = str(result.get("snippet") or "")
+        # Avoid exact duplicate urls
+        for existing in self._web_items:
+            if existing.get("url") == url:
+                return existing
+        item = {
+            "type": "web",
+            "url": url,
+            "title": title,
+            "snippet": snippet,
+        }
+        self._web_items.append(item)
+        return item
+
+    def list_web_sources(self) -> list[dict]:
+        return list(self._web_items[: self.max_sources])
 
     def add_chunk(self, kb_id: str, chunk: dict, doc_info: dict | None = None) -> dict:
         text = str(chunk.get("text") or "")
@@ -41,7 +62,9 @@ class SourceCollector:
     def list_sources(self) -> list[dict]:
         sources = list(self._items.values())
         sources.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
-        return sources[: self.max_sources]
+        combined = list(sources)
+        combined.extend(self._web_items)
+        return combined[: self.max_sources]
 
     def used_kbs(self) -> list[str]:
         seen: set[str] = set()

@@ -47,6 +47,10 @@ class SettingsUpdate(BaseModel):
     chunk_overlap: Optional[int] = None
     vault_sync_interval_minutes: Optional[int] = None
     host_dangerous_patterns: Optional[list[str]] = None
+    enable_web_search: Optional[bool] = None
+    web_search_provider: Optional[str] = None
+    web_search_api_key: Optional[str] = None
+    web_search_endpoint: Optional[str] = None
 
 
 class QQSettingsUpdate(BaseModel):
@@ -128,6 +132,10 @@ def update_settings(body: SettingsUpdate, request: Request, db: DB = Depends(get
         "chunk_overlap": str(body.chunk_overlap) if body.chunk_overlap is not None else None,
         "vault_sync_interval_minutes": str(body.vault_sync_interval_minutes) if body.vault_sync_interval_minutes is not None else None,
         "host_dangerous_patterns": json.dumps(body.host_dangerous_patterns) if body.host_dangerous_patterns is not None else None,
+        "enable_web_search": ("true" if body.enable_web_search else "false") if body.enable_web_search is not None else None,
+        "web_search_provider": body.web_search_provider if body.web_search_provider is not None else None,
+        "web_search_api_key": body.web_search_api_key if body.web_search_api_key is not None else None,
+        "web_search_endpoint": body.web_search_endpoint if body.web_search_endpoint is not None else None,
     }
     changed = False
     for key, value in mapping.items():

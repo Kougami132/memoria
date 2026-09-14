@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     openai_base_url: str = "http://localhost"
     openai_api_key: str = "mock"
     external_api_token: str = ""
+    enable_web_search: bool = False
+    web_search_provider: str = "duckduckgo"
+    web_search_api_key: str = ""
+    web_search_endpoint: str = ""
     use_mock: bool = False
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "deepseek-v4-flash"
@@ -57,6 +61,10 @@ def get_effective_settings(db) -> dict:
         "chunk_overlap": str(settings.chunk_overlap),
         "vault_sync_interval_minutes": "15",
         "host_dangerous_patterns": json.dumps(DEFAULT_HOST_DANGEROUS_PATTERNS),
+        "enable_web_search": "true" if settings.enable_web_search else "false",
+        "web_search_provider": str(settings.web_search_provider),
+        "web_search_api_key": str(settings.web_search_api_key),
+        "web_search_endpoint": str(settings.web_search_endpoint),
     }
     fields.update({k: v for k, v in overrides.items() if k in fields})
     url = fields["openai_base_url"].rstrip("/")

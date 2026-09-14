@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,22 @@ TOOL_METADATA: dict[str, dict[str, str]] = {
         "description": "委派专精于远程服务器探查与受控命令执行的 HostAgent 处理主机运维任务",
         "agent_id": "host_agent",
         "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
+    "delegate_to_web_agent": {
+        "label": "委派互联网搜索专家",
+        "description": "委派专精于公开网络检索与时事资讯查询的 WebAgent 处理外部检索任务",
+        "agent_id": "web_agent",
+        "agent_name": "WebAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
+    "web_search": {
+        "label": "互联网网页检索",
+        "description": "在公开互联网中检索相关网页与最新实时信息",
+        "agent_id": "web_agent",
+        "agent_name": "WebAgent",
         "agent_role": "specialist",
         "parent_agent_id": "orchestrator",
     },
@@ -110,12 +127,85 @@ class AgentKnowledgeTools:
             })
         return results
 
+    def read_knowledge_document(
+        self,
+        doc_id: str,
+        start_line: int = 1,
+        max_lines: int = 300,
+    ) -> dict:
+        """Read lines from a specific document in an allowed knowledge base."""
+        doc = self.db.get_doc(doc_id)
+        if not doc:
+            raise KnowledgeBaseAccessError(f"Document {doc_id} not found")
+        if doc.get("kb_id") not in self.allowed_kb_ids:
+            raise KnowledgeBaseAccessError(
+                f"Document {doc_id} belongs to KB {doc.get('kb_id')} which is not in allowed_kb_ids: {self.allowed_kb_ids}"
+            )
+
+        file_path = doc.get("path")
+        if not file_path or not os.path.exists(file_path):
+            raise KnowledgeBaseAccessError(f"Document file {file_path} not found on disk")
+
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.readlines()
+        except Exception as exc:
+            raise KnowledgeBaseAccessError(f"Failed to read document {doc_id}: {exc}") from exc
+
+        total_lines = len(all_lines)
+        start_idx = max(0, start_line - 1)
+        end_idx = min(total_lines, start_idx + max_lines)
+        sliced_lines = all_lines[start_idx:end_idx]
+
+        content = "".join(sliced_lines)
+        return {
+            "doc_id": doc_id,
+            "filename": doc.get("filename", ""),
+            "kb_id": doc.get("kb_id", ""),
+            "start_line": start_line,
+            "line_count": len(sliced_lines),
+            "total_lines": total_lines,
+            "content": content,
+            "has_more": end_idx < total_lines,
+        }
+
+
+
+@dataclass
+class AgentWebTools:
+    """Web search tools scoped to current agent execution."""
+    collector: SourceCollector = field(default_factory=SourceCollector)
+    db: "DB | None" = None
+
+    def web_search(self, query: str, max_results: int = 5) -> dict:
+        from memoria.agents.web_search import execute_web_search
+        provider = "duckduckgo"
+        api_key = ""
+        endpoint = ""
+        if self.db:
+            provider = self.db.get_setting("web_search_provider") or "duckduckgo"
+            api_key = self.db.get_setting("web_search_api_key") or ""
+            endpoint = self.db.get_setting("web_search_endpoint") or ""
+
+        res = execute_web_search(
+            query=query,
+            provider=provider,
+            api_key=api_key,
+            endpoint=endpoint,
+            max_results=max_results,
+        )
+        if res.success:
+            for item in res.results:
+                self.collector.add_web_result(item)
+        return res.to_dict()
+
 
 @dataclass
 class AgentTools:
     """Unified tool container aggregating Knowledge, Host, and other pluggable tools."""
     knowledge: AgentKnowledgeTools
     host: AgentHostTools
+    web: AgentWebTools
 
     @classmethod
     def create(
@@ -143,7 +233,11 @@ class AgentTools:
             registry=registry,
             host_security_modes=host_security_modes,
         )
-        return cls(knowledge=kt, host=ht)
+        wt = AgentWebTools(
+            collector=collector,
+            db=db,
+        )
+        return cls(knowledge=kt, host=ht, web=wt)
 
     # Delegate knowledge base tools
     def list_knowledge_bases(self) -> list[dict]:
@@ -151,6 +245,14 @@ class AgentTools:
 
     def search_knowledge_base(self, kb_id: str, query: str, top_k: int = 5) -> list[dict]:
         return self.knowledge.search_knowledge_base(kb_id, query, top_k)
+
+    def read_knowledge_document(
+        self,
+        doc_id: str,
+        start_line: int = 1,
+        max_lines: int = 300,
+    ) -> dict:
+        return self.knowledge.read_knowledge_document(doc_id=doc_id, start_line=start_line, max_lines=max_lines)
 
     # Delegate host tools
     def list_hosts(self) -> list[dict]:
@@ -173,6 +275,20 @@ class AgentTools:
             approved=False,
             approval_token=approval_token,
             session_id=session_id,
+        )
+
+    def read_host_log_tail(
+        self,
+        host_id: str,
+        path: str,
+        lines: int = 100,
+        max_bytes: int = 32768,
+    ) -> dict:
+        return self.host.read_host_log_tail(
+            host_id=host_id,
+            path=path,
+            lines=lines,
+            max_bytes=max_bytes,
         )
 
     def delegate_to_knowledge_agent(self, query: str, kb_id: str | None = None, top_k: int = 5) -> dict:
@@ -220,3 +336,11 @@ class AgentTools:
             "instruction": instruction,
             "error": "No structured command was supplied; no host command was executed",
         }
+
+    def delegate_to_web_agent(self, query: str, max_results: int = 5) -> dict:
+        """Subagent action: Dispatch web search through WebAgent."""
+        return self.web.web_search(query=query, max_results=max_results)
+
+    def web_search(self, query: str, max_results: int = 5) -> dict:
+        """Execute a web search directly."""
+        return self.web.web_search(query=query, max_results=max_results)

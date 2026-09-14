@@ -30,6 +30,14 @@ HOST_TOOL_METADATA: dict[str, dict[str, str]] = {
         "agent_role": "specialist",
         "parent_agent_id": "orchestrator",
     },
+    "read_host_log_tail": {
+        "label": "读取主机日志文件末尾",
+        "description": "安全读取主机上指定日志文件或文本文件的末尾若干行（受行数与字符截断保护）",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
     "run_host_command": {
         "label": "在主机上执行受控命令",
         "description": "在允许的主机上运行系统状态查询或安全诊断命令（如 uptime, df -h, free -m, docker ps 等）",
@@ -100,6 +108,45 @@ class AgentHostTools:
             "memory_summary": "Total: 16 GB, Used: 6.2 GB, Free: 9.8 GB",
             "disk_summary": "/dev/vda1: 45% used",
             "status": h.get("status") or "online",
+        }
+
+    def read_host_log_tail(
+        self,
+        host_id: str,
+        path: str,
+        lines: int = 100,
+        max_bytes: int = 32768,
+    ) -> dict[str, Any]:
+        """Safely read the trailing lines of a log or text file on the host."""
+        self._ensure_allowed(host_id)
+        if not path or not path.strip():
+            return {
+                "host_id": host_id,
+                "path": path,
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "File path cannot be empty",
+                "truncated": False,
+            }
+
+        lines_to_read = max(1, min(int(lines), 500))
+        import shlex
+        cmd = f"tail -n {lines_to_read} {shlex.quote(path.strip())}"
+        res = self.run_host_command(host_id, cmd)
+        stdout = res.get("stdout", "")
+        truncated = False
+        if len(stdout) > max_bytes:
+            stdout = stdout[-max_bytes:]
+            truncated = True
+
+        return {
+            "host_id": host_id,
+            "path": path,
+            "exit_code": res.get("exit_code", 0),
+            "stdout": stdout,
+            "stderr": res.get("stderr", ""),
+            "lines": lines_to_read,
+            "truncated": truncated,
         }
 
     def run_host_command(

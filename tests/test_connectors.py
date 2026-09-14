@@ -96,13 +96,40 @@ def test_agent_host_tools_scoping(tmp_path):
     assert len(visible) == 1
     assert visible[0]["id"] == h1["id"]
 
-    # Allowed access to h1
-    info = tools.get_host_info(h1["id"])
-    assert info["host_id"] == h1["id"]
-
     # Blocked access to h2
     with pytest.raises(HostAccessError):
-        tools.get_host_info(h2["id"])
-
-    with pytest.raises(HostAccessError):
         tools.run_host_command(h2["id"], "uptime")
+
+
+def test_agent_tools_read_knowledge_document_and_host_log_tail(tmp_path, monkeypatch):
+    from memoria.agents.tools import AgentTools
+
+    db_file = str(tmp_path / "test.db")
+    db = DB(db_file)
+    kb = db.create_kb("KB 1", "test kb")
+    doc_path = str(tmp_path / "test.txt")
+    with open(doc_path, "w", encoding="utf-8") as f:
+        f.write("Line 1\nLine 2\nLine 3\nLine 4\nLine 5")
+    doc_meta = db.create_doc(kb["id"], "test.txt", doc_path, chunk_count=1)
+
+    collector = SourceCollector()
+    agent_tools = AgentTools.create(
+        db=db,
+        pipeline=None,  # type: ignore
+        allowed_kb_ids=[kb["id"]],
+        allowed_host_ids=[],
+        collector=collector,
+    )
+
+    # Test read_knowledge_document
+    doc_content = agent_tools.read_knowledge_document(doc_meta["id"])
+    assert "Line 1" in doc_content["content"]
+    assert doc_content["total_lines"] == 5
+
+    # Test with line range
+    paged = agent_tools.read_knowledge_document(doc_meta["id"], start_line=2, max_lines=2)
+    assert paged["start_line"] == 2
+    assert paged["line_count"] == 2
+    assert paged["content"] == "Line 2\nLine 3\n"
+
+

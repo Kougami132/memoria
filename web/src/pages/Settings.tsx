@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download, ShieldAlert, Radio, Database, Upload, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, Save, Check, FlaskConical, Sliders, KeyRound, MessageSquareCode, RefreshCw, Download, ShieldAlert, Radio, Database, Upload, AlertCircle, Globe } from 'lucide-react'
 import * as api from '@/api'
 import type { QQSettingsUpdate, SettingsUpdate } from '@/api'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -39,7 +39,10 @@ export default function Settings() {
 
   useEffect(() => {
     if (settings) {
-      setForm({ ...settings })
+      setForm({
+        ...settings,
+        enable_web_search: settings.enable_web_search ? 'true' : 'false',
+      })
       const initialModels = new Set<string>()
       if (settings.embedding_model) initialModels.add(settings.embedding_model)
       if (settings.llm_model) initialModels.add(settings.llm_model)
@@ -86,6 +89,18 @@ export default function Settings() {
       }
       if (form.external_api_token !== settings?.external_api_token) {
         payload.external_api_token = form.external_api_token
+      }
+      if (form.enable_web_search !== undefined) {
+        payload.enable_web_search = form.enable_web_search === 'true' || form.enable_web_search === true as unknown as string
+      }
+      if (form.web_search_provider !== undefined) {
+        payload.web_search_provider = form.web_search_provider
+      }
+      if (form.web_search_api_key !== undefined) {
+        payload.web_search_api_key = form.web_search_api_key
+      }
+      if (form.web_search_endpoint !== undefined) {
+        payload.web_search_endpoint = form.web_search_endpoint
       }
 
 
@@ -148,7 +163,7 @@ export default function Settings() {
     }
   }
 
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }))
   const setQQ = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setQQForm(f => ({ ...f, [key]: e.target.value }))
@@ -645,6 +660,79 @@ export default function Settings() {
             rows={5}
             className="rounded-xl border-border bg-background resize-none leading-relaxed"
           />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
+        <CardHeader className="pb-4">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">联网搜索 (Web Search)</CardTitle>
+          </div>
+          <CardDescription>
+            为智能体开启外网搜索能力。支持本地优先的 DuckDuckGo 免配置搜索，或接入 SearXNG / Tavily / SerpAPI
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="enable_web_search"
+              checked={form.enable_web_search === 'true' || form.enable_web_search === true as unknown as string}
+              onCheckedChange={(checked) => {
+                setForm((prev) => ({ ...prev, enable_web_search: checked ? 'true' : 'false' }))
+              }}
+            />
+            <label
+              htmlFor="enable_web_search"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+            >
+              启用联网搜索智能体 (WebAgent)
+            </label>
+          </div>
+
+          {(form.enable_web_search === 'true' || form.enable_web_search === true as unknown as string) && (
+            <div className="space-y-4 pt-2 border-t border-border">
+              <div className="space-y-1.5 max-w-xs">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">搜索服务提供商</Label>
+                <select
+                  value={form.web_search_provider || 'duckduckgo'}
+                  onChange={set('web_search_provider')}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-hidden"
+                >
+                  <option value="duckduckgo">DuckDuckGo (无需密钥 / 本地直连)</option>
+                  <option value="searxng">SearXNG (自建私有搜索引擎)</option>
+                  <option value="tavily">Tavily (AI 搜索 API)</option>
+                  <option value="serpapi">SerpAPI (Google 搜索 API)</option>
+                </select>
+              </div>
+
+              {form.web_search_provider === 'searxng' && (
+                <div className="space-y-1.5 max-w-md">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">SearXNG 服务地址</Label>
+                  <Input
+                    placeholder="http://localhost:8080"
+                    value={form.web_search_endpoint ?? ''}
+                    onChange={set('web_search_endpoint')}
+                    className="rounded-xl border-border bg-background"
+                  />
+                  <p className="text-[11px] text-muted-foreground">填写私有部署的 SearXNG 实例根地址</p>
+                </div>
+              )}
+
+              {(form.web_search_provider === 'tavily' || form.web_search_provider === 'serpapi') && (
+                <div className="space-y-1.5 max-w-md">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API 密钥 (API Key)</Label>
+                  <Input
+                    type="password"
+                    placeholder="tvly-... 或 SerpAPI Key"
+                    value={form.web_search_api_key ?? ''}
+                    onChange={set('web_search_api_key')}
+                    className="rounded-xl border-border bg-background"
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

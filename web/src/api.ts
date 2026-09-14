@@ -47,6 +47,9 @@ export interface Source {
   source?: string
   kb_id?: string
   db_doc_id?: string
+  type?: string
+  url?: string
+  title?: string
 }
 export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
 export interface AgentSource extends Source {
@@ -183,11 +186,19 @@ export interface Settings {
   llm_model: string; system_prompt: string; top_k: string; chunk_size: string; chunk_overlap: string;
   vault_sync_interval_minutes: string
   host_dangerous_patterns?: string
+  enable_web_search?: string | boolean
+  web_search_provider?: string
+  web_search_api_key?: string
+  web_search_endpoint?: string
 }
 export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; external_api_token?: string; embedding_model?: string;
   llm_model?: string; system_prompt?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
   vault_sync_interval_minutes?: number
+  enable_web_search?: boolean
+  web_search_provider?: string
+  web_search_api_key?: string
+  web_search_endpoint?: string
 }
 
 const json = (body: unknown) => ({

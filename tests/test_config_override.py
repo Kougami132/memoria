@@ -14,7 +14,8 @@ def test_get_effective_settings_defaults(db):
     assert set(result.keys()) == {
         "openai_base_url", "openai_api_key", "external_api_token", "embedding_model",
         "llm_model", "system_prompt", "top_k", "min_score", "chunk_size", "chunk_overlap",
-        "vault_sync_interval_minutes", "host_dangerous_patterns"
+        "vault_sync_interval_minutes", "host_dangerous_patterns",
+        "enable_web_search", "web_search_provider", "web_search_api_key", "web_search_endpoint"
     }
     assert result["top_k"] == str(settings.top_k)
     assert result["chunk_size"] == str(settings.chunk_size)

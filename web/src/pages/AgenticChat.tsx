@@ -28,6 +28,7 @@ import {
   BrainCircuit,
   Cpu,
   Database,
+  Globe,
   Search,
   Server,
   Terminal,
@@ -99,11 +100,13 @@ const mdComponents: Components = {
 const TOOL_CN_MAP: Record<string, string> = {
   delegate_to_knowledge_agent: '委派知识库专家 (KnowledgeAgent)',
   delegate_to_host_agent: '委派主机运维专家 (HostAgent)',
+  delegate_to_web_agent: '委派联网检索专员 (WebAgent)',
   list_knowledge_bases: '查询可用知识库',
   search_knowledge_base: '检索知识库内容',
+  read_knowledge_document: '查看知识库文档全文',
   list_hosts: '查询可用远程主机',
-  get_host_info: '获取主机运行状态',
   run_host_command: '远程执行受控命令',
+  read_host_log_tail: '读取主机日志文件末尾',
 }
 
 function getToolDisplayName(name?: string, type?: string): string {
@@ -118,11 +121,14 @@ function getToolIcon(name?: string, type?: string) {
   if (type === 'generation') return <Cpu className="w-3.5 h-3.5 text-purple-500" />
   if (name === 'delegate_to_knowledge_agent') return <Database className="w-3.5 h-3.5 text-blue-500" />
   if (name === 'delegate_to_host_agent') return <Server className="w-3.5 h-3.5 text-indigo-500" />
+  if (name === 'delegate_to_web_agent') return <Globe className="w-3.5 h-3.5 text-sky-500" />
   if (name === 'list_knowledge_bases') return <Database className="w-3.5 h-3.5 text-blue-500" />
   if (name === 'search_knowledge_base') return <Search className="w-3.5 h-3.5 text-amber-500" />
+  if (name === 'read_knowledge_document') return <BookOpen className="w-3.5 h-3.5 text-emerald-500" />
   if (name === 'list_hosts') return <Server className="w-3.5 h-3.5 text-indigo-500" />
   if (name === 'get_host_info') return <Activity className="w-3.5 h-3.5 text-emerald-500" />
   if (name === 'run_host_command') return <Terminal className="w-3.5 h-3.5 text-sky-500" />
+  if (name === 'read_host_log_tail') return <Terminal className="w-3.5 h-3.5 text-teal-500" />
   return <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
 }
 
@@ -1330,30 +1336,56 @@ function SourcesList({ sources }: { sources: Source[] }) {
       >
         <div className="flex items-center gap-1.5">
           <BookOpen className="w-3.5 h-3.5 text-primary" />
-          <span>参考依据 ({sources.length} 个片段)</span>
+          <span>参考依据 ({sources.length} 个来源/片段)</span>
         </div>
         {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
       </button>
 
       {expanded && (
         <div className="p-3 border-t border-border/60 space-y-2.5 max-h-60 overflow-y-auto">
-          {sources.map((src, idx) => (
-            <div key={idx} className="p-2 rounded border border-border/50 bg-background/60 space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-foreground truncate max-w-[70%]">
-                  [{idx + 1}] {src.filename || src.source || src.doc_id || '未知来源'}
-                </span>
-                {src.score !== undefined && (
-                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
-                    相似度: {(src.score * 100).toFixed(1)}%
-                  </Badge>
-                )}
+          {sources.map((src, idx) => {
+            const isWeb = src.type === 'web' || !!src.url
+            return (
+              <div key={idx} className="p-2 rounded border border-border/50 bg-background/60 space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-1.5 truncate max-w-[70%]">
+                    {isWeb ? (
+                      <Globe className="w-3.5 h-3.5 text-sky-500 flex-shrink-0" />
+                    ) : (
+                      <BookOpen className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    )}
+                    {isWeb && src.url ? (
+                      <a
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-primary hover:underline truncate"
+                      >
+                        [{idx + 1}] {src.title || src.filename || src.url}
+                      </a>
+                    ) : (
+                      <span className="font-semibold text-foreground truncate">
+                        [{idx + 1}] {src.filename || src.source || src.doc_id || '未知来源'}
+                      </span>
+                    )}
+                  </div>
+                  {src.score !== undefined && !isWeb && (
+                    <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                      相似度: {(src.score * 100).toFixed(1)}%
+                    </Badge>
+                  )}
+                  {isWeb && (
+                    <Badge variant="secondary" className="text-[10px] px-1 py-0 bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                      互联网来源
+                    </Badge>
+                  )}
+                </div>
+                <div className="text-muted-foreground text-[11px] line-clamp-3 leading-relaxed whitespace-pre-wrap">
+                  {src.text || (src as any).snippet}
+                </div>
               </div>
-              <div className="text-muted-foreground text-[11px] line-clamp-3 leading-relaxed whitespace-pre-wrap">
-                {src.text}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
