@@ -9,4 +9,5 @@ dist/
 .eggs/
 .ace-tool/
 .claude/worktrees/
+.scratch/
 task-prompt.md
