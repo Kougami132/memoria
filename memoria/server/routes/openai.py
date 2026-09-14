@@ -13,8 +13,8 @@ except ImportError:  # pragma: no cover
     APIError = RuntimeError
 from pydantic import BaseModel, Field
 
-from memoria.agents.engine import AgenticRagEngine
-from memoria.server.deps import get_agentic_engine, get_db, require_external_api_token
+from memoria.agents.engine import AgentEngine, AgenticRagEngine
+from memoria.server.deps import get_agent_engine, get_agentic_engine, get_db, require_external_api_token
 from memoria.storage.db import DB
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ def _estimate_tokens(text: str) -> int:
 def chat_completions(
     body: ChatCompletionRequest,
     request: Request,
-    engine: AgenticRagEngine = Depends(get_agentic_engine),
+    engine: AgentEngine = Depends(get_agent_engine),
     db: DB = Depends(get_db),
 ):
     is_web_client = (
@@ -409,7 +409,7 @@ def _extract_response_input(input_val: Union[str, List[Any]]) -> str:
 def create_response(
     body: ResponsesRequest,
     request: Request,
-    engine: AgenticRagEngine = Depends(get_agentic_engine),
+    engine: AgentEngine = Depends(get_agent_engine),
     db: DB = Depends(get_db),
 ):
     is_web_client = (

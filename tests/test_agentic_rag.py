@@ -186,18 +186,15 @@ def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_pa
     doc_file.write_text("hello agentic rag", encoding="utf-8")
     pipeline.ingest(kb_unbound["id"], str(doc_file))
 
-    response = client.post("/api/agent-chat", json={"message": "hello"})
+    response = client.post("/v1/responses", json={"model": "memoria-agent", "input": "hello"})
 
     assert response.status_code == 200
     data = response.json()
-    assert data["answer"] == "agent answer"
+    assert data["output"][0]["content"][0]["text"] == "agent answer"
     assert data["session_id"]
-    assert data["trace"]["trace_id"] == "trace-fake"
-    assert data["trace"]["group_id"] == data["session_id"]
-    assert data["trace"]["summary"]["tool_count"] == 1
     assert [kb["id"] for kb in runner.calls[0]["kbs"]] == [kb_bound["id"], kb_unbound["id"]]
     assert runner.calls[0]["message"] == "hello"
-    assert ("central Orchestrator AI Agent" in runner.calls[0]["instructions"] or "independent AI Agent assistant" in runner.calls[0]["instructions"])
+    assert ("Orchestrator AI Agent" in runner.calls[0]["instructions"])
 
     sessions = client.get("/api/agent-sessions").json()
     assert sessions[0]["id"] == data["session_id"]
@@ -214,7 +211,6 @@ def test_agentic_chat_endpoint_uses_all_kbs_and_persists_agentic_messages(tmp_pa
     assert messages[1]["trace"]["summary"]["tool_count"] == 1
 
     assert client.get(f"/api/sessions/{data['session_id']}/messages").status_code == 404
-    assert client.post(f"/api/chat/{bot['id']}", json={"message": "hello classic"}).status_code == 200
 
 
 def test_agentic_session_crud_and_reuse(tmp_path):
@@ -222,10 +218,10 @@ def test_agentic_session_crud_and_reuse(tmp_path):
     client, db, pipeline, engine = make_client(tmp_path, runner=runner)
     client.post("/api/knowledge-bases", json={"name": "kb", "description": ""})
 
-    first = client.post("/api/agent-chat", json={"message": "first"}).json()
+    first = client.post("/v1/responses", json={"model": "memoria-agent", "input": "first"}).json()
     sid = first["session_id"]
-    second = client.post("/api/agent-chat", json={"message": "second", "session_id": sid}).json()
-    other = client.post("/api/agent-chat", json={"message": "fresh session"}).json()
+    second = client.post("/v1/responses", json={"model": "memoria-agent", "input": "second", "session_id": sid}).json()
+    other = client.post("/v1/responses", json={"model": "memoria-agent", "input": "fresh session"}).json()
 
     assert second["session_id"] == sid
     assert runner.calls[0]["message"] == "first"

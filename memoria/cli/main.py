@@ -5,7 +5,7 @@ import logging
 import os
 import uvicorn
 
-from memoria.server.deps import get_db, get_pipeline
+from memoria.server.deps import get_db, get_pipeline, get_agent_engine
 
 
 def _setup_file_logging(log_path: str) -> None:
@@ -122,6 +122,6 @@ def ingest(kb_id: str, path: str) -> None:
 @click.option("--session-id", default=None)
 def query(bot_id: str, question: str, session_id: Optional[str]) -> None:
     """Query a bot."""
-    result = get_pipeline().query(bot_id, question, session_id)
+    result = get_agent_engine().run(question, session_id=session_id, bot_id=bot_id)
     click.echo(result["answer"])
     click.echo(f"[session_id: {result['session_id']}]")

@@ -172,13 +172,6 @@ export interface AgentTrace {
   summary: AgentTraceSummary
   created_at?: string
 }
-export interface AgentChatResponse {
-  answer: string
-  session_id: string
-  used_kbs: string[]
-  sources: AgentSource[]
-  trace?: AgentTrace | null
-}
 export interface ChatStreamMetaEvent { type: 'meta'; session_id: string; sources: Source[] }
 export interface ChatStreamDeltaEvent { type: 'delta'; delta: string }
 export interface ChatStreamStatusEvent { type: 'status'; message: string }
@@ -225,14 +218,6 @@ export const updateBot = (id: string, data: BotUpdate) =>
 export const deleteBot = (id: string) => req<void>(`/bots/${id}`, { method: 'DELETE' })
 export const listSessions = (botId: string) => req<Session[]>(`/bots/${botId}/sessions`)
 
-export const chat = (botId: string, message: string, sessionId?: string) =>
-  req<ChatResponse>(`/chat/${botId}`, { method: 'POST', ...json({ message, session_id: sessionId }) })
-
-export const agentChat = (message: string, sessionId?: string) =>
-  req<AgentChatResponse>('/agent-chat', {
-    method: 'POST',
-    ...json({ message, session_id: sessionId }),
-  })
 
 export interface AgentStreamEvent {
   type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'sources' | 'tool_start' | 'tool_end' | 'done' | 'error'

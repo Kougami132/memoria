@@ -184,7 +184,8 @@ async def test_async_agent_host_tools_require_approval_before_connector_executio
         tools,
     )
 
-    assert result["status"] == "pending_approval"
+    assert result["status"] == "rejected"
+    assert "rejected by user or timed out" in result["error"]
     assert tools.executed == []
 
 

@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Request
 
-from memoria.agents.engine import AgenticRagEngine
+from memoria.agents.engine import AgentEngine, AgenticRagEngine
 from memoria.config import get_effective_settings, settings
 from memoria.core.embedder import Embedder, MockEmbedder
 from memoria.core.pipeline import Pipeline
@@ -73,16 +73,24 @@ def get_pipeline() -> Pipeline:
     return _pipeline
 
 
-def get_agentic_engine() -> AgenticRagEngine:
-    global _agentic_engine
-    if _agentic_engine is None:
-        _agentic_engine = AgenticRagEngine(db=get_db(), pipeline=get_pipeline())
-    return _agentic_engine
+_agent_engine: AgentEngine | None = None
+
+
+def get_agent_engine() -> AgentEngine:
+    global _agent_engine
+    if _agent_engine is None:
+        _agent_engine = AgentEngine(db=get_db(), pipeline=get_pipeline())
+    return _agent_engine
+
+
+# Backward compatibility aliases
+get_agentic_engine = get_agent_engine
 
 
 def reset_pipeline() -> None:
-    global _pipeline, _agentic_engine
+    global _pipeline, _agent_engine, _agentic_engine
     _pipeline = None
+    _agent_engine = None
     _agentic_engine = None
 
 _registry: ConnectorRegistry | None = None

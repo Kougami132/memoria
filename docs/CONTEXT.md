@@ -57,7 +57,7 @@
 ┌───────────────────▼───────────────────▼───────────────────▼────────────┐
 │                        业务与智能体核心引擎 (Core Engines)              │
 │  ┌─────────────────────────┐  ┌─────────────────────────────────────┐  │
-│  │   AgenticRagEngine      │  │        RAG Pipeline                 │  │
+│  │   AgentEngine (Orch)    │  │        RAG Pipeline                 │  │
 │  │  - Orchestrator         │  │  - Smart Chunker                    │  │
 │  │  - Sub-Agents (KB/Host) │  │  - OpenAI / Ollama Embedder         │  │
 │  │  - Agent Tools & Spans  │  │  - Chroma Vector Search             │  │
@@ -77,8 +77,8 @@
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.1 `memoria/agents/` (Multi-Agent 体系)
-- **`engine.py`**: 基于 OpenAI Agent SDK（或内置备用轻量引擎）构建的 Agent 核心。定义主编排器 `Orchestrator`，动态挂载 `kb_agent`（检索增强专家）和 `host_agent`（主机管理专家）为子工具。支持 SSE 流式事件还原（包含思考片段 `response.thought.delta`、子 Agent 调用 Span `response.output_item.*`）。
+### 3.1 `memoria/agents/` (Multi-Agent 体系与统一单轮编排)
+- **`engine.py`**: 定义统一单轮会话编排器 `AgentEngine`（向前兼容 `AgenticRagEngine`）。主编排器 `Orchestrator` 协调多智能体图与工具执行回路，动态挂载 `kb_agent`（检索增强专家）和 `host_agent`（主机管理专家）为委托工具。CLI、QQBot、OpenAI 兼容协议均汇聚于此统一执行，支持思考流（`response.thought.delta`）与 Span 级追踪。
 - **`tools.py`**: 封装底层专业操作为结构化工具函数，包括 `search_knowledge_bases`、`list_hosts`、`run_host_command`、`execute_command_with_approval` 等。
 - **`state.py`**: 审批等待队列与多会话执行状态机。
 
@@ -124,6 +124,9 @@
 
 ### ADR-4: 双轨制 OpenAI 协议与思考/追踪兼容
 - **决策**: Web 端和第三方客户端统一收敛到 `/v1/chat/completions` 与 `/v1/responses`。通过请求头（`X-Memoria-Client: web`）区分：Web 端接收细粒度 Agent Trace Span（用于可视化展示调用链与耗时）；标准 OpenAI 客户端则接收流式思考标记（`<thought>...</thought>`）或折叠思考块，无缝兼容 Cherry Studio、Chatbox 等第三方客户端。
+
+### ADR-5: 统一单轮会话编排器 (Unified Turn Orchestrator)
+- **决策**: 将 `AgenticRagEngine` 增强并更名为 `AgentEngine`（保留向前兼容别名），确立为唯一的单轮执行编排器。收敛 CLI `query`、QQ 机器人适配器和 OpenAI 路由至统一流式/非流式编排内核。彻底清理未注册或废弃的 `routes/chat.py` 与 `routes/agent_chat.py`。底层 `Pipeline` 退回纯粹的 RAG 检索增强引擎。
 
 ---
 

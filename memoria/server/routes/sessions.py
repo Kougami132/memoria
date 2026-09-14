@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from typing import Optional
 from pydantic import BaseModel
 
-from memoria.agents.engine import AgenticRagEngine
-from memoria.server.deps import get_agentic_engine, get_db
+from memoria.agents.engine import AgentEngine
+from memoria.server.deps import get_agent_engine, get_db
 from memoria.storage.db import DB
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -35,7 +35,7 @@ def get_session(session_id: str, db: DB = Depends(get_db)) -> dict:
 def get_messages(
     session_id: str,
     db: DB = Depends(get_db),
-    engine: AgenticRagEngine = Depends(get_agentic_engine),
+    engine: AgentEngine = Depends(get_agent_engine),
 ):
     session = db.get_session(session_id)
     if session is None or session.get("session_type") != "bot":
@@ -62,7 +62,7 @@ def truncate_session_messages(session_id: str, body: SessionTruncate, db: DB = D
 def abort_session(
     session_id: str,
     body: Optional[SessionAbort] = None,
-    engine: AgenticRagEngine = Depends(get_agentic_engine),
+    engine: AgentEngine = Depends(get_agent_engine),
     db: DB = Depends(get_db),
 ):
     session = db.get_session(session_id)

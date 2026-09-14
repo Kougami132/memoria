@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full bg-slate-50 text-slate-900">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>架构评审报告 · Memoria 模块下沉与深模块重构候选方案</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'neutral',
+      fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'
+    });
+  </script>
+</head>
+<body class="min-h-full flex flex-col p-6 md:p-12 max-w-6xl mx-auto font-sans antialiased space-y-12">
+
+  <!-- 头部 Header -->
+  <header class="border-b border-slate-200 pb-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="flex items-center gap-3">
+          <h1 class="text-3xl font-extrabold tracking-tight text-slate-900">Memoria 架构评审报告</h1>
+          <span class="bg-indigo-100 text-indigo-800 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-indigo-200">
+            深模块演进候选 (Deepening Candidates)
+          </span>
+        </div>
+        <p class="mt-2 text-slate-600 text-sm md:text-base">
+          揭示 Memoria 运行时与 Agent 子系统中的架构摩擦、浅模块反模式以及缺失的接缝（Seams）。
+        </p>
+      </div>
+      <div class="text-right hidden sm:block text-xs text-slate-400">
+        <div>评审对象: <span class="font-mono text-slate-600 font-medium">memoria-rag</span></div>
+        <div>架构标准: <span class="font-mono text-slate-600 font-medium">软件设计哲学 (Philosophy of Software Design)</span></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 执行概述 Executive Summary -->
+  <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+      <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+      </svg>
+      全景概览与代码库摩擦点分析
+    </h2>
+    <p class="text-slate-700 leading-relaxed text-sm">
+      Memoria 已经从最初纯粹的检索引擎演进为一个支持 Web 聊天、兼容 OpenAI 协议的 API、QQ 机器人频道接入以及主机（Host）系统运维工具执行的多接入 Agentic 平台。近期代码提交的改动热点高度集中在 <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded text-indigo-700">memoria/agents/engine.py</span>、<span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded text-indigo-700">memoria/server/routes/openai.py</span>、<span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded text-indigo-700">memoria/connectors/host/</span> 以及 <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded text-indigo-700">memoria/storage/db.py</span>。
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+      <div class="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">候选方案 1</div>
+        <div class="mt-1 font-bold text-slate-800">统一单轮会话编排器 (Unified Turn Orchestrator)</div>
+        <div class="text-xs text-slate-600 mt-1">消弭分裂的双重 RAG 与 Agent 执行回路，恢复路由适配器的内聚与局部性。</div>
+      </div>
+      <div class="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">候选方案 2</div>
+        <div class="mt-1 font-bold text-slate-800">主机安全策略引擎 (Host Security Policy Engine)</div>
+        <div class="text-xs text-slate-600 mt-1">将危险命令匹配与人工确认审批 Token 的完整生命周期收拢下沉到原子安全接缝后。</div>
+      </div>
+      <div class="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">候选方案 3</div>
+        <div class="mt-1 font-bold text-slate-800">统一会话存储接缝 (Unified Conversation Store Seam)</div>
+        <div class="text-xs text-slate-600 mt-1">消除并行的 Standard / Agentic 会话模型，整合数据库中分裂的追踪与生命周期管理。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 候选方案 1 -->
+  <article class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">候选方案 01</span>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+            推荐等级: 强烈推荐 (Strong)
+          </span>
+        </div>
+        <h3 class="text-xl font-bold text-slate-900 mt-2">
+          统一单轮会话编排器：收拢割裂的双重 RAG / Agent 执行回路
+        </h3>
+      </div>
+      <div class="text-right text-xs text-slate-500">
+        <span class="font-semibold text-slate-700">所属领域:</span> 核心编排与接入适配层 (Core Orchestration &amp; Ingress Seams)
+      </div>
+    </div>
+
+    <div class="p-6 space-y-6">
+      <!-- 涉及文件 -->
+      <div>
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">涉及文件与模块</h4>
+        <div class="flex flex-wrap gap-2 text-xs font-mono">
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/agents/engine.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/core/pipeline.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/server/routes/openai.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/server/routes/chat.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/server/routes/agent_chat.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/qqbot/adapter.py</span>
+        </div>
+      </div>
+
+      <!-- 问题与解决方案 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-amber-50/60 border border-amber-200 rounded-lg p-4 space-y-2">
+          <h5 class="text-sm font-bold text-amber-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-amber-700" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            核心痛点：执行回路分裂与浅适配器泄漏
+          </h5>
+          <p class="text-xs text-amber-900 leading-relaxed">
+            代码库维护着两套分道扬镳的执行引擎：一套是 <code class="font-mono text-amber-950 bg-amber-100 px-1">Pipeline.query()</code>（430 行的同步单层工具循环，内嵌提示词拼装和主机工具 Schema 生成），另一套是 <code class="font-mono text-amber-950 bg-amber-100 px-1">AgenticRagEngine.run()</code>（1,600 行的 LangGraph 多智能体图状态机）。
+          </p>
+          <p class="text-xs text-amber-900 leading-relaxed">
+            由于缺乏深接缝，上游适配器（<code class="font-mono text-xs">openai.py</code>、<code class="font-mono text-xs">chat.py</code>、<code class="font-mono text-xs">qqbot/adapter.py</code>）充斥着大量的重复编排：自行查表提取上下文历史、拼装 System Prompt、手动监听流式并写回 DB 数据库记录。甚至在版本迭代中，<code class="font-mono text-xs">agent_chat.py</code> 路由在重构中被遗漏注册进 <code class="font-mono text-xs">app.py</code>，直接体现了接入层极差的局部性（Locality）。
+          </p>
+        </div>
+
+        <div class="bg-emerald-50/60 border border-emerald-200 rounded-lg p-4 space-y-2">
+          <h5 class="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-emerald-700" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            改进构想：深编排模块与统一的单轮会话接缝
+          </h5>
+          <p class="text-xs text-emerald-900 leading-relaxed">
+            彻底弃用并移除 <code class="font-mono text-emerald-950 bg-emerald-100 px-1">Pipeline.query()</code> 中的遗留执行回路，统一下沉为一个深模块：<code class="font-mono font-bold text-emerald-950">TurnOrchestrator</code>（或基于深化后的 <code class="font-mono text-emerald-950">AgenticRagEngine</code>）。
+          </p>
+          <p class="text-xs text-emerald-900 leading-relaxed">
+            该接缝对外仅暴露极简接口：<code class="font-mono text-xs">run_turn()</code> 与 <code class="font-mono text-xs">stream_turn()</code>。所有外部适配器（OpenAI 兼容协议、Web 界面、QQBot、CLI）仅需传入会话/机器人标识与用户输入。提示词构建、召回检索、工具循环分发、持久化及 SSE Chunk 生成被完整封装在内部。
+          </p>
+        </div>
+      </div>
+
+      <!-- 架构收益分析 -->
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-4">
+        <h5 class="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">局部性 (Locality)、杠杆率 (Leverage) 与测试表面</h5>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-700">
+          <div>
+            <strong class="text-slate-900 block mb-1">局部性 (Locality)</strong>
+            提示词模板解析、工具 Schema 注册、会话上下文组装以及消息持久化全部收束在单一点，不再分散飞溅在 <code class="font-mono text-slate-800">openai.py</code>、<code class="font-mono text-slate-800">chat.py</code> 和 <code class="font-mono text-slate-800">pipeline.py</code> 中。
+          </div>
+          <div>
+            <strong class="text-slate-900 block mb-1">杠杆率 (Leverage)</strong>
+            对多智能体路由逻辑、流式事件结构或错误恢复的任意一处改进，立刻自动化惠及 OpenAI 接口、Web 控制台和 QQBot，形成极高的复用杠杆。
+          </div>
+          <div>
+            <strong class="text-slate-900 block mb-1">测试表面 (Test Surface)</strong>
+            测试用例通过公开的单轮接缝输入真实用户消息并断言输出，无需探入内部字典结构断言中间状态，更不必针对每一个 mock 子节点做脆弱的打桩。
+          </div>
+        </div>
+      </div>
+
+      <!-- 前后结构对比可视化 -->
+      <div class="border border-slate-200 rounded-lg p-4 bg-white">
+        <h5 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">架构演进结构对比</h5>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <div class="text-xs font-semibold text-rose-700 mb-2 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> 当前现状: 双重执行回路与泄漏的浅适配器
+            </div>
+            <div class="mermaid bg-slate-50 p-3 rounded border border-slate-200 text-xs">
+flowchart TD
+  subgraph Ingress["接入适配器 (浅且逻辑泄漏)"]
+    API["openai.py<br/>(790 行: 会话管理/流式分块/提示词拼接)"]
+    Chat["chat.py 与 agent_chat.py<br/>(分裂割裂的端点)"]
+    QQ["qqbot/adapter.py<br/>(私有桥接与状态组装)"]
+  end
+
+  subgraph Execution["双重执行子系统"]
+    Pipe["Pipeline.query()<br/>(430 行: 同步 RAG + Host 工具循环)"]
+    AgentEng["AgenticRagEngine<br/>(1,600 行: LangGraph 多智能体图)"]
+  end
+
+  API -->|直连 DB &amp; 手动拼接 SSE| Pipe
+  Chat -->|单独分发给不同底层| AgentEng
+  QQ -->|临时手工转接| AgentEng
+            </div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> 重构深化: 统一单轮编排器深接缝
+            </div>
+            <div class="mermaid bg-slate-50 p-3 rounded border border-slate-200 text-xs">
+flowchart TD
+  subgraph Adapters["轻薄、干净的协议适配器"]
+    API["openai.py<br/>(纯粹做 OpenAI JSON 协议格式转换)"]
+    Chat["chat.py<br/>(统一 Web 交互路由)"]
+    QQ["qqbot/adapter.py<br/>(纯粹负责 WS 协议与 Markdown 解析)"]
+  end
+
+  subgraph DeepModule["深模块: TurnOrchestrator"]
+    Orch["TurnOrchestrator<br/>(公开接口: run_turn, stream_turn)"]
+    subgraph Internal["接缝后隐藏的丰富内聚逻辑"]
+      Prompt["提示词渲染与 Host 环境上下文加载"]
+      Router["直接回答 / 多智能体图智能分流决策"]
+      Store["统一消息与多步骤执行追踪记录持久化"]
+    end
+    Orch --> Prompt
+    Orch --> Router
+    Orch --> Store
+  end
+
+  API --> Orch
+  Chat --> Orch
+  QQ --> Orch
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 候选方案 2 -->
+  <article class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">候选方案 02</span>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+            推荐等级: 强烈推荐 (Strong)
+          </span>
+        </div>
+        <h3 class="text-xl font-bold text-slate-900 mt-2">
+          主机安全策略引擎：封装高危正则与人工审批全生命周期
+        </h3>
+      </div>
+      <div class="text-right text-xs text-slate-500">
+        <span class="font-semibold text-slate-700">所属领域:</span> 主机连接器与安全边界 (Host Connector &amp; Security Boundary)
+      </div>
+    </div>
+
+    <div class="p-6 space-y-6">
+      <!-- 涉及文件 -->
+      <div>
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">涉及文件与模块</h4>
+        <div class="flex flex-wrap gap-2 text-xs font-mono">
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/connectors/host/guard.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/connectors/host/approval.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/connectors/host/connector.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/agents/engine.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/core/pipeline.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/server/routes/hosts.py</span>
+        </div>
+      </div>
+
+      <!-- 问题与解决方案 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-amber-50/60 border border-amber-200 rounded-lg p-4 space-y-2">
+          <h5 class="text-sm font-bold text-amber-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-amber-700" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            核心痛点：安全校验飞溅散落与 Token 外部协调
+          </h5>
+          <p class="text-xs text-amber-900 leading-relaxed">
+            执行远程主机命令当前需要调用方协同 3 个独立的浅层模块：用 <code class="font-mono text-xs">CommandGuard</code> 跑正则匹配、用 <code class="font-mono text-xs">ApprovalManager</code> 签发和核销审批 Token、再调用 <code class="font-mono text-xs">HostConnector</code> 建立 SSH 执行。
+          </p>
+          <p class="text-xs text-amber-900 leading-relaxed">
+            在 <code class="font-mono text-xs">engine.py</code>（500-650 行）、<code class="font-mono text-xs">pipeline.py</code>（180-230 行）以及 <code class="font-mono text-xs">hosts.py</code> 中，调用方每次都得手动读 DB 拿配置、实例化 <code class="font-mono text-xs">CommandGuard</code>、自行比对 token、更新数据库状态。外部对安全实现细节（哈希算法、危险模式分类）了解过多，模块极其浅薄。
+          </p>
+        </div>
+
+        <div class="bg-emerald-50/60 border border-emerald-200 rounded-lg p-4 space-y-2">
+          <h5 class="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-emerald-700" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            改进构想：下沉构建 HostSecurityPolicy 深模块
+          </h5>
+          <p class="text-xs text-emerald-900 leading-relaxed">
+            将 <code class="font-mono text-xs">CommandGuard</code> 与 <code class="font-mono text-xs">ApprovalManager</code> 彻底合并，重塑为内聚且深沉的 <code class="font-mono font-bold text-emerald-950">HostSecurityPolicy</code> 引擎。
+          </p>
+          <p class="text-xs text-emerald-900 leading-relaxed">
+            接缝对外仅暴露原子网关方法：<code class="font-mono text-xs font-semibold">authorize_and_execute(host_id, command, channel_ctx, approval_token=None)</code>。它在内部查询主机安全级别、加载动态危险模式、验证/消费审批 Token、记录审计轨迹，且仅在授权无误时透传给 SSH 执行层。
+          </p>
+        </div>
+      </div>
+
+      <!-- 架构收益分析 -->
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-4">
+        <h5 class="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">局部性 (Locality)、杠杆率 (Leverage) 与测试表面</h5>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-700">
+          <div>
+            <strong class="text-slate-900 block mb-1">局部性 (Locality)</strong>
+            安全判定、Token 签发、核销与超时清理完全内聚。Agent 执行回路无需碰触 Token 字符串细节，也不必反复写 DB 兜底逻辑。
+          </div>
+          <div>
+            <strong class="text-slate-900 block mb-1">杠杆率 (Leverage)</strong>
+            未来引入指令频次限流、审计留痕日志或全新的审批交互（如钉钉/企业微信审批 Webhook），无需改动 Agent 或 Pipeline 一行代码即可生效。
+          </div>
+          <div>
+            <strong class="text-slate-900 block mb-1">测试表面 (Test Surface)</strong>
+            测试表面极度清晰：携带合法 Token 执行 &rarr; 成功通过；无 Token 执行高危指令 &rarr; 返回待审批状态及摘要；只读模式执行 &rarr; 拒绝执行。再也不用针对内部正则字典写脆弱的单元 Mock。
+          </div>
+        </div>
+      </div>
+
+      <!-- 前后结构对比可视化 -->
+      <div class="border border-slate-200 rounded-lg p-4 bg-white">
+        <h5 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">架构演进结构对比</h5>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <div class="text-xs font-semibold text-rose-700 mb-2 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> 当前现状: 浅类组合与外部编排泄漏
+            </div>
+            <div class="mermaid bg-slate-50 p-3 rounded border border-slate-200 text-xs">
+sequenceDiagram
+  participant Agent as AgentEngine / Pipeline
+  participant DB as SQLite 数据库
+  participant Guard as CommandGuard (浅模块)
+  participant Appr as ApprovalManager (浅模块)
+  participant Conn as HostConnector
+
+  Agent->>DB: get_host() 获取配置并读取危险特征
+  Agent->>Guard: validate_command(cmd) 正则校验
+  Agent->>Appr: create_request() 或 validate_token()
+  Agent->>Conn: execute_command(approved=True)
+  Note over Agent: 调用方承担了全部 Token 状态机<br/>与数据库读写协调
+            </div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> 重构深化: 深层主机安全策略网关
+            </div>
+            <div class="mermaid bg-slate-50 p-3 rounded border border-slate-200 text-xs">
+sequenceDiagram
+  participant Caller as Agent / 路由 / Bot
+  participant Sec as HostSecurityPolicy (深模块接缝)
+  participant SSH as HostConnector
+
+  Caller->>Sec: execute_guarded(host_id, cmd, token)
+  activate Sec
+  Note over Sec: 查询模式并拉取特征<br/>校验危险指令与审批令牌<br/>记录审计操作流水
+  Sec->>SSH: 授权通过，安全执行指令
+  SSH-->>Sec: 返回 stdout/stderr
+  Sec-->>Caller: 执行成功结果 | 需要人工确认审批响应
+  deactivate Sec
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 候选方案 3 -->
+  <article class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">候选方案 03</span>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+            推荐等级: 值得探索 (Worth Exploring)
+          </span>
+        </div>
+        <h3 class="text-xl font-bold text-slate-900 mt-2">
+          统一会话存储接缝：消除双轨会话与追踪模型
+        </h3>
+      </div>
+      <div class="text-right text-xs text-slate-500">
+        <span class="font-semibold text-slate-700">所属领域:</span> 存储层与会话管理 (Storage &amp; Session Management)
+      </div>
+    </div>
+
+    <div class="p-6 space-y-6">
+      <!-- 涉及文件 -->
+      <div>
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">涉及文件与模块</h4>
+        <div class="flex flex-wrap gap-2 text-xs font-mono">
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/storage/db.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/server/routes/sessions.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/server/routes/agent_sessions.py</span>
+          <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded border border-slate-200">memoria/agents/engine.py</span>
+        </div>
+      </div>
+
+      <!-- 问题与解决方案 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-amber-50/60 border border-amber-200 rounded-lg p-4 space-y-2">
+          <h5 class="text-sm font-bold text-amber-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-amber-700" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            核心痛点：双轨会话类型与分裂的数据接口
+          </h5>
+          <p class="text-xs text-amber-900 leading-relaxed">
+            数据库层针对完全同构的概念暴露了重复的 CRUD 方法：
+            <code class="font-mono text-xs">list_sessions()</code> 对照 <code class="font-mono text-xs">list_agentic_sessions()</code>，<code class="font-mono text-xs">get_session()</code> 对照 <code class="font-mono text-xs">get_agentic_session()</code>，以及 <code class="font-mono text-xs">delete_session()</code> 对照 <code class="font-mono text-xs">delete_agentic_session_messages()</code>。
+          </p>
+          <p class="text-xs text-amber-900 leading-relaxed">
+            在 API 路由层同样分裂出了 <code class="font-mono text-xs">/api/sessions</code> 与 <code class="font-mono text-xs">/api/agent-sessions</code>。多步骤追踪信息（<code class="font-mono text-xs">MessageTraceRow</code>）与 Agent 会话强绑定，而普通会话则通过消息里的额外 JSON 字段打补丁，存储概念高度碎片化。
+          </p>
+        </div>
+
+        <div class="bg-emerald-50/60 border border-emerald-200 rounded-lg p-4 space-y-2">
+          <h5 class="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-emerald-700" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            改进构想：深层 ConversationStore 统一持久化模块
+          </h5>
+          <p class="text-xs text-emerald-900 leading-relaxed">
+            在数据库底层抹平两类会话的概念割裂，提供统一的深模块接口 <code class="font-mono font-bold text-emerald-950">ConversationStore</code>。
+          </p>
+          <p class="text-xs text-emerald-900 leading-relaxed">
+            所有对话（直接检索回答、多智能体深度推理、或是 QQBot 交互）共享同一套 Session 实体模型，仅用引擎类型作为标记属性（<code class="font-mono text-xs">type: 'standard' | 'agent'</code>）。步骤追踪、人工审批单据与历史消息通过统一接缝操作，从 <code class="font-mono text-xs">DB</code> 类中剔除数十个冗余方法。
+          </p>
+        </div>
+      </div>
+
+      <!-- 架构收益分析 -->
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-4">
+        <h5 class="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">局部性 (Locality)、杠杆率 (Leverage) 与测试表面</h5>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-700">
+          <div>
+            <strong class="text-slate-900 block mb-1">局部性 (Locality)</strong>
+            会话全生命周期管理、消息归档清理以及级联删除逻辑全部内聚在单点，无需维护两套时刻可能脱节的清理 SQL 语句。
+          </div>
+          <div>
+            <strong class="text-slate-900 block mb-1">杠杆率 (Leverage)</strong>
+            前端会话侧边栏列表、筛选搜索、会话导入导出等能力对普通对话与复杂 Agent 对话天然透明适配。
+          </div>
+          <div>
+            <strong class="text-slate-900 block mb-1">测试表面 (Test Surface)</strong>
+            一套集中的存储集成测试即可无死角覆盖所有对话模式的持久化、回溯与级联删除特性。
+          </div>
+        </div>
+      </div>
+
+      <!-- 前后结构对比可视化 -->
+      <div class="border border-slate-200 rounded-lg p-4 bg-white">
+        <h5 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">架构演进结构对比</h5>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <div class="text-xs font-semibold text-rose-700 mb-2 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> 当前现状: 并行路由与冗余重复的数据库方法
+            </div>
+            <div class="mermaid bg-slate-50 p-3 rounded border border-slate-200 text-xs">
+flowchart TD
+  subgraph Routes["外部路由端点"]
+    R1["/api/sessions (标准对话)"]
+    R2["/api/agent-sessions (Agent 对话)"]
+  end
+
+  subgraph DB["DB 数据库层 (db.py 包含 1,400+ 行)"]
+    M1["list_sessions()<br/>get_session()<br/>delete_session()"]
+    M2["list_agentic_sessions()<br/>get_agentic_session()<br/>delete_agentic_session_messages()"]
+  end
+
+  R1 --> M1
+  R2 --> M2
+            </div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> 重构深化: 统一 ConversationStore 会话存储接缝
+            </div>
+            <div class="mermaid bg-slate-50 p-3 rounded border border-slate-200 text-xs">
+flowchart TD
+  subgraph UnifiedRoutes["统一接入路由"]
+    R["/api/sessions?mode=all|agent|standard"]
+  end
+
+  subgraph Store["深模块: ConversationStore 接缝"]
+    CS["get_session()<br/>list_sessions()<br/>append_turn()<br/>delete_session()"]
+    subgraph StorageInternals["内部数据表模式与级联约束"]
+      Session["Session 实体 (引擎类型作为标签)"]
+      Msg["结构化 Messages &amp; 执行 Traces"]
+    end
+    CS --> Session
+    CS --> Msg
+  end
+
+  UnifiedRoutes --> CS
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- 首要推荐模块 Top Recommendation -->
+  <section class="bg-indigo-50 border border-indigo-200 rounded-xl p-6 md:p-8 space-y-4">
+    <div class="flex items-center gap-2 text-indigo-900 font-bold text-lg">
+      <svg class="w-6 h-6 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      首要建议先行推进的方案
+    </div>
+    <div class="text-sm text-indigo-950 leading-relaxed space-y-2">
+      <p>
+        <strong>候选方案 01: 统一单轮会话编排器 (Unified Turn Orchestrator)</strong> 是当前整个仓库中重构杠杆率最高的机会。
+      </p>
+      <p>
+        <code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">Pipeline.query()</code> 与 <code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">AgenticRagEngine.run()</code> 之间的割裂是导致多处逻辑重复和意外路由漂移的根因（例如 <code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">agent_chat.py</code> 在重构时被遗落挂载到 <code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">app.py</code>，导致 Web 与 OpenAI 协议端点完全脱节）。
+      </p>
+      <p>
+        一旦确立起统一的单轮会话接缝，整个上游适配层（<code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">openai.py</code>、<code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">chat.py</code>、<code class="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200 text-xs">qqbot/adapter.py</code>）即可剔除数百行泄漏的业务逻辑，并且测试重点可以直接下沉到端到端单轮执行的真实契约上。
+      </p>
+    </div>
+  </section>
+
+  <!-- 页脚 Footer -->
+  <footer class="pt-6 border-t border-slate-200 text-center text-xs text-slate-400">
+    Memoria 架构评审报告 &bull; 严格基于深模块设计原则与 CONTEXT.md 领域模型标准编写。
+  </footer>
+
+</body>
+</html>

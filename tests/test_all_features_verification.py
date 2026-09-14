@@ -133,7 +133,7 @@ def test_full_verification_suite():
     assert sys_res.status_code == 200
     sys_data = sys_res.json()
     assert "items" in sys_data
-    assert "placeholder" in sys_data
+    assert sys_data["status"] == "ok"
 
     print("ALL 4 CRITICAL MODULE TESTS PASSED 100%!")
 

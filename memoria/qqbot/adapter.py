@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from memoria.agents.engine import AgenticRagEngine
+from memoria.agents.engine import AgentEngine, AgenticRagEngine
 from memoria.config import get_qq_settings
 from memoria.qqbot.formatting import (
     MAX_MESSAGE_LENGTH,
@@ -31,7 +31,7 @@ class _QueuedMessage:
 
 
 class QQBotAdapter:
-    def __init__(self, db: DB, engine: AgenticRagEngine | Callable[[], AgenticRagEngine]) -> None:
+    def __init__(self, db: DB, engine: AgentEngine | Callable[[], AgentEngine]) -> None:
         self.db = db
         self._engine = engine
         self._gateway: QQGateway | None = None
@@ -44,7 +44,7 @@ class QQBotAdapter:
         self._running = False
         self._lifecycle_lock = asyncio.Lock()
 
-    def _get_engine(self) -> AgenticRagEngine:
+    def _get_engine(self) -> AgentEngine:
         if callable(self._engine):
             self._engine = self._engine()
         return self._engine

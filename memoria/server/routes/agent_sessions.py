@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from typing import Optional
 from pydantic import BaseModel
 
-from memoria.agents.engine import AgenticRagEngine
-from memoria.server.deps import get_agentic_engine, get_db
+from memoria.agents.engine import AgentEngine
+from memoria.server.deps import get_agent_engine, get_db
 from memoria.storage.db import DB
 
 router = APIRouter(prefix="/agent-sessions", tags=["agent-sessions"])
@@ -32,7 +32,7 @@ def list_agent_sessions(db: DB = Depends(get_db)):
 def get_agent_messages(
     session_id: str,
     db: DB = Depends(get_db),
-    engine: AgenticRagEngine = Depends(get_agentic_engine),
+    engine: AgentEngine = Depends(get_agent_engine),
 ):
     if db.get_agentic_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Agentic session not found")
@@ -57,7 +57,7 @@ def truncate_agent_session_messages(session_id: str, body: AgentSessionTruncate,
 def abort_agent_session(
     session_id: str,
     body: Optional[AgentSessionAbort] = None,
-    engine: AgenticRagEngine = Depends(get_agentic_engine),
+    engine: AgentEngine = Depends(get_agent_engine),
     db: DB = Depends(get_db),
 ):
     if db.get_agentic_session(session_id) is None:

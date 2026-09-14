@@ -1278,7 +1278,7 @@ class MockAgentRunner:
 
 
 @dataclass
-class AgenticRagEngine:
+class AgentEngine:
     db: DB
     pipeline: "Pipeline"
     runner: AgentRunner | None = None
@@ -1595,3 +1595,7 @@ class AgenticRagEngine:
                 "【重要】在思考推理过程（CoT/Thinking）和最终回复中，请全程使用清晰严谨的简体中文进行思考与解答。"
             )
         return f"{base_prompt}\n\n{role_desc}".strip()
+
+
+# Backward compatibility alias
+AgenticRagEngine = AgentEngine
