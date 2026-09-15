@@ -772,7 +772,7 @@ export function Chat() {
               </div>
             )}
 
-            {(streamState ? messages.filter((m) => m.status !== 'streaming') : messages).map((m) => (
+            {(streamState ? messages.filter((m) => m.status !== 'streaming' && m.status !== 'pending_approval') : messages).map((m) => (
               <ChatMessageItem
                 key={m.id}
                 msg={m}
@@ -1208,6 +1208,8 @@ function StreamingMessageItem({
                 ))}
               </div>
             )}
+          </div>
+        )}
 
         {/* Real-time Thought Chain */}
         {state.thought && (
@@ -1227,8 +1229,6 @@ function StreamingMessageItem({
                 {state.thought}
               </div>
             )}
-          </div>
-        )}
           </div>
         )}
 
