@@ -429,7 +429,7 @@ def test_vault_doc_delete_409(client, tmp_path):
     f = tmp_path / "note.md"
     f.write_text("# Hello")
     with open(f, "rb") as fh:
-        r = client.post(f"/api/knowledge-bases/{kb['id']}/documents",
+        r = client.post(f"/api/knowledge-bases/{kb['id']}/documents?async_mode=false",
                         files={"file": ("note.md", fh, "text/plain")})
     assert r.status_code == 201
 

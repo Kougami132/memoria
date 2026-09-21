@@ -198,6 +198,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class TaskRow(Base):
+    __tablename__ = "tasks"
+    id = Column(String, primary_key=True)
+    task_type = Column(String, nullable=False)
+    payload = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending, running, completed, failed
+    result = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+
+
 def _uid() -> str:
     return str(uuid.uuid4())
 
@@ -1406,3 +1418,94 @@ class DB:
                 "error_count": error_count,
                 "last_event_time": last_event.timestamp if last_event else None,
             }
+
+    # ------------------------------------------------------------------
+    # Tasks
+    # ------------------------------------------------------------------
+
+    def create_task(self, task_type: str, payload: dict) -> dict:
+        now = _now()
+        row = TaskRow(
+            id=_uid(),
+            task_type=task_type,
+            payload=json.dumps(payload, ensure_ascii=False),
+            status="pending",
+            result=None,
+            error=None,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._s() as s:
+            s.add(row)
+            s.commit()
+            return self._task_to_dict(row)
+
+    def get_task(self, task_id: str) -> dict | None:
+        with self._s() as s:
+            r = s.query(TaskRow).filter(TaskRow.id == task_id).first()
+            return self._task_to_dict(r) if r else None
+
+    def update_task_status(
+        self,
+        task_id: str,
+        status: str,
+        result: dict | None = None,
+        error: str | None = None,
+    ) -> dict | None:
+        now = _now()
+        with self._s() as s:
+            r = s.query(TaskRow).filter(TaskRow.id == task_id).first()
+            if not r:
+                return None
+            r.status = status
+            if result is not None:
+                r.result = json.dumps(result, ensure_ascii=False)
+            if error is not None:
+                r.error = error
+            r.updated_at = now
+            s.commit()
+            return self._task_to_dict(r)
+
+    def fetch_next_pending_task(self) -> dict | None:
+        with self._s() as s:
+            r = (
+                s.query(TaskRow)
+                .filter(TaskRow.status == "pending")
+                .order_by(TaskRow.created_at.asc())
+                .first()
+            )
+            return self._task_to_dict(r) if r else None
+
+    def list_tasks(self, limit: int = 50) -> list[dict]:
+        with self._s() as s:
+            rows = (
+                s.query(TaskRow)
+                .order_by(desc(TaskRow.created_at))
+                .limit(limit)
+                .all()
+            )
+            return [self._task_to_dict(r) for r in rows]
+
+    def _task_to_dict(self, r: TaskRow) -> dict:
+        payload = {}
+        if r.payload:
+            try:
+                payload = json.loads(r.payload)
+            except Exception:
+                payload = {}
+        result = None
+        if r.result:
+            try:
+                result = json.loads(r.result)
+            except Exception:
+                result = r.result
+        return {
+            "id": r.id,
+            "task_type": r.task_type,
+            "payload": payload,
+            "status": r.status,
+            "result": result,
+            "error": r.error,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+        }

@@ -1,22 +1,27 @@
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from openai import APIConnectionError, APIError
 
 from memoria.config import settings
 from memoria.core.pipeline import Pipeline
-from memoria.server.deps import get_db, get_pipeline
+from memoria.server.deps import get_db, get_pipeline, get_task_queue
 from memoria.storage.db import DB
+from memoria.tasks.base import BaseTaskQueue
 
 router = APIRouter(tags=["documents"])
 
 from memoria.core.chunker import SUPPORTED as ALLOWED_SUFFIXES
 
 
-@router.post("/knowledge-bases/{kb_id}/documents", status_code=201)
+@router.post("/knowledge-bases/{kb_id}/documents")
 async def upload_document(kb_id: str, file: UploadFile,
-                          db: DB = Depends(get_db), pipeline: Pipeline = Depends(get_pipeline)):
+                          response: Response,
+                          async_mode: bool = Query(default=True),
+                          db: DB = Depends(get_db),
+                          pipeline: Pipeline = Depends(get_pipeline),
+                          task_queue: BaseTaskQueue = Depends(get_task_queue)):
     if db.get_kb(kb_id) is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     kb = db.get_kb(kb_id)
@@ -35,6 +40,19 @@ async def upload_document(kb_id: str, file: UploadFile,
     with open(save_path, "wb") as f:
         f.write(content)
 
+    if async_mode:
+        response.status_code = status.HTTP_202_ACCEPTED
+        task_id = await task_queue.enqueue(
+            "document_ingest",
+            {"kb_id": kb_id, "file_path": save_path, "filename": file.filename},
+        )
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": "Document uploaded and indexing task enqueued",
+        }
+
+    response.status_code = status.HTTP_201_CREATED
     try:
         return pipeline.ingest(kb_id, save_path)
     except APIConnectionError as e:

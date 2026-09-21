@@ -94,6 +94,26 @@ def reset_pipeline() -> None:
     _agentic_engine = None
 
 _registry: ConnectorRegistry | None = None
+_task_queue = None
+
+
+def get_task_queue():
+    global _task_queue
+    if _task_queue is None:
+        from memoria.tasks.queue import SqliteTaskQueue
+        from memoria.tasks.handlers import handle_document_ingest, handle_vault_sync
+
+        db = get_db()
+        queue = SqliteTaskQueue(db=db)
+        queue.register_handler("document_ingest", handle_document_ingest)
+        queue.register_handler("vault_sync", handle_vault_sync)
+        _task_queue = queue
+    return _task_queue
+
+
+def set_task_queue(queue):
+    global _task_queue
+    _task_queue = queue
 
 
 def get_registry() -> ConnectorRegistry:

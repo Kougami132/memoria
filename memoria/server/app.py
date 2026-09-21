@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from memoria.server.routes import agent_sessions, bots, documents, hosts, knowledge_bases, logs, openai, settings, sessions, vaults
+from memoria.server.routes import agent_sessions, bots, documents, hosts, knowledge_bases, logs, openai, settings, sessions, tasks, vaults
 from memoria.server.deps import get_agentic_engine, get_db, get_pipeline
 from memoria.vault.syncer import VaultSyncer
 
@@ -46,9 +46,15 @@ async def _lifespan(app: FastAPI):
     qq_adapter = QQBotAdapter(get_db(), get_agentic_engine)
     app.state.qq_adapter = qq_adapter
     await qq_adapter.start()
+
+    from memoria.server.deps import get_task_queue
+    task_queue = get_task_queue()
+    await task_queue.start()
+
     try:
         yield
     finally:
+        await task_queue.stop()
         await qq_adapter.stop()
         app.state.qq_adapter = None
     scheduler.shutdown(wait=False)
@@ -65,6 +71,7 @@ def create_app(lifespan=_lifespan) -> FastAPI:
     app.include_router(vaults.router, prefix="/api")
     app.include_router(hosts.router, prefix="/api")
     app.include_router(logs.router, prefix="/api")
+    app.include_router(tasks.router, prefix="/api")
     app.include_router(openai.router)
 
     @app.get("/api/health")
