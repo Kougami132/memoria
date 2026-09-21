@@ -21,6 +21,8 @@ _agentic_engine: AgenticRagEngine | None = None
 
 @lru_cache
 def get_db() -> DB:
+    if settings.database_url:
+        return DB(settings.database_url)
     os.makedirs(os.path.dirname(os.path.abspath(settings.db_path)), exist_ok=True)
     return DB(settings.db_path)
 

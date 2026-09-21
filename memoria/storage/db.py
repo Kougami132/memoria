@@ -264,122 +264,133 @@ def _manual_session_title(title: str | None) -> str:
 
 class DB:
     def __init__(self, db_path: str) -> None:
-        from sqlalchemy.pool import NullPool
+        from sqlalchemy.pool import NullPool, StaticPool
+        if "://" in db_path:
+            url = db_path
+        elif db_path == ":memory:":
+            url = "sqlite:///:memory:"
+        else:
+            url = f"sqlite:///{db_path}"
+
+        pool_cls = StaticPool if db_path == ":memory:" or url == "sqlite:///:memory:" else NullPool
+        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+
         engine = create_engine(
-            f"sqlite:///{db_path}",
-            connect_args={"check_same_thread": False},
-            poolclass=NullPool,
+            url,
+            connect_args=connect_args,
+            poolclass=pool_cls,
         )
         Base.metadata.create_all(engine)
-        with engine.connect() as conn:
-            kb_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(knowledge_bases)"))]
-            if "type" not in kb_cols:
-                conn.execute(text("ALTER TABLE knowledge_bases ADD COLUMN type TEXT DEFAULT 'upload'"))
-                conn.execute(text("UPDATE knowledge_bases SET type='vault' WHERE id IN (SELECT kb_id FROM vaults)"))
-                conn.commit()
-            msg_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(messages)"))]
-            if "sources" not in msg_cols:
-                conn.execute(text("ALTER TABLE messages ADD COLUMN sources TEXT"))
-                conn.commit()
-            if "status" not in msg_cols:
-                conn.execute(text("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'done'"))
-                conn.commit()
-            if "metadata" not in msg_cols:
-                conn.execute(text("ALTER TABLE messages ADD COLUMN metadata TEXT"))
-                conn.commit()
-            doc_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
-            if "source" not in doc_cols:
-                conn.execute(text("ALTER TABLE documents ADD COLUMN source TEXT DEFAULT 'upload'"))
-                conn.commit()
-            vault_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(vaults)"))]
-            if "syncing" not in vault_cols:
-                conn.execute(text("ALTER TABLE vaults ADD COLUMN syncing INTEGER DEFAULT 0"))
-                conn.commit()
-            if "auto_sync" not in vault_cols:
-                conn.execute(text("ALTER TABLE vaults ADD COLUMN auto_sync INTEGER DEFAULT 1"))
-                conn.commit()
-            if "webdav_path" not in vault_cols:
-                conn.execute(text("ALTER TABLE vaults ADD COLUMN webdav_path TEXT DEFAULT '/'"))
-                conn.commit()
-            host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(hosts)"))]
-            if "safe_mode" not in host_cols:
-                conn.execute(text("ALTER TABLE hosts ADD COLUMN safe_mode INTEGER DEFAULT 0"))
-            if "security_mode" not in host_cols:
-                conn.execute(text("ALTER TABLE hosts ADD COLUMN security_mode TEXT DEFAULT 'read_only'"))
-                conn.commit()
-            bot_host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bot_host_links)"))]
-            if "security_mode" not in bot_host_cols:
-                conn.execute(text("ALTER TABLE bot_host_links ADD COLUMN security_mode TEXT DEFAULT NULL"))
-                conn.commit()
-            bot_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bots)"))]
-            if "model_key" not in bot_cols:
-                conn.execute(text("ALTER TABLE bots ADD COLUMN model_key TEXT DEFAULT ''"))
-                conn.commit()
-            bot_rows = conn.execute(text(
-                "SELECT id, name, model_key FROM bots "
-                "WHERE model_key IS NULL OR model_key = '' OR model_key GLOB 'bot-[0-9a-f]*'"
-            )).fetchall()
-            for bot_row in bot_rows:
-                try:
-                    model_key = _bot_model_key(bot_row[1])
-                except ValueError:
-                    # Legacy records without an ASCII name remain addressable until renamed/configured.
-                    model_key = f"legacy-{bot_row[0][:8]}"
-                if bot_row[2] and not LEGACY_UUID_MODEL_KEY_RE.fullmatch(bot_row[2]):
-                    continue
-                base_model_key = model_key
-                suffix = 2
-                while conn.execute(
-                    text("SELECT 1 FROM bots WHERE model_key = :model_key AND id != :bot_id"),
-                    {"model_key": model_key, "bot_id": bot_row[0]},
-                ).first():
-                    suffix_text = f"-{suffix}"
-                    model_key = f"{base_model_key[:63 - len(suffix_text)]}{suffix_text}"
-                    suffix += 1
-                conn.execute(
-                    text("UPDATE bots SET model_key = :model_key WHERE id = :bot_id"),
-                    {"model_key": model_key, "bot_id": bot_row[0]},
-                )
-            if bot_rows:
-                conn.commit()
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bots_model_key ON bots (model_key)"))
-            conn.commit()
-            session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
-            session_cols = [r[1] for r in session_info]
-            bot_id_notnull = any(r[1] == "bot_id" and r[3] == 1 for r in session_info)
-            if "title" not in session_cols:
-                conn.execute(text("ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT ''"))
+        if engine.dialect.name == "sqlite":
+            with engine.connect() as conn:
+                kb_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(knowledge_bases)"))]
+                if "type" not in kb_cols:
+                    conn.execute(text("ALTER TABLE knowledge_bases ADD COLUMN type TEXT DEFAULT 'upload'"))
+                    conn.execute(text("UPDATE knowledge_bases SET type='vault' WHERE id IN (SELECT kb_id FROM vaults)"))
+                    conn.commit()
+                msg_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(messages)"))]
+                if "sources" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN sources TEXT"))
+                    conn.commit()
+                if "status" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'done'"))
+                    conn.commit()
+                if "metadata" not in msg_cols:
+                    conn.execute(text("ALTER TABLE messages ADD COLUMN metadata TEXT"))
+                    conn.commit()
+                doc_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(documents)"))]
+                if "source" not in doc_cols:
+                    conn.execute(text("ALTER TABLE documents ADD COLUMN source TEXT DEFAULT 'upload'"))
+                    conn.commit()
+                vault_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(vaults)"))]
+                if "syncing" not in vault_cols:
+                    conn.execute(text("ALTER TABLE vaults ADD COLUMN syncing INTEGER DEFAULT 0"))
+                    conn.commit()
+                if "auto_sync" not in vault_cols:
+                    conn.execute(text("ALTER TABLE vaults ADD COLUMN auto_sync INTEGER DEFAULT 1"))
+                    conn.commit()
+                if "webdav_path" not in vault_cols:
+                    conn.execute(text("ALTER TABLE vaults ADD COLUMN webdav_path TEXT DEFAULT '/'"))
+                    conn.commit()
+                host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(hosts)"))]
+                if "safe_mode" not in host_cols:
+                    conn.execute(text("ALTER TABLE hosts ADD COLUMN safe_mode INTEGER DEFAULT 0"))
+                if "security_mode" not in host_cols:
+                    conn.execute(text("ALTER TABLE hosts ADD COLUMN security_mode TEXT DEFAULT 'read_only'"))
+                    conn.commit()
+                bot_host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bot_host_links)"))]
+                if "security_mode" not in bot_host_cols:
+                    conn.execute(text("ALTER TABLE bot_host_links ADD COLUMN security_mode TEXT DEFAULT NULL"))
+                    conn.commit()
+                bot_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bots)"))]
+                if "model_key" not in bot_cols:
+                    conn.execute(text("ALTER TABLE bots ADD COLUMN model_key TEXT DEFAULT ''"))
+                    conn.commit()
+                bot_rows = conn.execute(text(
+                    "SELECT id, name, model_key FROM bots "
+                    "WHERE model_key IS NULL OR model_key = '' OR model_key GLOB 'bot-[0-9a-f]*'"
+                )).fetchall()
+                for bot_row in bot_rows:
+                    try:
+                        model_key = _bot_model_key(bot_row[1])
+                    except ValueError:
+                        # Legacy records without an ASCII name remain addressable until renamed/configured.
+                        model_key = f"legacy-{bot_row[0][:8]}"
+                    if bot_row[2] and not LEGACY_UUID_MODEL_KEY_RE.fullmatch(bot_row[2]):
+                        continue
+                    base_model_key = model_key
+                    suffix = 2
+                    while conn.execute(
+                        text("SELECT 1 FROM bots WHERE model_key = :model_key AND id != :bot_id"),
+                        {"model_key": model_key, "bot_id": bot_row[0]},
+                    ).first():
+                        suffix_text = f"-{suffix}"
+                        model_key = f"{base_model_key[:63 - len(suffix_text)]}{suffix_text}"
+                        suffix += 1
+                    conn.execute(
+                        text("UPDATE bots SET model_key = :model_key WHERE id = :bot_id"),
+                        {"model_key": model_key, "bot_id": bot_row[0]},
+                    )
+                if bot_rows:
+                    conn.commit()
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bots_model_key ON bots (model_key)"))
                 conn.commit()
                 session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
                 session_cols = [r[1] for r in session_info]
-            if "session_type" not in session_cols or bot_id_notnull:
-                # SQLite cannot alter a column from NOT NULL to NULL in place. Rebuild
-                # the small sessions table while preserving all existing bot sessions.
-                conn.execute(text("PRAGMA foreign_keys=OFF"))
-                conn.execute(text("ALTER TABLE sessions RENAME TO sessions_legacy"))
-                SessionRow.__table__.create(conn)
-                conn.execute(text(
-                    "INSERT INTO sessions (id, bot_id, session_type, title, created_at) "
-                    "SELECT id, bot_id, 'bot', title, created_at FROM sessions_legacy"
-                ))
-                conn.execute(text("DROP TABLE sessions_legacy"))
-                conn.execute(text("PRAGMA foreign_keys=ON"))
-                conn.commit()
-            trace_fk_targets = [r[2] for r in conn.execute(text("PRAGMA foreign_key_list(message_traces)"))]
-            if "sessions_legacy" in trace_fk_targets:
-                # The new trace table may have been created before the legacy sessions-table
-                # rebuild above; SQLite rewrites FK targets on table rename, so rebuild it
-                # once more to point traces at the final sessions table.
-                conn.execute(text("ALTER TABLE message_traces RENAME TO message_traces_legacy"))
-                MessageTraceRow.__table__.create(conn)
-                conn.execute(text(
-                    "INSERT INTO message_traces "
-                    "(id, session_id, message_id, trace_id, workflow_name, group_id, metadata, spans, summary, created_at) "
-                    "SELECT id, session_id, message_id, trace_id, workflow_name, group_id, metadata, spans, summary, created_at "
-                    "FROM message_traces_legacy"
-                ))
-                conn.execute(text("DROP TABLE message_traces_legacy"))
-                conn.commit()
+                bot_id_notnull = any(r[1] == "bot_id" and r[3] == 1 for r in session_info)
+                if "title" not in session_cols:
+                    conn.execute(text("ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT ''"))
+                    conn.commit()
+                    session_info = list(conn.execute(text("PRAGMA table_info(sessions)")))
+                    session_cols = [r[1] for r in session_info]
+                if "session_type" not in session_cols or bot_id_notnull:
+                    # SQLite cannot alter a column from NOT NULL to NULL in place. Rebuild
+                    # the small sessions table while preserving all existing bot sessions.
+                    conn.execute(text("PRAGMA foreign_keys=OFF"))
+                    conn.execute(text("ALTER TABLE sessions RENAME TO sessions_legacy"))
+                    SessionRow.__table__.create(conn)
+                    conn.execute(text(
+                        "INSERT INTO sessions (id, bot_id, session_type, title, created_at) "
+                        "SELECT id, bot_id, 'bot', title, created_at FROM sessions_legacy"
+                    ))
+                    conn.execute(text("DROP TABLE sessions_legacy"))
+                    conn.execute(text("PRAGMA foreign_keys=ON"))
+                    conn.commit()
+                trace_fk_targets = [r[2] for r in conn.execute(text("PRAGMA foreign_key_list(message_traces)"))]
+                if "sessions_legacy" in trace_fk_targets:
+                    # The new trace table may have been created before the legacy sessions-table
+                    # rebuild above; SQLite rewrites FK targets on table rename, so rebuild it
+                    # once more to point traces at the final sessions table.
+                    conn.execute(text("ALTER TABLE message_traces RENAME TO message_traces_legacy"))
+                    MessageTraceRow.__table__.create(conn)
+                    conn.execute(text(
+                        "INSERT INTO message_traces "
+                        "(id, session_id, message_id, trace_id, workflow_name, group_id, metadata, spans, summary, created_at) "
+                        "SELECT id, session_id, message_id, trace_id, workflow_name, group_id, metadata, spans, summary, created_at "
+                        "FROM message_traces_legacy"
+                    ))
+                    conn.execute(text("DROP TABLE message_traces_legacy"))
+                    conn.commit()
         self._Session = sessionmaker(bind=engine)
         self._backfill_missing_session_titles()
 

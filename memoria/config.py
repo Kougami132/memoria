@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 128
     top_k: int = 5
     min_score: float = 0.5
+    database_url: str = ""
     db_path: str = "./data/memoria.db"
     chroma_path: str = "./data/chroma"
     upload_dir: str = "./data/uploads"

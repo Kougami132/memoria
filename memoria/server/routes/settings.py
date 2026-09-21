@@ -247,9 +247,12 @@ def export_backup(db: DB = Depends(get_db)):
                 zf.write(db_dump_path, arcname="db/memoria.db")
 
             # Add chroma directory if exists
-            db_dir = os.path.dirname(os.path.abspath(db._db_path)) if getattr(db, "_db_path", None) and db._db_path != ":memory:" else os.path.abspath("./data")
-            chroma_cand = os.path.join(db_dir, "chroma")
-            chroma_dir = chroma_cand if os.path.isdir(chroma_cand) else os.path.abspath(settings.chroma_path)
+            db_dir = os.path.dirname(os.path.abspath(db._db_path)) if getattr(db, "_db_path", None) and db._db_path != ":memory:" else None
+            chroma_dir = os.path.abspath(settings.chroma_path)
+            if db_dir:
+                chroma_cand = os.path.join(db_dir, "chroma")
+                if os.path.isdir(chroma_cand):
+                    chroma_dir = chroma_cand
             if os.path.isdir(chroma_dir):
                 for root, _, files in os.walk(chroma_dir):
                     for file in files:
@@ -258,8 +261,11 @@ def export_backup(db: DB = Depends(get_db)):
                         zf.write(full_path, arcname=os.path.join("chroma", rel_path).replace("\\", "/"))
 
             # Add uploads directory if exists
-            uploads_cand = os.path.join(db_dir, "uploads")
-            upload_dir = uploads_cand if os.path.isdir(uploads_cand) else os.path.abspath(settings.upload_dir)
+            upload_dir = os.path.abspath(settings.upload_dir)
+            if db_dir:
+                uploads_cand = os.path.join(db_dir, "uploads")
+                if os.path.isdir(uploads_cand):
+                    upload_dir = uploads_cand
             if os.path.isdir(upload_dir):
                 for root, _, files in os.walk(upload_dir):
                     for file in files:
