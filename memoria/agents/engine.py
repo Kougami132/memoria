@@ -594,8 +594,8 @@ async def _execute_agent_tool_async(
                     "host_name": host_name,
                     "command": command,
                 })
-            # Wait for decision
-            approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=300.0)
+            timeout = float(db.get_setting("approval_timeout") or 300.0) if db else 300.0
+            approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=timeout)
             if approved:
                 approval_token = global_host_approval_manager.get_authorization_token(
                     approval.id,

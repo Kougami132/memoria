@@ -19,7 +19,7 @@ def test_chunker_txt(tmp_path):
 
 
 def test_chunker_unsupported(tmp_path):
-    f = tmp_path / "doc.pdf"
+    f = tmp_path / "doc.exe"
     f.write_text("data")
     with pytest.raises(ValueError, match="Unsupported"):
         Chunker().split(str(f))

@@ -120,11 +120,11 @@ def test_unknown_model_returns_404(client, endpoint, payload):
 
 def test_upload_unsupported_format(client, tmp_path):
     kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
-    f = tmp_path / "doc.pdf"
+    f = tmp_path / "doc.exe"
     f.write_bytes(b"data")
     with open(f, "rb") as fh:
         r = client.post(f"/api/knowledge-bases/{kb['id']}/documents",
-                        files={"file": ("doc.pdf", fh, "application/pdf")})
+                        files={"file": ("doc.exe", fh, "application/octet-stream")})
     assert r.status_code == 422
 
 

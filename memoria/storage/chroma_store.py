@@ -39,14 +39,15 @@ class ChromaStore(VectorStore):
         res = col.query(query_embeddings=[embedding], n_results=k,
                               include=["documents", "distances", "metadatas"])
         results = []
-        for text, dist, meta in zip(
-            res["documents"][0], res["distances"][0], res["metadatas"][0]
+        for chunk_id, text, dist, meta in zip(
+            res["ids"][0], res["documents"][0], res["distances"][0], res["metadatas"][0]
         ):
             if self._metric == "cosine":
                 score = 1.0 - dist
             else:
                 score = 1.0 - dist / 2.0
             results.append({
+                "id": chunk_id,
                 "text": text,
                 "score": score,
                 "doc_id": meta.get("doc_id", ""),
@@ -56,3 +57,23 @@ class ChromaStore(VectorStore):
 
     def delete(self, where: dict) -> None:
         self._col().delete(where=where)
+
+    def get_all_documents(self) -> list[dict]:
+        col = self._col()
+        count = col.count()
+        if count == 0:
+            return []
+        data = col.get(include=["documents", "metadatas"])
+        items = []
+        ids = data.get("ids") or []
+        documents = data.get("documents") or []
+        metadatas = data.get("metadatas") or []
+        for chunk_id, text, meta in zip(ids, documents, metadatas):
+            meta_dict = meta or {}
+            items.append({
+                "id": chunk_id,
+                "text": text,
+                "doc_id": meta_dict.get("doc_id", ""),
+                "db_doc_id": meta_dict.get("db_doc_id", ""),
+            })
+        return items

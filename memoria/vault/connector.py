@@ -6,7 +6,7 @@ import tempfile
 from urllib.parse import unquote, urlsplit
 from abc import ABC, abstractmethod
 
-SUPPORTED_EXTS = {".md", ".txt"}
+from memoria.core.chunker import SUPPORTED as SUPPORTED_EXTS
 
 
 class VaultConnector(ABC):

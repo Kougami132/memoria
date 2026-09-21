@@ -162,6 +162,8 @@ async def test_async_agent_host_tools_require_approval_before_connector_executio
             return {"id": host_id, "name": "test", "security_mode": "ask_confirmation", "safe_mode": False}
 
         def get_setting(self, key):
+            if key == "approval_timeout":
+                return 0.05
             return None
 
     class FakeHost:

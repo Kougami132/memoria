@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -136,6 +137,7 @@ def test_agent_tools_list_and_search_only_allowed_kbs(tmp_path):
 
 
 def test_openai_agents_runner_imports_sdk_and_returns_final_output(monkeypatch):
+    pytest.importorskip("agents")
     import agents
 
     class FakeTools:

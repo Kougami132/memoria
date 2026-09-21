@@ -503,7 +503,7 @@ function DocList({ kb }: { kb: api.KB }) {
             </Button>
             <input
               type="file"
-              accept=".md,.txt"
+              accept=".md,.markdown,.txt,.pdf,.docx,.yaml,.yml"
               className="hidden"
               onChange={e => {
                 const file = e.target.files?.[0]
@@ -516,7 +516,7 @@ function DocList({ kb }: { kb: api.KB }) {
       </div>
       {docs.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-6">
-          {kb.type === 'vault' ? '仓库同步后文档将显示在此处' : '暂无文档，请上传 .md 或 .txt 文件'}
+          {kb.type === 'vault' ? '仓库同步后文档将显示在此处' : '暂无文档，请上传 .md, .txt, .pdf, .docx 或 .yaml 文件'}
         </p>
       ) : (
         <div className="space-y-1.5">

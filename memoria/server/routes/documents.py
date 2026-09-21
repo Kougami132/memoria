@@ -11,7 +11,7 @@ from memoria.storage.db import DB
 
 router = APIRouter(tags=["documents"])
 
-ALLOWED_SUFFIXES = {".md", ".txt"}
+from memoria.core.chunker import SUPPORTED as ALLOWED_SUFFIXES
 
 
 @router.post("/knowledge-bases/{kb_id}/documents", status_code=201)
