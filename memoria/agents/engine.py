@@ -1171,7 +1171,7 @@ class OpenAIAgentsRunner:
                             # Tool execution guarded by tiered hard timeouts and exception containment
                             tool_result = await execute_tool_with_sandbox(
                                 tool_name,
-                                lambda: _execute_agent_tool_async(
+                                _execute_agent_tool_async(
                                     tool_name,
                                     args,
                                     tools,

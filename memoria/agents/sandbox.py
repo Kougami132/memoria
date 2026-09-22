@@ -104,15 +104,20 @@ async def execute_tool_with_sandbox(
         tout = get_tool_timeout(tool_name)
 
     try:
-        if asyncio.iscoroutinefunction(coroutine_or_fn) or asyncio.iscoroutine(coroutine_or_fn):
-            task = coroutine_or_fn() if callable(coroutine_or_fn) else coroutine_or_fn
-            res = await asyncio.wait_for(task, timeout=tout)
-        else:
-            # Synchronous callable run in thread
+        if asyncio.iscoroutine(coroutine_or_fn):
+            res = await asyncio.wait_for(coroutine_or_fn, timeout=tout)
+        elif asyncio.iscoroutinefunction(coroutine_or_fn):
+            res = await asyncio.wait_for(coroutine_or_fn(), timeout=tout)
+        elif callable(coroutine_or_fn):
+            # Synchronous callable run in thread, or callable returning a coroutine (e.g. lambda)
             res = await asyncio.wait_for(
                 asyncio.to_thread(coroutine_or_fn),
                 timeout=tout,
             )
+            if asyncio.iscoroutine(res):
+                res = await asyncio.wait_for(res, timeout=tout)
+        else:
+            res = coroutine_or_fn
         return truncate_tool_output(res, max_chars=max_output_chars)
     except asyncio.TimeoutError:
         err_msg = f"Tool '{tool_name}' execution timed out after {tout}s"
