@@ -5,7 +5,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** done
+**Status:** closed
 
 - [x] 定义 `BaseTaskQueue` 统一接口（enqueue, get_task, cancel_task）并实现基于 SQLite 的持久化存储驱动
 - [x] 启动内嵌后台 Async Worker，支持消费、异常重试与持久化状态扭转

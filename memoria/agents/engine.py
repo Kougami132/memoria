@@ -1166,18 +1166,29 @@ class OpenAIAgentsRunner:
                                 "tool_agent": tool_agent_name,
                                 "args": args,
                             })
-                            tool_result = await _execute_agent_tool_async(
+                            from memoria.agents.sandbox import execute_tool_with_sandbox, truncate_tool_output
+
+                            # Tool execution guarded by tiered hard timeouts and exception containment
+                            tool_result = await execute_tool_with_sandbox(
                                 tool_name,
-                                args,
-                                tools,
-                                event_queue=event_queue,
-                                session_id=session_id,
-                                message_id=message_id,
-                                db=db,
+                                lambda: _execute_agent_tool_async(
+                                    tool_name,
+                                    args,
+                                    tools,
+                                    event_queue=event_queue,
+                                    session_id=session_id,
+                                    message_id=message_id,
+                                    db=db,
+                                ),
                             )
+                            if isinstance(tool_result, dict) and tool_result.get("status") in ("error", "timeout") and tool_result.get("error"):
+                                tool_error = tool_result["error"]
                         except Exception as e:
                             tool_error = str(e)
-                            tool_result = {"error": str(e)}
+                            tool_result = {"error": str(e), "status": "error"}
+
+                        from memoria.agents.sandbox import truncate_tool_output
+                        tool_result = truncate_tool_output(tool_result)
 
                         tool_end = time.time()
                         tool_span["ended_at"] = datetime.utcnow().isoformat() + "Z"
@@ -1621,19 +1632,16 @@ class AgentEngine:
             "trace": stored_trace or final_trace,
         }
 
-    def _build_prompt(self, message: str, history: list[dict]) -> str:
-        if not history:
-            return message
+    def _build_prompt(self, message: str, history: list[dict], watermark_tokens: int = 8000) -> str:
+        from memoria.agents.whiteboard import build_consolidated_prompt
 
-        transcript: list[str] = ["以下是本会话此前的对话上下文，请结合它回答当前问题："]
-        for item in history:
-            role = "用户" if item.get("role") == "user" else "助手"
-            content = str(item.get("content") or "").strip()
-            if content:
-                transcript.append(f"{role}：{content}")
-        transcript.append("")
-        transcript.append(f"当前用户问题：{message}")
-        return "\n".join(transcript)
+        prompt, _ = build_consolidated_prompt(
+            message=message,
+            history=history,
+            watermark_tokens=watermark_tokens,
+            keep_recent_turns=6,
+        )
+        return prompt
 
     def _default_runner(self, effective: dict) -> AgentRunner:
         from memoria.config import settings
