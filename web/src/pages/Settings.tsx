@@ -21,10 +21,10 @@ interface TabItem {
 
 const TABS: TabItem[] = [
   { id: 'general', label: '全局基础', badge: 'General', icon: Sliders },
-  { id: 'knowledge-agent', label: '知识检索', badge: 'KnowledgeAgent', icon: Database },
-  { id: 'host-agent', label: '主机运维', badge: 'HostAgent', icon: Server },
-  { id: 'web-agent', label: '联网搜索', badge: 'WebAgent', icon: Globe },
-  { id: 'qq-bot', label: 'QQ 机器人', badge: 'QQBot 通道', icon: Radio },
+  { id: 'knowledge-agent', label: '知识检索', badge: 'Knowledge', icon: Database },
+  { id: 'host-agent', label: '主机运维', badge: 'Host', icon: Server },
+  { id: 'web-agent', label: '联网搜索', badge: 'Web', icon: Globe },
+  { id: 'qq-bot', label: 'QQ 机器人', badge: 'QQBot', icon: Radio },
 ]
 
 export default function Settings() {
@@ -73,7 +73,7 @@ export default function Settings() {
       </div>
 
       {/* Horizontal Segmented Tab Navigation Bar */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-secondary/50 rounded-2xl border border-border/80 overflow-x-auto shadow-2xs">
+      <div className="flex items-center gap-1 p-1 bg-secondary/50 rounded-2xl border border-border/80 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden shadow-2xs">
         {TABS.map(item => {
           const isActive = activeTab === item.id
           const Icon = item.icon
@@ -82,16 +82,16 @@ export default function Settings() {
               key={item.id}
               type="button"
               onClick={() => handleTabChange(item.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex-1 min-w-fit flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
                 isActive
                   ? 'bg-background text-foreground shadow-xs font-semibold'
                   : 'text-muted-foreground hover:text-foreground hover:bg-background/40'
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+              <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
               <span>{item.label}</span>
               <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono ${
+                className={`hidden md:inline-flex text-[10px] px-1.5 py-0.5 rounded-md font-mono shrink-0 ${
                   isActive
                     ? 'bg-primary/10 text-primary font-medium'
                     : 'bg-muted/70 text-muted-foreground'
