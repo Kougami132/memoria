@@ -145,6 +145,34 @@ def test_settings_put(client):
     assert data["llm_model"] == "gpt-4o"
 
 
+def test_settings_subagent_differential_update_host_dangerous_patterns_and_rag(client):
+    # Setup initial state
+    client.put("/api/settings", json={"top_k": 6, "llm_model": "gpt-4o-mini"})
+
+    # 1. Update host_dangerous_patterns alone
+    custom_patterns = [r"^rm\s+-rf\s+/", r"^poweroff$"]
+    r = client.put("/api/settings", json={"host_dangerous_patterns": custom_patterns})
+    assert r.status_code == 200
+    data = r.json()
+    assert json.loads(data["host_dangerous_patterns"]) == custom_patterns
+    assert data["top_k"] == "6"
+    assert data["llm_model"] == "gpt-4o-mini"
+
+    # Verify GET persistence
+    get_res = client.get("/api/settings")
+    assert get_res.status_code == 200
+    assert json.loads(get_res.json()["host_dangerous_patterns"]) == custom_patterns
+
+    # 2. Update RAG slice alone
+    r_rag = client.put("/api/settings", json={"top_k": 10, "min_score": 0.72})
+    assert r_rag.status_code == 200
+    data_rag = r_rag.json()
+    assert data_rag["top_k"] == "10"
+    assert float(data_rag["min_score"]) == 0.72
+    assert json.loads(data_rag["host_dangerous_patterns"]) == custom_patterns
+    assert data_rag["llm_model"] == "gpt-4o-mini"
+
+
 def test_external_api_token_authentication_and_rotation(client):
     assert client.get("/v1/models").status_code == 200
 

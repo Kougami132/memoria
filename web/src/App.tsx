@@ -27,6 +27,7 @@ export default function App() {
             <Route path="agentic-chat/:sessionId" element={<AgenticChat />} />
             <Route path="logs" element={<Logs />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="settings/:tab" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

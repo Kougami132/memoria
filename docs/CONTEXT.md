@@ -128,6 +128,10 @@
 ### ADR-5: 统一单轮会话编排器 (Unified Turn Orchestrator)
 - **决策**: 将 `AgenticRagEngine` 增强并更名为 `AgentEngine`（保留向前兼容别名），确立为唯一的单轮执行编排器。收敛 CLI `query`、QQ 机器人适配器和 OpenAI 路由至统一流式/非流式编排内核。彻底清理未注册或废弃的 `routes/chat.py` 与 `routes/agent_chat.py`。底层 `Pipeline` 退回纯粹的 RAG 检索增强引擎。
 
+### ADR-6: 专家智能体配置与全局系统设置模块化解耦
+- **决策**: 将原本平铺堆叠的单体设置长页面解耦为「全局基础底座」与各专家专员（`KnowledgeAgent`、`HostAgent`、`WebAgent`）及通道网关（`QQBot`）的独立模块切片。采用水平分段 Tab 与 URL 深链接（`/settings`、`/settings/:tab`）双向同步，配合保活挂载（Keep-Alive）与差量提交（Differential Payloads），彻底隔离各切片表单生命周期与未提交草稿，消除多模块干扰与意外覆盖。
+- **理由**: 与系统 Multi-Agent 架构严格对齐，降低配置认知负荷，保证交互与草稿安全，提供直达深链接支持。
+
 ---
 
 ## 5. 项目工程规范与技术约束

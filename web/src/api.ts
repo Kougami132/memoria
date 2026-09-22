@@ -183,7 +183,7 @@ export interface ChatStreamErrorEvent { type: 'error'; detail: string }
 export type ChatStreamEvent = ChatStreamMetaEvent | ChatStreamDeltaEvent | ChatStreamStatusEvent | ChatStreamFinalEvent | ChatStreamErrorEvent
 export interface Settings {
   openai_base_url: string; openai_api_key: string; external_api_token: string; embedding_model: string;
-  llm_model: string; system_prompt: string; top_k: string; chunk_size: string; chunk_overlap: string;
+  llm_model: string; system_prompt: string; top_k: string; min_score?: string; chunk_size: string; chunk_overlap: string;
   vault_sync_interval_minutes: string
   host_dangerous_patterns?: string
   enable_web_search?: string | boolean
@@ -195,6 +195,7 @@ export interface SettingsUpdate {
   openai_base_url?: string; api_key?: string; external_api_token?: string; embedding_model?: string;
   llm_model?: string; system_prompt?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
   vault_sync_interval_minutes?: number
+  host_dangerous_patterns?: string[]
   enable_web_search?: boolean
   web_search_provider?: string
   web_search_api_key?: string
