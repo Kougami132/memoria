@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
@@ -41,3 +41,4 @@ class CommandResult(BaseModel):
     stdout: str
     stderr: str
     duration_ms: int = 0
+    job_handle: Optional[dict[str, Any]] = None

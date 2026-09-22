@@ -202,6 +202,26 @@ class HostConnector(BaseConnector):
             logger.debug("Remote SSH execution fallback: %s", exc)
             self.pool.invalidate(self.resource_id)
 
+        # Process Handle checking for background commands
+        from memoria.connectors.host.process import ProcessManager, global_process_manager
+        if ProcessManager.is_background_command(cmd):
+            proc_info = global_process_manager.register_process(self.resource_id, cmd)
+            duration_ms = int((time.time() - start_time) * 1000)
+            stdout = (
+                f"Command started in background on {self.config.host}.\n"
+                f"Job Handle: {proc_info['job_handle']}\n"
+                f"PID: {proc_info['pid']}\n"
+                f"Status: {proc_info['status']}"
+            )
+            return CommandResult(
+                command=cmd,
+                exit_code=0,
+                stdout=stdout,
+                stderr="",
+                duration_ms=duration_ms,
+                job_handle=proc_info,
+            )
+
         # Simulated fallback execution (for testing / uncredentialed hosts)
         if cmd in ("uptime", "w"):
             stdout = " 14:30:00 up 14 days,  3:22,  2 users,  load average: 0.18, 0.22, 0.25"

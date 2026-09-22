@@ -8,6 +8,10 @@ DEFAULT_HOST_DANGEROUS_PATTERNS = [
     r"\bdd\s+if=.*of=/dev/[a-z0-9]+",
     r"\b(?:reboot|shutdown|poweroff|init\s+0|init\s+6)\b",
     r">\s*/dev/(?:sd[a-z]|nvme[0-9]|hd[a-z])",
+    r"\bchmod\s+-[a-zA-Z]*R[a-zA-Z]*\s+[0-7]*777\s+(?:/|/\*)(?:\s|$)",
+    r"\bchown\s+-[a-zA-Z]*R[a-zA-Z]*\s+\S+\s+(?:/|/\*)(?:\s|$)",
+    r"(?:^|[|;&\s])(?:sudo\s+)?(?:passwd|chpasswd)(?:\s|$)",
+    r":\(\)\s*\{[^}]*:\s*\|[^}]*&\s*\}",
 ]
 
 from pydantic_settings import BaseSettings

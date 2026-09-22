@@ -265,6 +265,7 @@ def _manual_session_title(title: str | None) -> str:
 class DB:
     def __init__(self, db_path: str) -> None:
         from sqlalchemy.pool import NullPool, StaticPool
+        db_path = str(db_path)
         if "://" in db_path:
             url = db_path
         elif db_path == ":memory:":

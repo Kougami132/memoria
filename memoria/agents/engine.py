@@ -507,10 +507,17 @@ async def _execute_agent_tool_async(
         path = str(args.get("path") or "")
         lines = int(args.get("lines") or 50)
         return tools.read_host_log_tail(host_id=host_id, path=path, lines=lines)
+    elif name == "get_job_status":
+        job_handle = str(args.get("job_handle") or args.get("job_id") or "")
+        return tools.get_job_status(job_handle=job_handle)
+    elif name == "read_job_output":
+        job_handle = str(args.get("job_handle") or args.get("job_id") or "")
+        tail_lines = int(args.get("tail_lines") or args.get("lines") or 50)
+        return tools.read_job_output(job_handle=job_handle, tail_lines=tail_lines)
     elif name == "run_host_command":
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")
-        
+
         # Check if approval is required before execution
         host_tools = getattr(tools, "host", None)
         db = getattr(host_tools, "db", None) or getattr(tools, "db", None)
@@ -762,6 +769,13 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
         path = str(args.get("path") or "")
         lines = int(args.get("lines") or 50)
         return tools.read_host_log_tail(host_id=host_id, path=path, lines=lines)
+    elif name == "get_job_status":
+        job_handle = str(args.get("job_handle") or args.get("job_id") or "")
+        return tools.get_job_status(job_handle=job_handle)
+    elif name == "read_job_output":
+        job_handle = str(args.get("job_handle") or args.get("job_id") or "")
+        tail_lines = int(args.get("tail_lines") or args.get("lines") or 50)
+        return tools.read_job_output(job_handle=job_handle, tail_lines=tail_lines)
     elif name == "run_host_command":
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")

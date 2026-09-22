@@ -291,6 +291,12 @@ class AgentTools:
             max_bytes=max_bytes,
         )
 
+    def get_job_status(self, job_handle: str) -> dict:
+        return self.host.get_job_status(job_handle=job_handle)
+
+    def read_job_output(self, job_handle: str, tail_lines: int = 50) -> dict:
+        return self.host.read_job_output(job_handle=job_handle, tail_lines=tail_lines)
+
     def delegate_to_knowledge_agent(self, query: str, kb_id: str | None = None, top_k: int = 5) -> dict:
         """Subagent action: Retrieve information across knowledge bases and return summarized findings."""
         if kb_id:

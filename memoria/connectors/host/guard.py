@@ -59,6 +59,10 @@ class CommandGuard:
                 return False
         return True
 
+    def check(self, command: str, approved: bool = False) -> None:
+        """Alias for validate_command."""
+        return self.validate_command(command, approved=approved)
+
     def validate_command(self, command: str, approved: bool = False) -> None:
         cmd_stripped = command.strip()
         if not cmd_stripped:
@@ -95,3 +99,7 @@ class CommandGuard:
         truncated = text[: self.max_output_chars]
         omitted = len(text) - self.max_output_chars
         return f"{truncated}\n\n... [Output truncated: {omitted} characters omitted] ..."
+
+
+# Alias for backward compatibility and spec alignment
+HostCommandGuard = CommandGuard

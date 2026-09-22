@@ -46,6 +46,22 @@ HOST_TOOL_METADATA: dict[str, dict[str, str]] = {
         "agent_role": "specialist",
         "parent_agent_id": "orchestrator",
     },
+    "get_job_status": {
+        "label": "查询主机后台任务运行状态",
+        "description": "根据 job_handle 句柄查询后台长任务进程的实时状态、退出码与输出摘要",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
+    "read_job_output": {
+        "label": "读取后台任务实时输出日志",
+        "description": "根据 job_handle 句柄增量读取后台任务进程的标准输出和错误日志",
+        "agent_id": "host_agent",
+        "agent_name": "HostAgent",
+        "agent_role": "specialist",
+        "parent_agent_id": "orchestrator",
+    },
 }
 
 
@@ -242,3 +258,20 @@ class AgentHostTools:
             command, approved=False, approval_token=approval_token, session_id=session_id
         )
         return res.model_dump()
+
+    def get_job_status(self, job_handle: str) -> dict[str, Any]:
+        """Query real-time status, exit code, and stdout tail for a background job handle."""
+        from memoria.connectors.host.process import global_process_manager
+        info = global_process_manager.get_process_status(job_handle)
+        if not info:
+            return {
+                "job_handle": job_handle,
+                "status": "unknown",
+                "error": f"Job handle '{job_handle}' not found or expired",
+            }
+        return info
+
+    def read_job_output(self, job_handle: str, tail_lines: int = 50) -> dict[str, Any]:
+        """Read output lines from a background job handle."""
+        from memoria.connectors.host.process import global_process_manager
+        return global_process_manager.read_job_output(job_handle, tail_lines=tail_lines)

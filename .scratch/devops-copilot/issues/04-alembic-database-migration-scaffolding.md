@@ -5,7 +5,7 @@
 
 **Blocked by:** 03: 基于 SQLite 任务表的单机持久化异步队列与 202 接口改造 (Persistent Async Task Queue)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] 审查并规范已有 ORM 模型（会话表、消息表、配置表、任务表），确保类型跨 SQLite 与 PostgreSQL 完全兼容
 - [x] 搭建 `alembic` 迁移脚手架，生成覆盖当前表结构的基准迁移脚本（Revision Baseline）
