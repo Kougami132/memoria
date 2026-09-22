@@ -1339,10 +1339,11 @@ class DB:
     ) -> dict:
         log_id = f"qqlog-{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
+        cat = category.lower()
         row = QqbotLogRow(
             id=log_id,
             timestamp=now,
-            category=category,
+            category=cat,
             level=level.upper(),
             event_type=event_type,
             source_type=source_type,
@@ -1357,7 +1358,7 @@ class DB:
         return {
             "id": log_id,
             "timestamp": now,
-            "category": category,
+            "category": cat,
             "level": level.upper(),
             "event_type": event_type,
             "source_type": source_type,
@@ -1378,7 +1379,7 @@ class DB:
         with self._s() as s:
             q = s.query(QqbotLogRow)
             if category:
-                q = q.filter(QqbotLogRow.category == category)
+                q = q.filter(QqbotLogRow.category == category.lower())
             if level:
                 q = q.filter(QqbotLogRow.level == level.upper())
             rows = (
@@ -1408,7 +1409,7 @@ class DB:
         with self._s() as s:
             q = s.query(QqbotLogRow)
             if category:
-                q = q.filter(QqbotLogRow.category == category)
+                q = q.filter(QqbotLogRow.category == category.lower())
             count = q.delete()
             return count
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react'
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import {
   Activity,
   AlertCircle,
@@ -58,34 +58,7 @@ export default function Logs() {
   const terminalEndRef = useRef<HTMLDivElement | null>(null)
   const [stickToBottom, setStickToBottom] = useState<boolean>(true)
 
-  // Initial fetch on tab change
-  useEffect(() => {
-    if (activeTab === 'invocations') {
-      fetchInvocations()
-    } else if (activeTab === 'qqbot') {
-      fetchQQBotData()
-    } else if (activeTab === 'system') {
-      fetchSystemLogs()
-    }
-  }, [activeTab])
-
-  // System logs auto-refresh interval (every 4s)
-  useEffect(() => {
-    if (activeTab !== 'system' || !autoRefresh) return
-    const timer = setInterval(() => {
-      fetchSystemLogs(true)
-    }, 4000)
-    return () => clearInterval(timer)
-  }, [activeTab, autoRefresh, systemLines, systemLevel, systemSearch])
-
-  // Auto scroll to bottom of terminal if stickToBottom is active
-  useEffect(() => {
-    if (activeTab === 'system' && stickToBottom && terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [systemLogs, activeTab, stickToBottom])
-
-  const fetchInvocations = async () => {
+  const fetchInvocations = useCallback(async () => {
     setInvLoading(true)
     try {
       const res = await logsApi.listInvocations({ limit: 100, offset: 0 })
@@ -95,7 +68,7 @@ export default function Logs() {
     } finally {
       setInvLoading(false)
     }
-  }
+  }, [])
 
   const handleClearInvocations = async () => {
     if (!window.confirm('确定要清空所有外部调用日志吗？')) return
@@ -111,7 +84,7 @@ export default function Logs() {
     }
   }
 
-  const fetchQQBotData = async () => {
+  const fetchQQBotData = useCallback(async () => {
     setQqbotLoading(true)
     try {
       const [statusRes, eventsRes] = await Promise.all([
@@ -132,7 +105,7 @@ export default function Logs() {
     } finally {
       setQqbotLoading(false)
     }
-  }
+  }, [qqbotCategory, qqbotLevel])
 
   const handleClearQQBotLogs = async () => {
     if (!window.confirm('确定要清空 QQBot 审计日志吗？')) return
@@ -144,7 +117,7 @@ export default function Logs() {
     }
   }
 
-  const fetchSystemLogs = async (silent = false) => {
+  const fetchSystemLogs = useCallback(async (silent = false) => {
     if (!silent) setSystemLoading(true)
     try {
       const res = await logsApi.getSystemLogs({
@@ -159,7 +132,37 @@ export default function Logs() {
     } finally {
       if (!silent) setSystemLoading(false)
     }
-  }
+  }, [systemLines, systemLevel, systemSearch])
+
+  // Invocations tab fetch
+  useEffect(() => {
+    if (activeTab === 'invocations') {
+      fetchInvocations()
+    }
+  }, [activeTab, fetchInvocations])
+
+  // QQBot tab fetch on tab change, category change, or level change
+  useEffect(() => {
+    if (activeTab === 'qqbot') {
+      fetchQQBotData()
+    }
+  }, [activeTab, fetchQQBotData])
+
+  // System logs fetch on tab change or filter change
+  useEffect(() => {
+    if (activeTab === 'system') {
+      fetchSystemLogs()
+    }
+  }, [activeTab, fetchSystemLogs])
+
+  // System logs auto-refresh interval (every 4s)
+  useEffect(() => {
+    if (activeTab !== 'system' || !autoRefresh) return
+    const timer = setInterval(() => {
+      fetchSystemLogs(true)
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [activeTab, autoRefresh, fetchSystemLogs])
 
   const formatTime = (iso: string) => {
     try {
@@ -179,9 +182,16 @@ export default function Logs() {
   }
 
   const filteredQQBotLogs = useMemo(() => {
-    if (!qqbotSearch.trim()) return qqbotLogs
+    let list = qqbotLogs
+    if (qqbotCategory !== 'all') {
+      list = list.filter((l) => (l.category || '').toLowerCase() === qqbotCategory.toLowerCase())
+    }
+    if (qqbotLevel !== 'all') {
+      list = list.filter((l) => (l.level || '').toUpperCase() === qqbotLevel.toUpperCase())
+    }
+    if (!qqbotSearch.trim()) return list
     const q = qqbotSearch.toLowerCase()
-    return qqbotLogs.filter(
+    return list.filter(
       (l) =>
         (l.summary && l.summary.toLowerCase().includes(q)) ||
         (l.user_name && l.user_name.toLowerCase().includes(q)) ||
@@ -189,7 +199,7 @@ export default function Logs() {
         (l.event_type && l.event_type.toLowerCase().includes(q)) ||
         (l.details && l.details.toLowerCase().includes(q))
     )
-  }, [qqbotLogs, qqbotSearch])
+  }, [qqbotLogs, qqbotCategory, qqbotLevel, qqbotSearch])
 
   // Metric calculations
   const totalInvocationTokens = useMemo(
