@@ -216,11 +216,12 @@ def test_chat_fallback_uses_updated_default_system_prompt(client):
     kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
     bot = client.post("/api/bots", json={"name": "b", "system_prompt": "", "kb_ids": [kb["id"]]}).json()
 
-    pipeline = client.app.dependency_overrides[get_pipeline]()
-    prepared = pipeline.prepare_query(bot["id"], "hello")
+    engine = client.app.dependency_overrides[get_agentic_engine]()
+    db = client.app.dependency_overrides[get_db]()
+    effective = get_effective_settings(db)
+    instructions = engine._instructions(effective, custom_system_prompt=bot["system_prompt"], is_bot=True)
 
-    assert prepared["messages"][0]["role"] == "system"
-    assert prepared["messages"][0]["content"].startswith("configured default")
+    assert "configured default" in instructions
 
 
 def test_chat_keeps_bot_system_prompt_over_global_default(client):
@@ -228,11 +229,13 @@ def test_chat_keeps_bot_system_prompt_over_global_default(client):
     kb = client.post("/api/knowledge-bases", json={"name": "kb", "description": ""}).json()
     bot = client.post("/api/bots", json={"name": "b", "system_prompt": "bot custom", "kb_ids": [kb["id"]]}).json()
 
-    pipeline = client.app.dependency_overrides[get_pipeline]()
-    prepared = pipeline.prepare_query(bot["id"], "hello")
+    engine = client.app.dependency_overrides[get_agentic_engine]()
+    db = client.app.dependency_overrides[get_db]()
+    effective = get_effective_settings(db)
+    instructions = engine._instructions(effective, custom_system_prompt=bot["system_prompt"], is_bot=True)
 
-    assert prepared["messages"][0]["role"] == "system"
-    assert prepared["messages"][0]["content"].startswith("bot custom")
+    assert "bot custom" in instructions
+    assert "configured default" not in instructions
 
 
 def test_settings_put_skip_empty_api_key(client):

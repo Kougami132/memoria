@@ -6,12 +6,13 @@ import copy
 import json
 import logging
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from memoria.agents.state import SourceCollector
-from memoria.agents.tools import AgentTools, TOOL_METADATA
+from memoria.agents.tools import AgentTools, AgentKnowledgeTools, TOOL_METADATA
 from memoria.storage.db import DB
 
 if TYPE_CHECKING:
@@ -518,101 +519,37 @@ async def _execute_agent_tool_async(
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")
 
-        # Check if approval is required before execution
-        host_tools = getattr(tools, "host", None)
-        db = getattr(host_tools, "db", None) or getattr(tools, "db", None)
-        h = db.get_host(host_id) if db else None
-        host_sec_modes = getattr(host_tools, "host_security_modes", None)
-        override_mode = (host_sec_modes or {}).get(host_id) if host_sec_modes else None
-        sec_mode = override_mode or (h.get("security_mode") if h else "ask_confirmation") or ("read_only" if (h and h.get("safe_mode")) else "ask_confirmation")
-        
-        from memoria.connectors.host.guard import (
-            CommandApprovalRequired,
-            CommandGuard,
-            CommandSafetyViolation,
-        )
-        import json
-        from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
-        raw_patterns = db.get_setting("host_dangerous_patterns") if db else None
-        dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
-        guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
-        
-        # Match the Hermes boundary: reject blacklist violations before creating
-        # an approval, then use the whitelist only to decide whether approval is
-        # needed.  `is_safe_command()` alone does not enforce the blacklist.
-        try:
-            guard.validate_command(command)
-        except CommandSafetyViolation as exc:
+        def _on_approval_required(info: dict) -> None:
             _log_trace(
-                "HOST_SECURITY_BLOCK",
-                f"Host command rejected by safety policy: host={host_id} cmd={command!r} error={exc}",
+                "APPROVAL_REQ",
+                f"Host command waiting for user approval: host={info['host_name']}({info['host_id']}) cmd={info['command']!r} approval_id={info['approval_id']}",
                 agent="HostAgent",
             )
-            return {
-                "status": "rejected",
-                "error": str(exc),
-                "host_id": host_id,
-                "command": command,
-            }
-        except CommandApprovalRequired:
-            # This is the normal ask_confirmation branch. The command is not
-            # passed to the connector until the channel reports approval.
-            pass
-
-        is_safe_command = guard.is_safe_command(command)
-        approval_required = sec_mode == "ask_confirmation"
-        approval_token = None
-        approved = False
-        _log_trace(
-            "HOST_SECURITY",
-            f"Host command policy: host={h.get('name') if h else host_id}({host_id}) "
-            f"mode={sec_mode} safe={is_safe_command} approval_required={approval_required}",
-            agent="HostAgent",
-        )
-
-        # Only commands outside the read-only whitelist need approval.
-        if approval_required and not is_safe_command:
-            from memoria.connectors.host.approval import global_host_approval_manager
-            host_name = h.get("name") if h else host_id
-            approval = global_host_approval_manager.create_approval(
-                host_id=host_id,
-                host_name=host_name,
-                command=command,
-                session_id=session_id,
-            )
-            _log_trace("APPROVAL_REQ", f"Host command waiting for user approval: host={host_name}({host_id}) cmd={command!r} approval_id={approval.id}", agent="HostAgent")
             if message_id and db:
                 db.update_message_status(
                     message_id=message_id,
                     status="pending_approval",
                     metadata={
-                        "approval_id": approval.id,
-                        "host_id": host_id,
-                        "host_name": host_name,
-                        "command": command,
+                        "approval_id": info["approval_id"],
+                        "host_id": info["host_id"],
+                        "host_name": info["host_name"],
+                        "command": info["command"],
                         "approval_status": "pending",
                     },
                 )
             if event_queue:
                 event_queue.put({
                     "type": "approval_required",
-                    "approval_id": approval.id,
-                    "host_id": host_id,
-                    "host_name": host_name,
-                    "command": command,
+                    "approval_id": info["approval_id"],
+                    "host_id": info["host_id"],
+                    "host_name": info["host_name"],
+                    "command": info["command"],
                 })
-            timeout = float(db.get_setting("approval_timeout") or 300.0) if db else 300.0
-            approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=timeout)
-            if approved:
-                approval_token = global_host_approval_manager.get_authorization_token(
-                    approval.id,
-                    host_id,
-                    command,
-                    session_id,
-                )
+
+        def _on_approval_decision(approved: bool, info: dict) -> None:
             _log_trace(
                 "APPROVAL_DEC",
-                f"User decision for approval_id={approval.id}: approved={approved} authorized={bool(approval_token)}",
+                f"User decision for approval_id={info['approval_id']}: approved={approved}",
                 agent="HostAgent",
             )
             if message_id and db:
@@ -620,42 +557,31 @@ async def _execute_agent_tool_async(
                     message_id=message_id,
                     status="streaming",
                     metadata={
-                        "approval_id": approval.id,
-                        "host_id": host_id,
-                        "host_name": host_name,
-                        "command": command,
+                        "approval_id": info["approval_id"],
+                        "host_id": info["host_id"],
+                        "host_name": info["host_name"],
+                        "command": info["command"],
                         "approval_status": "approved" if approved else "rejected",
                     },
                 )
-            if not approved:
-                return {
-                    "error": f"Command execution rejected by user or timed out: '{command}'",
-                    "status": "rejected",
-                }
-        # Revalidate after approval. This keeps a stale or externally modified
-        # approval from turning into an unchecked execution.
-        try:
-            guard.validate_command(command, approved=bool(approval_token))
-        except CommandSafetyViolation as exc:
-            return {
-                "status": "rejected",
-                "error": str(exc),
-                "host_id": host_id,
-                "command": command,
-            }
-        if approval_required and not is_safe_command and not approval_token:
-            return {
-                "status": "rejected",
-                "error": "Approval was accepted but no matching execution authorization was issued",
-                "host_id": host_id,
-                "command": command,
-            }
-        return tools.run_host_command(
-            host_id,
-            command,
-            approved=False,
-            approval_token=approval_token,
+
+        if hasattr(tools, "run_host_command_async"):
+            return await tools.run_host_command_async(
+                host_id=host_id,
+                command=command,
+                session_id=session_id,
+                on_approval_required=_on_approval_required,
+                on_approval_decision=_on_approval_decision,
+            )
+        from memoria.connectors.host.guard import execute_guarded_host_command_async
+        return await execute_guarded_host_command_async(
+            tools=tools,
+            host_id=host_id,
+            command=command,
             session_id=session_id,
+            on_approval_required=_on_approval_required,
+            on_approval_decision=_on_approval_decision,
+            db=db,
         )
     else:
         raise ValueError(f"Unknown agent tool: {name}")
@@ -667,50 +593,6 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
     therefore report the pending approval instead of calling the host connector
     directly. The streaming runner is the approval-capable path.
     """
-    def sync_host_command(host_id: str, command: str) -> dict:
-        host_tools = getattr(tools, "host", None)
-        db = getattr(host_tools, "db", None) or getattr(tools, "db", None)
-        h = db.get_host(host_id) if db else None
-        host_security_modes = getattr(host_tools, "host_security_modes", None)
-        override_mode = (host_security_modes or {}).get(host_id) if host_security_modes else None
-        sec_mode = override_mode or (h.get("security_mode") if h else "ask_confirmation") or (
-            "read_only" if (h and h.get("safe_mode")) else "ask_confirmation"
-        )
-        from memoria.connectors.host.guard import CommandApprovalRequired, CommandGuard, CommandSafetyViolation
-        import json
-        from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
-
-        raw_patterns = db.get_setting("host_dangerous_patterns") if db else None
-        dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
-        guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
-        try:
-            guard.validate_command(command)
-        except CommandSafetyViolation as exc:
-            _log_trace(
-                "HOST_SECURITY_BLOCK",
-                f"Synchronous host command rejected by safety policy: host={host_id} cmd={command!r} error={exc}",
-                agent="HostAgent",
-            )
-            return {
-                "status": "rejected",
-                "error": str(exc),
-                "host_id": host_id,
-                "command": command,
-            }
-        except CommandApprovalRequired:
-            _log_trace(
-                "APPROVAL_BLOCKED_SYNC",
-                f"Synchronous host command requires channel approval: host={host_id} cmd={command!r}",
-                agent="HostAgent",
-            )
-            return {
-                "status": "pending_approval",
-                "error": f"Command requires user approval before execution: '{command}'",
-                "host_id": host_id,
-                "command": command,
-            }
-        return tools.run_host_command(host_id, command, approved=False)
-
     if name == "delegate_to_knowledge_agent":
         query = str(args.get("query") or "")
         kb_id = args.get("kb_id")
@@ -741,13 +623,14 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
                     "command": str(command),
                 }
         if command and host_id:
-            return sync_host_command(str(host_id), str(command))
+            from memoria.connectors.host.guard import execute_guarded_host_command_sync
+            return execute_guarded_host_command_sync(tools=tools, host_id=str(host_id), command=str(command))
         return tools.delegate_to_host_agent(instruction=instruction, host_id=host_id, command=command)
     elif name == "delegate_to_web_agent":
         query = str(args.get("query") or "")
         max_results = int(args.get("max_results") or 5)
         return tools.delegate_to_web_agent(query=query, max_results=max_results)
-    if name == "list_knowledge_bases":
+    elif name == "list_knowledge_bases":
         return tools.list_knowledge_bases()
     elif name == "search_knowledge_base":
         kb_id = str(args.get("kb_id") or "")
@@ -779,7 +662,8 @@ def _execute_agent_tool(name: str, args: dict, tools: Any) -> Any:
     elif name == "run_host_command":
         host_id = str(args.get("host_id") or "")
         command = str(args.get("command") or "")
-        return sync_host_command(host_id, command)
+        from memoria.connectors.host.guard import execute_guarded_host_command_sync
+        return execute_guarded_host_command_sync(tools=tools, host_id=host_id, command=command)
     else:
         raise ValueError(f"Unknown agent tool: {name}")
 
@@ -1550,7 +1434,6 @@ class AgentEngine:
 
         final_answer = ""
         final_trace = None
-        message_persisted = False
         has_error = False
         completed = False
 

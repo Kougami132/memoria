@@ -277,6 +277,22 @@ class AgentTools:
             session_id=session_id,
         )
 
+    async def run_host_command_async(
+        self,
+        host_id: str,
+        command: str,
+        session_id: str | None = None,
+        on_approval_required: Any = None,
+        on_approval_decision: Any = None,
+    ) -> dict:
+        return await self.host.run_host_command_async(
+            host_id=host_id,
+            command=command,
+            session_id=session_id,
+            on_approval_required=on_approval_required,
+            on_approval_decision=on_approval_decision,
+        )
+
     def read_host_log_tail(
         self,
         host_id: str,

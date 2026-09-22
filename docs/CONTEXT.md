@@ -78,14 +78,14 @@
 ```
 
 ### 3.1 `memoria/agents/` (Multi-Agent 体系与统一单轮编排)
-- **`engine.py`**: 定义统一单轮会话编排器 `AgentEngine`（向前兼容 `AgenticRagEngine`）。主编排器 `Orchestrator` 协调多智能体图与工具执行回路，动态挂载 `kb_agent`（检索增强专家）和 `host_agent`（主机管理专家）为委托工具。CLI、QQBot、OpenAI 兼容协议均汇聚于此统一执行，支持思考流（`response.thought.delta`）与 Span 级追踪。
-- **`tools.py`**: 封装底层专业操作为结构化工具函数，包括 `search_knowledge_bases`、`list_hosts`、`run_host_command`、`execute_command_with_approval` 等。
-- **`state.py`**: 审批等待队列与多会话执行状态机。
+- **`engine.py`**: 定义统一单轮会话编排器 `AgentEngine`（向前兼容 `AgenticRagEngine`）。主编排器 `Orchestrator` 协调多智能体图与工具执行回路，动态挂载 `kb_agent`（检索增强专家）、`host_agent`（主机管理专家）及 `web_agent`（互联网搜索专家）为委托工具。CLI、QQBot、OpenAI 兼容协议均汇聚于此统一执行，支持思考流（`response.thought.delta`）与 Span 级追踪。
+- **`tools.py`**: 聚合底层各专家专业操作（`AgentKnowledgeTools`、`AgentHostTools`、`AgentWebTools`），提供各专家专员工具集合与元数据。
+- **`state.py`**: 运行时引用来源收集器 `SourceCollector`，负责归集、去重与打分知识库文本片段及 Web 搜索引用。
 
-### 3.2 `memoria/core/` (RAG 核心流水线)
+### 3.2 `memoria/core/` (RAG 底层检索与摄取流水线)
 - **`chunker.py`**: 语义与结构敏感的 Markdown / Text 分块器，保留代码块与标题层级完整性。
 - **`embedder.py`**: 统一 Embedding 抽象，适配 OpenAI 兼容端点、本地 Ollama 等向量模型。
-- **`pipeline.py`**: 负责文档读取、切分、嵌入并存入持久化 ChromaDB 集合；实现基于余弦距离的 Top-K 语义检索。
+- **`pipeline.py`**: 纯粹底层 RAG 摄取与混合检索引擎（Retrieval Engine）。负责文档切分、向量嵌入、ChromaDB 持久化与 BM25 稀疏检索融合，不承载任何会话生成逻辑。
 
 ### 3.3 `memoria/connectors/` (基础设施连接器)
 - **`host/connector.py`**: 基于 Paramiko 的 SSH 连接池管理。具备会话保活、命令超时熔断与输出缓冲。
@@ -131,6 +131,10 @@
 ### ADR-6: 专家智能体配置与全局系统设置模块化解耦
 - **决策**: 将原本平铺堆叠的单体设置长页面解耦为「全局基础底座」与各专家专员（`KnowledgeAgent`、`HostAgent`、`WebAgent`）及通道网关（`QQBot`）的独立模块切片。采用水平分段 Tab 与 URL 深链接（`/settings`、`/settings/:tab`）双向同步，配合保活挂载（Keep-Alive）与差量提交（Differential Payloads），彻底隔离各切片表单生命周期与未提交草稿，消除多模块干扰与意外覆盖。
 - **理由**: 与系统 Multi-Agent 架构严格对齐，降低配置认知负荷，保证交互与草稿安全，提供直达深链接支持。
+
+### ADR-7: 深模块主机执行收敛与底层检索流水线纯粹化
+- **决策**: 将高危命令校验（`CommandGuard`）、审批生命周期（`HostApprovalManager`）、一次性授权与 SSH 执行全面下沉收敛为深模块 `Host Execution`，主编排器通过单点回调接缝交互，消除跨模块 Token 泄露与三度重复校验；彻底剔除 `Pipeline` 中遗留的 360 行僵尸对话回路（`query()`、`prepare_query()` 及主机工具），使其回归纯粹的向量摄取与混合检索基础设施。
+- **理由**: 消除代码库中双重对话回路的认知分裂，最大化主机安全治理与审批流的局部性（Locality），通过删除测试显著降低维护与测试摩擦。
 
 ---
 

@@ -325,3 +325,142 @@ def test_bot_host_security_mode_override(tmp_path):
         host_security_modes={host["id"]: "unrestricted"},
     )
     assert updated["host_security_modes"] == {host["id"]: "unrestricted"}
+
+
+@pytest.mark.asyncio
+async def test_agent_host_tools_run_host_command_async_lifecycle(tmp_path):
+    from memoria.storage.db import DB
+    from memoria.agents.state import SourceCollector
+    from memoria.connectors.host.tools import AgentHostTools
+    from memoria.connectors.host.approval import global_host_approval_manager
+    from memoria.connectors.host.guard import execute_guarded_host_command_sync
+
+    db = DB(str(tmp_path / "test.db"))
+    host = db.create_host(
+        name="Test Server",
+        host="127.0.0.1",
+        port=22,
+        username="root",
+        auth_type="password",
+        credential="",
+        security_mode="ask_confirmation",
+    )
+    tools = AgentHostTools(db=db, allowed_host_ids=[host["id"]], collector=SourceCollector())
+
+    # 1. Dangerous command is rejected immediately without creating approval
+    res_danger = await tools.run_host_command_async(host["id"], "rm -rf /")
+    assert res_danger["status"] == "rejected"
+    assert "dangerous" in res_danger["error"].lower()
+
+    # 2. Command requiring approval without callback fails closed to pending_approval
+    res_no_cb = await tools.run_host_command_async(host["id"], "touch /tmp/hello.txt")
+    assert res_no_cb["status"] == "pending_approval"
+
+    # 3. Synchronous guarded execution returns pending_approval for unconfirmed command
+    res_sync = execute_guarded_host_command_sync(tools, host["id"], "touch /tmp/hello.txt")
+    assert res_sync["status"] == "pending_approval"
+
+    # 4. Safe command passes directly without approval
+    res_safe = await tools.run_host_command_async(host["id"], "uptime")
+    assert res_safe.get("exit_code") == 0
+
+    # 5. Asynchronous execution with approval flow accepted
+    approval_events = []
+    decision_events = []
+
+    async def on_req(info):
+        approval_events.append(info)
+        global_host_approval_manager.respond(info["approval_id"], approved=True)
+
+    async def on_dec(approved, info):
+        decision_events.append((approved, info))
+
+    res_approved = await tools.run_host_command_async(
+        host["id"],
+        "touch /tmp/approved.txt",
+        on_approval_required=on_req,
+        on_approval_decision=on_dec,
+    )
+    assert len(approval_events) == 1
+    assert approval_events[0]["command"] == "touch /tmp/approved.txt"
+    assert len(decision_events) == 1
+    assert decision_events[0][0] is True
+    assert res_approved.get("exit_code") == 0 or "stdout" in res_approved
+
+    # 6. Asynchronous execution with approval flow rejected
+    async def on_req_reject(info):
+        global_host_approval_manager.respond(info["approval_id"], approved=False)
+
+    res_rejected = await tools.run_host_command_async(
+        host["id"],
+        "touch /tmp/rejected.txt",
+        on_approval_required=on_req_reject,
+    )
+    assert res_rejected["status"] == "rejected"
+    assert "rejected by user" in res_rejected["error"]
+
+
+@pytest.mark.asyncio
+async def test_async_execute_agent_tool_with_agent_tools_approval_and_events(tmp_path):
+    import asyncio
+    import queue
+    from memoria.storage.db import DB
+    from memoria.agents.state import SourceCollector
+    from memoria.agents.tools import AgentTools
+    from memoria.agents.engine import _execute_agent_tool_async
+    from memoria.connectors.host.approval import global_host_approval_manager
+
+    db = DB(str(tmp_path / "test.db"))
+    host = db.create_host(
+        name="Event Server",
+        host="127.0.0.1",
+        port=22,
+        username="root",
+        auth_type="password",
+        credential="",
+        security_mode="ask_confirmation",
+    )
+    bot = db.create_bot("Bot1", "ops helper", [], host_ids=[host["id"]])
+    sess = db.create_session(bot["id"], "test session")
+    msg = db.add_message(sess["id"], "assistant", "")
+
+    collector = SourceCollector()
+    tools = AgentTools.create(
+        db=db,
+        pipeline=None,  # type: ignore
+        allowed_kb_ids=[],
+        allowed_host_ids=[host["id"]],
+        collector=collector,
+    )
+
+    event_queue = queue.Queue()
+
+    # Run in a background task so we can approve when the event appears in event_queue
+    async def approve_when_received():
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if not event_queue.empty():
+                evt = event_queue.get_nowait()
+                if evt.get("type") == "approval_required":
+                    global_host_approval_manager.respond(evt["approval_id"], approved=True)
+                    return
+
+    task = asyncio.create_task(approve_when_received())
+    result = await _execute_agent_tool_async(
+        "run_host_command",
+        {"host_id": host["id"], "command": "touch /tmp/created.txt"},
+        tools,
+        event_queue=event_queue,
+        session_id=sess["id"],
+        message_id=msg["id"],
+        db=db,
+    )
+    await task
+
+    assert result.get("exit_code") == 0 or "stdout" in result
+    messages = db.get_messages(sess["id"])
+    updated_msg = [m for m in messages if m["id"] == msg["id"]][0]
+    assert updated_msg["status"] == "streaming"
+    assert updated_msg["metadata"]["approval_status"] == "approved"
+
+

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from memoria.storage.db import DB
@@ -165,6 +170,41 @@ class AgentHostTools:
             "truncated": truncated,
         }
 
+    def _execute_on_connector(
+        self,
+        host_id: str,
+        command: str,
+        dangerous_patterns: list[str],
+        sec_mode: str,
+        h: dict,
+        approval_token: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.registry:
+            from memoria.connectors.base import ResourceType
+            conn = self.registry.get(ResourceType.HOST, host_id)
+            if conn:
+                if hasattr(conn, "guard"):
+                    conn.guard.dangerous_patterns = dangerous_patterns
+                    conn.guard.security_mode = sec_mode
+                    conn.guard.safe_mode = sec_mode == "read_only"
+                res = conn.execute_command(  # type: ignore[attr-defined]
+                    command, approved=False, approval_token=approval_token, session_id=session_id
+                )
+                return res.model_dump()
+
+        # Apply bot-level security mode override if configured
+        host_dict = dict(h)
+        host_dict["security_mode"] = sec_mode
+
+        from memoria.connectors.host.connector import HostConnector
+        from memoria.connectors.host.models import HostConfig
+        conn = HostConnector(HostConfig(**host_dict), dangerous_patterns=dangerous_patterns)
+        res = conn.execute_command(
+            command, approved=False, approval_token=approval_token, session_id=session_id
+        )
+        return res.model_dump()
+
     def run_host_command(
         self,
         host_id: str,
@@ -173,26 +213,20 @@ class AgentHostTools:
         approval_token: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Execute a command after enforcing the current host policy.
-
-        The engine normally handles the interactive approval flow.  This second
-        check is intentional: direct callers and cached registry connectors must
-        not turn this tool into an approval bypass.
-        """
+        """Execute a command after enforcing the current host policy synchronously."""
         self._ensure_allowed(host_id)
         h = self.db.get_host(host_id)
         assert h is not None
 
         # Load dynamic dangerous patterns from DB if available
-        import json
         from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
-        raw_patterns = self.db.get_setting("host_dangerous_patterns")
+        raw_patterns = self.db.get_setting("host_dangerous_patterns") if self.db else None
         dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
 
         sec_mode = (
             (self.host_security_modes or {}).get(host_id)
-            or h.get("security_mode")
-            or ("read_only" if h.get("safe_mode") else "ask_confirmation")
+            or (h.get("security_mode") if h else None)
+            or ("read_only" if (h and h.get("safe_mode")) else "ask_confirmation")
         )
         from memoria.connectors.host.guard import (
             CommandApprovalRequired,
@@ -234,30 +268,163 @@ class AgentHostTools:
                 "command": command,
             }
 
-        if self.registry:
-            from memoria.connectors.base import ResourceType
-            conn = self.registry.get(ResourceType.HOST, host_id)
-            if conn:
-                if hasattr(conn, "guard"):
-                    conn.guard.dangerous_patterns = dangerous_patterns
-                    conn.guard.security_mode = sec_mode
-                    conn.guard.safe_mode = sec_mode == "read_only"
-                res = conn.execute_command(  # type: ignore[attr-defined]
-                    command, approved=False, approval_token=approval_token, session_id=session_id
-                )
-                return res.model_dump()
-
-        # Apply bot-level security mode override if configured
-        host_dict = dict(h)
-        host_dict["security_mode"] = sec_mode
-
-        from memoria.connectors.host.connector import HostConnector
-        from memoria.connectors.host.models import HostConfig
-        conn = HostConnector(HostConfig(**host_dict), dangerous_patterns=dangerous_patterns)
-        res = conn.execute_command(
-            command, approved=False, approval_token=approval_token, session_id=session_id
+        return self._execute_on_connector(
+            host_id=host_id,
+            command=command,
+            dangerous_patterns=dangerous_patterns,
+            sec_mode=sec_mode,
+            h=h,
+            approval_token=approval_token,
+            session_id=session_id,
         )
-        return res.model_dump()
+
+    async def run_host_command_async(
+        self,
+        host_id: str,
+        command: str,
+        session_id: str | None = None,
+        on_approval_required: Callable[[dict[str, Any]], Any] | None = None,
+        on_approval_decision: Callable[[bool, dict[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a host command asynchronously with fully encapsulated interactive approval flow."""
+        self._ensure_allowed(host_id)
+        h = self.db.get_host(host_id)
+        assert h is not None
+
+        from memoria.config import DEFAULT_HOST_DANGEROUS_PATTERNS
+        raw_patterns = self.db.get_setting("host_dangerous_patterns") if self.db else None
+        dangerous_patterns = json.loads(raw_patterns) if raw_patterns else DEFAULT_HOST_DANGEROUS_PATTERNS
+
+        sec_mode = (
+            (self.host_security_modes or {}).get(host_id)
+            or (h.get("security_mode") if h else None)
+            or ("read_only" if (h and h.get("safe_mode")) else "ask_confirmation")
+        )
+        from memoria.connectors.host.guard import (
+            CommandApprovalRequired,
+            CommandGuard,
+            CommandSafetyViolation,
+        )
+        guard = CommandGuard(security_mode=sec_mode, dangerous_patterns=dangerous_patterns)
+
+        # 1. Strict blacklist check: cannot run even if approved
+        try:
+            guard.validate_command(command)
+        except CommandSafetyViolation as exc:
+            logger.info(
+                "[HOST_SECURITY_BLOCK] Host command rejected by safety policy: host=%s cmd=%r error=%s",
+                host_id, command, exc,
+            )
+            return {
+                "status": "rejected",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+        except CommandApprovalRequired:
+            pass
+
+        is_safe = guard.is_safe_command(command)
+        approval_required = (sec_mode == "ask_confirmation" and not is_safe)
+        approval_token: str | None = None
+
+        logger.info(
+            "[HOST_SECURITY] Host command policy: host=%s(%s) mode=%s safe=%s approval_required=%s",
+            h.get("name") if h else host_id,
+            host_id,
+            sec_mode,
+            is_safe,
+            approval_required,
+        )
+
+        # 2. Interactive approval flow
+        if approval_required:
+            if not on_approval_required:
+                return {
+                    "status": "pending_approval",
+                    "error": f"Command requires user approval before execution: '{command}'",
+                    "host_id": host_id,
+                    "command": command,
+                }
+
+            from memoria.connectors.host.approval import global_host_approval_manager
+            host_name = h.get("name") if h else host_id
+            approval = global_host_approval_manager.create_approval(
+                host_id=host_id,
+                host_name=host_name,
+                command=command,
+                session_id=session_id,
+            )
+            logger.info(
+                "[APPROVAL_REQ] Host command waiting for user approval: host=%s(%s) cmd=%r approval_id=%s",
+                host_name, host_id, command, approval.id,
+            )
+
+            info = {
+                "approval_id": approval.id,
+                "host_id": host_id,
+                "host_name": host_name,
+                "command": command,
+            }
+            cb_req = on_approval_required(info)
+            if asyncio.iscoroutine(cb_req):
+                await cb_req
+
+            timeout = float(self.db.get_setting("approval_timeout") or 300.0) if self.db else 300.0
+            approved = await global_host_approval_manager.wait_for_decision(approval.id, timeout=timeout)
+            if approved:
+                approval_token = global_host_approval_manager.get_authorization_token(
+                    approval.id,
+                    host_id,
+                    command,
+                    session_id,
+                )
+
+            logger.info(
+                "[APPROVAL_DEC] User decision for approval_id=%s: approved=%s authorized=%s",
+                approval.id, approved, bool(approval_token),
+            )
+
+            if on_approval_decision:
+                cb_dec = on_approval_decision(approved, info)
+                if asyncio.iscoroutine(cb_dec):
+                    await cb_dec
+
+            if not approved:
+                return {
+                    "error": f"Command execution rejected by user or timed out: '{command}'",
+                    "status": "rejected",
+                }
+
+            if not approval_token:
+                return {
+                    "status": "rejected",
+                    "error": "Approval was accepted but no matching execution authorization was issued",
+                    "host_id": host_id,
+                    "command": command,
+                }
+
+        # 3. Post-validation with authorization
+        try:
+            guard.validate_command(command, approved=bool(approval_token) or is_safe)
+        except CommandSafetyViolation as exc:
+            return {
+                "status": "rejected",
+                "error": str(exc),
+                "host_id": host_id,
+                "command": command,
+            }
+
+        # 4. Execute
+        return self._execute_on_connector(
+            host_id=host_id,
+            command=command,
+            dangerous_patterns=dangerous_patterns,
+            sec_mode=sec_mode,
+            h=h,
+            approval_token=approval_token,
+            session_id=session_id,
+        )
 
     def get_job_status(self, job_handle: str) -> dict[str, Any]:
         """Query real-time status, exit code, and stdout tail for a background job handle."""
