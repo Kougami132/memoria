@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 import socket
 import urllib.parse
-import socks
+
+try:
+    import socks
+except ImportError:  # pragma: no cover
+    socks = None  # type: ignore
 
 logger = logging.getLogger("memoria.connectors.host.proxy")
 
@@ -140,6 +144,9 @@ def create_proxy_socket(
     """
     if not proxy_url or not proxy_url.strip():
         raise ValueError("proxy_url cannot be empty")
+
+    if socks is None:
+        raise ProxyError("PySocks 未安装，无法建立代理隧道。请执行 'pip install PySocks'")
 
     parsed = urllib.parse.urlsplit(proxy_url.strip())
     scheme = parsed.scheme.lower()

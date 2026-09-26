@@ -211,6 +211,16 @@ def test_create_proxy_socket_target_unreachable():
         mock_sock.close.assert_called_once()
 
 
+def test_create_proxy_socket_missing_socks():
+    with patch("memoria.connectors.host.proxy.socks", None):
+        with pytest.raises(ProxyError, match="PySocks 未安装"):
+            create_proxy_socket(
+                proxy_url="socks5://127.0.0.1:1080",
+                target_host="192.168.1.10",
+                target_port=22,
+            )
+
+
 def test_connector_create_ssh_client_with_proxy():
     from memoria.connectors.host.connector import HostConnector
     from memoria.connectors.host.models import HostConfig
