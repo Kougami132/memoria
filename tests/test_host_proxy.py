@@ -212,7 +212,13 @@ def test_create_proxy_socket_target_unreachable():
 
 
 def test_create_proxy_socket_missing_socks():
+    import typing
+
     with patch("memoria.connectors.host.proxy.socks", None):
+        # Type hints should be resolvable without socks
+        hints = typing.get_type_hints(create_proxy_socket)
+        assert hints["return"] is socket.socket
+
         with pytest.raises(ProxyError, match="PySocks 未安装"):
             create_proxy_socket(
                 proxy_url="socks5://127.0.0.1:1080",

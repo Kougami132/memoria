@@ -136,7 +136,7 @@ def create_proxy_socket(
     target_host: str,
     target_port: int,
     timeout: float = 5.0,
-) -> socks.socksocket:
+) -> socket.socket:
     """Create and connect a socksocket through the configured proxy to target_host:target_port.
 
     Enforces remote DNS resolution (rdns=True) for SOCKS5 proxies to avoid local DNS failures.
