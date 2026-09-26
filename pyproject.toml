@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -39,7 +39,22 @@ agents = ["openai-agents==0.0.10"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "black>=24", "ruff>=0.7"]
 
 [tool.setuptools]
-packages = ["memoria", "memoria.agents", "memoria.connectors", "memoria.connectors.host", "memoria.core", "memoria.storage", "memoria.models", "memoria.llm", "memoria.server", "memoria.server.routes", "memoria.cli", "memoria.vault", "memoria.qqbot"]
+packages = [
+    "memoria",
+    "memoria.agents",
+    "memoria.cli",
+    "memoria.connectors",
+    "memoria.connectors.host",
+    "memoria.core",
+    "memoria.llm",
+    "memoria.models",
+    "memoria.qqbot",
+    "memoria.server",
+    "memoria.server.routes",
+    "memoria.storage",
+    "memoria.tasks",
+    "memoria.vault",
+]
 
 [tool.setuptools.package-data]
 "memoria" = ["static/**/*"]
