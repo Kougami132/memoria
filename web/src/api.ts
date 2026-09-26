@@ -610,6 +610,8 @@ export interface Host {
   username: string
   auth_type: 'password' | 'key'
   credential_set: boolean
+  proxy_url?: string
+  proxy_url_set?: boolean
   description: string
   tags: string[]
   safe_mode: boolean
@@ -626,6 +628,7 @@ export interface HostCreate {
   username: string
   auth_type?: 'password' | 'key'
   credential?: string
+  proxy_url?: string
   description?: string
   tags?: string[]
   safe_mode?: boolean

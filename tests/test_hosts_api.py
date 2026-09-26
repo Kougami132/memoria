@@ -99,3 +99,77 @@ def test_bot_with_host_ids(client):
     res = client.get(f"/api/bots/{bot['id']}")
     assert res.status_code == 200
     assert res.json()["host_ids"] == [host_id]
+
+
+def test_host_proxy_crud_and_masking(client, tmp_path):
+    # 1. Create host with authenticated SOCKS5 proxy
+    payload = {
+        "name": "Intranet Proxied Host",
+        "host": "192.168.100.20",
+        "port": 22,
+        "username": "root",
+        "auth_type": "password",
+        "credential": "hostpassword",
+        "proxy_url": "socks5://proxyuser:my_secret_proxy_pass@10.0.0.1:1080",
+    }
+    res = client.post("/api/hosts", json=payload)
+    assert res.status_code == 201
+    created = res.json()
+    assert created["proxy_url"] == "socks5://proxyuser:******@10.0.0.1:1080"
+    assert created["proxy_url_set"] is True
+    host_id = created["id"]
+
+    # 2. Get single host details
+    res = client.get(f"/api/hosts/{host_id}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["proxy_url"] == "socks5://proxyuser:******@10.0.0.1:1080"
+    assert data["proxy_url_set"] is True
+
+    # 3. List hosts
+    res = client.get("/api/hosts")
+    assert res.status_code == 200
+    hosts = res.json()
+    matched = [h for h in hosts if h["id"] == host_id][0]
+    assert matched["proxy_url"] == "socks5://proxyuser:******@10.0.0.1:1080"
+    assert matched["proxy_url_set"] is True
+
+    # 4. Update host while passing masked proxy URL (password should be preserved)
+    update_res = client.put(
+        f"/api/hosts/{host_id}",
+        json={
+            "description": "Updated proxied host",
+            "proxy_url": "socks5://proxyuser:******@10.0.0.1:1080",
+        },
+    )
+    assert update_res.status_code == 200
+    updated = update_res.json()
+    assert updated["description"] == "Updated proxied host"
+    assert updated["proxy_url"] == "socks5://proxyuser:******@10.0.0.1:1080"
+    assert updated["proxy_url_set"] is True
+
+    # 5. Clear proxy by submitting empty string
+    clear_res = client.put(f"/api/hosts/{host_id}", json={"proxy_url": ""})
+    assert clear_res.status_code == 200
+    cleared = clear_res.json()
+    assert cleared["proxy_url"] == ""
+    assert cleared["proxy_url_set"] is False
+
+
+def test_host_proxy_validation_errors(client):
+    # Invalid scheme ftp
+    res = client.post("/api/hosts", json={
+        "name": "Invalid FTP Proxy",
+        "host": "192.168.1.1",
+        "proxy_url": "ftp://proxy.corp:21",
+    })
+    assert res.status_code == 422
+
+    # Invalid scheme socks4
+    res = client.post("/api/hosts", json={
+        "name": "Invalid SOCKS4 Proxy",
+        "host": "192.168.1.1",
+        "proxy_url": "socks4://127.0.0.1:1080",
+    })
+    assert res.status_code == 422
+

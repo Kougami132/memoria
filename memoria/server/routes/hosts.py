@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from memoria.connectors.base import ResourceType
 from memoria.connectors.host.connector import HostConnector
 from memoria.connectors.host.models import HostConfig
+from memoria.connectors.host.proxy import mask_proxy_url, merge_proxy_url, validate_proxy_url
 from memoria.server.deps import get_db, get_registry
 from memoria.storage.db import DB
 from memoria.connectors.registry import ConnectorRegistry
@@ -28,6 +29,19 @@ class HostCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     safe_mode: bool = Field(default=False)
     security_mode: str | None = Field(default=None)  # "read_only", "ask_confirmation", "unrestricted"
+    proxy_url: str | None = Field(default=None)
+
+    @field_validator("proxy_url", mode="before")
+    @classmethod
+    def validate_proxy(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return ""
+            return validate_proxy_url(stripped)
+        return v
 
 
 class HostUpdate(BaseModel):
@@ -43,6 +57,19 @@ class HostUpdate(BaseModel):
     security_mode: str | None = None
     os_info: str | None = None
     status: str | None = None
+    proxy_url: str | None = None
+
+    @field_validator("proxy_url", mode="before")
+    @classmethod
+    def validate_proxy(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return ""
+            return validate_proxy_url(stripped)
+        return v
 
 
 class HostOut(BaseModel):
@@ -53,6 +80,8 @@ class HostOut(BaseModel):
     username: str
     auth_type: str
     credential_set: bool = False
+    proxy_url: str = ""
+    proxy_url_set: bool = False
     description: str
     tags: list[str]
     safe_mode: bool = False
@@ -68,6 +97,9 @@ def _to_host_out(h: dict[str, Any]) -> dict[str, Any]:
     out["credential_set"] = bool(h.get("credential"))
     if "credential" in out:
         del out["credential"]
+    raw_proxy = h.get("proxy_url") or ""
+    out["proxy_url_set"] = bool(raw_proxy)
+    out["proxy_url"] = mask_proxy_url(raw_proxy)
     return out
 
 
@@ -95,6 +127,7 @@ def create_host(
         tags=payload.tags,
         safe_mode=(sec_mode == "read_only"),
         security_mode=sec_mode,
+        proxy_url=payload.proxy_url or "",
     )
     # Register connector in runtime registry with decrypted credential
     config = HostConfig(**host_dict)
@@ -123,6 +156,12 @@ def update_host(
     if sec_mode is None and payload.safe_mode is not None:
         sec_mode = "read_only" if payload.safe_mode else "unrestricted"
 
+    proxy_url = payload.proxy_url
+    if proxy_url is not None:
+        existing = db.get_host(host_id, decrypt=True)
+        if existing:
+            proxy_url = merge_proxy_url(proxy_url, existing.get("proxy_url") or "")
+
     host = db.update_host(
         host_id=host_id,
         name=payload.name,
@@ -137,6 +176,7 @@ def update_host(
         security_mode=sec_mode,
         os_info=payload.os_info,
         status=payload.status,
+        proxy_url=proxy_url,
     )
     if not host:
         raise HTTPException(status_code=404, detail="Host not found")

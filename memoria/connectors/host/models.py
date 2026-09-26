@@ -18,6 +18,7 @@ class HostConfig(BaseModel):
     security_mode: str = "read_only"  # "read_only", "ask_confirmation", "unrestricted"
     status: str = "unknown"
     os_info: str = ""
+    proxy_url: str = ""
     created_at: str = ""
     updated_at: str = ""
 

@@ -34,6 +34,7 @@
 | **专家子智能体** | `Sub-agent` (`Worker`) | 专注单一领域的专家（如 `kb_agent` 知识检索专家、`host_agent` 主机运维专家）。 |
 | **智能体即工具** | `Agent-as-a-Tool` | 将子 Agent 包装为标准函数工具（Function Tool），由主编排者按需通过函数调用进行委托。 |
 | **受控主机** | `Host` | 通过 SSH 接入的受控计算节点，受安全策略模式严密管控。 |
+| **主机代理连接** | `Host Proxy` (`proxy_url`) | 为无法直连的受管主机建立的出口隧道，支持 HTTP CONNECT 与 SOCKS5（默认远程 DNS 解析），敏感凭据加密存储与接口掩码脱敏。 |
 | **主机安全模式** | `SecurityMode` | 主机安全等级：`read_only`（仅读）、`ask_confirmation`（交互审批）、`unrestricted`（免审批）。 |
 | **安全审批流** | `Approval Flow` | 高危或非读操作时触发的挂起-决策机制，支持通过 Web 或 QQ 机器人交互确认。 |
 | **QQ 通道网关** | `QQ Gateway` | 基于腾讯开放平台官方 WebSocket 协议的异步消息网关，负责心跳、重连与鉴权。 |
@@ -88,7 +89,7 @@
 - **`pipeline.py`**: 纯粹底层 RAG 摄取与混合检索引擎（Retrieval Engine）。负责文档切分、向量嵌入、ChromaDB 持久化与 BM25 稀疏检索融合，不承载任何会话生成逻辑。
 
 ### 3.3 `memoria/connectors/` (基础设施连接器)
-- **`host/connector.py`**: 基于 Paramiko 的 SSH 连接池管理。具备会话保活、命令超时熔断与输出缓冲。
+- **`host/connector.py`**: 基于 Paramiko 的 SSH 连接池管理。具备会话保活、HTTP CONNECT / SOCKS5 代理隧道穿透、命令超时熔断与输出缓冲。
 - **`host/security.py`**: 主机安全防护核心。定义敏感命令白名单/黑名单校验，严格执行 `read_only`、`ask_confirmation`、`unrestricted` 三种安全模式。
 - **`crypto.py`**: 基于 AES-GCM / Fernet 对存入数据库的主机 SSH 私钥、密码及 WebDAV 凭据进行本地可逆强加密。
 

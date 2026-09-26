@@ -54,6 +54,7 @@ class HostRow(Base):
     tags = Column(Text, default="[]")
     safe_mode = Column(Integer, nullable=False, default=0)
     security_mode = Column(String, nullable=False, default="read_only")
+    proxy_url = Column(Text, nullable=True, default="")
     os_info = Column(String, default="")
     status = Column(String, default="unknown")
     created_at = Column(String, nullable=False)
@@ -318,6 +319,9 @@ class DB:
                     conn.execute(text("ALTER TABLE hosts ADD COLUMN safe_mode INTEGER DEFAULT 0"))
                 if "security_mode" not in host_cols:
                     conn.execute(text("ALTER TABLE hosts ADD COLUMN security_mode TEXT DEFAULT 'read_only'"))
+                    conn.commit()
+                if "proxy_url" not in host_cols:
+                    conn.execute(text("ALTER TABLE hosts ADD COLUMN proxy_url TEXT DEFAULT ''"))
                     conn.commit()
                 bot_host_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(bot_host_links)"))]
                 if "security_mode" not in bot_host_cols:
@@ -587,6 +591,8 @@ class DB:
         cred = row.credential or ""
         if cred and decrypt:
             cred = decrypt_secret(cred) or ""
+        raw_proxy = getattr(row, "proxy_url", "") or ""
+        proxy_url = decrypt_secret(raw_proxy) or "" if raw_proxy else ""
         return {
             "id": row.id,
             "name": row.name,
@@ -595,6 +601,7 @@ class DB:
             "username": row.username,
             "auth_type": row.auth_type,
             "credential": cred,
+            "proxy_url": proxy_url,
             "description": row.description or "",
             "tags": tags,
             "safe_mode": bool(row.safe_mode),
@@ -618,11 +625,13 @@ class DB:
         safe_mode: bool = False,
         security_mode: str | None = None,
         host_id: str | None = None,
+        proxy_url: str = "",
     ) -> dict:
         hid = host_id or _uid()
         now = _now()
         tags_json = json.dumps(tags or [], ensure_ascii=False)
         encrypted_cred = encrypt_secret(credential) if credential else ""
+        encrypted_proxy = encrypt_secret(proxy_url) if proxy_url else ""
         with self._s() as s:
             row = HostRow(
                 id=hid,
@@ -632,6 +641,7 @@ class DB:
                 username=username,
                 auth_type=auth_type,
                 credential=encrypted_cred,
+                proxy_url=encrypted_proxy,
                 description=description,
                 tags=tags_json,
                 safe_mode=1 if safe_mode else 0,
@@ -672,6 +682,7 @@ class DB:
         security_mode: str | None = None,
         os_info: str | None = None,
         status: str | None = None,
+        proxy_url: str | None = None,
     ) -> dict | None:
         with self._s() as s:
             row = s.get(HostRow, host_id)
@@ -702,6 +713,8 @@ class DB:
                 row.os_info = os_info
             if status is not None:
                 row.status = status
+            if proxy_url is not None:
+                row.proxy_url = encrypt_secret(proxy_url) if proxy_url else ""
             row.updated_at = _now()
             s.flush()
             return self._host_dict(row, decrypt=True)

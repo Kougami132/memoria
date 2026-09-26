@@ -20,6 +20,7 @@ import {
   Key,
   Lock,
   Loader2,
+  Zap,
 } from 'lucide-react'
 import * as api from '@/api'
 import type { Host as HostType, HostCreate, HostUpdate } from '@/api'
@@ -42,6 +43,7 @@ function HostForm({
   const [authType, setAuthType] = useState<'password' | 'key'>(initial?.auth_type ?? 'password')
   const [credential, setCredential] = useState('')
   const [description, setDescription] = useState(initial?.description ?? '')
+  const [proxyUrl, setProxyUrl] = useState(initial?.proxy_url ?? '')
   const [tagsInput, setTagsInput] = useState(initial?.tags?.join(', ') ?? '')
   const initialSecMode = initial?.security_mode || (initial?.safe_mode ? 'read_only' : 'ask_confirmation')
   const [securityMode, setSecurityMode] = useState<'read_only' | 'ask_confirmation' | 'unrestricted'>(initialSecMode)
@@ -61,6 +63,7 @@ function HostForm({
       port: parseInt(port, 10) || 22,
       username: username.trim(),
       auth_type: authType,
+      proxy_url: proxyUrl.trim(),
       description: description.trim(),
       tags,
       safe_mode: securityMode === 'read_only',
@@ -129,6 +132,21 @@ function HostForm({
             className="rounded-xl border-border bg-background font-mono text-sm"
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          网络代理 (可选)
+        </Label>
+        <Input
+          placeholder="socks5://127.0.0.1:1080 或 http://user:pass@10.0.0.1:8080"
+          value={proxyUrl}
+          onChange={e => setProxyUrl(e.target.value)}
+          className="rounded-xl border-border bg-background font-mono text-sm"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          支持 HTTP CONNECT 与 SOCKS5 出网代理（http://, https://, socks5://, socks5h://），SOCKS5 自动启用远端 DNS 解析。
+        </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -418,6 +436,12 @@ export default function Hosts() {
                             自由执行模式
                           </Badge>
                         )}
+                        {hostItem.proxy_url_set && hostItem.proxy_url && (
+                          <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30 gap-1 py-0.5 font-mono">
+                            <Zap className="w-3 h-3" />
+                            代理: {hostItem.proxy_url.toLowerCase().startsWith('socks5') ? 'SOCKS5' : 'HTTP'}
+                          </Badge>
+                        )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
                           hostItem.status === 'active'
                             ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
@@ -429,12 +453,20 @@ export default function Hosts() {
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono mt-1">
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono mt-1 flex-wrap">
                         <span>{hostItem.username}@{hostItem.host}:{hostItem.port}</span>
                         <span>•</span>
                         <span>{hostItem.auth_type === 'password' ? '密码认证' : '私钥认证'}</span>
                         {hostItem.credential_set && (
                           <span className="text-emerald-600 dark:text-emerald-400">已存凭据</span>
+                        )}
+                        {hostItem.proxy_url_set && hostItem.proxy_url && (
+                          <>
+                            <span>•</span>
+                            <span className="text-purple-600 dark:text-purple-400 truncate max-w-[260px]" title={hostItem.proxy_url}>
+                              via {hostItem.proxy_url}
+                            </span>
+                          </>
                         )}
                       </div>
 

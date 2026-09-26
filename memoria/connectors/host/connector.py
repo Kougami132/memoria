@@ -59,6 +59,7 @@ class HostConnector(BaseConnector):
                 "security_mode": getattr(self.config, "security_mode", "read_only" if self.config.safe_mode else "ask_confirmation"),
                 "status": self.config.status,
                 "os_info": self.config.os_info,
+                "proxy_url": getattr(self.config, "proxy_url", ""),
             },
         )
 
@@ -73,6 +74,17 @@ class HostConnector(BaseConnector):
             "username": self.config.username,
             "timeout": 5.0,
         }
+        proxy_url = getattr(self.config, "proxy_url", None)
+        if proxy_url:
+            from memoria.connectors.host.proxy import create_proxy_socket
+            proxy_sock = create_proxy_socket(
+                proxy_url=proxy_url,
+                target_host=self.config.host,
+                target_port=self.config.port,
+                timeout=5.0,
+            )
+            connect_kwargs["sock"] = proxy_sock
+
         if self.config.auth_type == "key" and self.config.credential:
             try:
                 pkey = paramiko.RSAKey.from_private_key(io.StringIO(self.config.credential))
@@ -89,18 +101,49 @@ class HostConnector(BaseConnector):
         """Test SSH connectivity and credentials."""
         start_time = time.time()
         try:
-            # First check TCP port
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2.0)
-            result = sock.connect_ex((self.config.host, self.config.port))
-            sock.close()
-            if result != 0:
-                elapsed_ms = int((time.time() - start_time) * 1000)
-                return {
-                    "status": "warning",
-                    "latency_ms": elapsed_ms,
-                    "message": f"Port {self.config.port} on {self.config.host} is unreachable (errno: {result})",
-                }
+            proxy_url = getattr(self.config, "proxy_url", None)
+            if proxy_url:
+                from memoria.connectors.host.proxy import (
+                    create_proxy_socket,
+                    ProxyAuthError,
+                    ProxyServerUnreachableError,
+                    TargetUnreachableViaProxyError,
+                )
+                try:
+                    probe_sock = create_proxy_socket(
+                        proxy_url=proxy_url,
+                        target_host=self.config.host,
+                        target_port=self.config.port,
+                        timeout=5.0,
+                    )
+                    probe_sock.close()
+                except (ProxyServerUnreachableError, ProxyAuthError, TargetUnreachableViaProxyError) as proxy_err:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "error",
+                        "latency_ms": elapsed_ms,
+                        "message": str(proxy_err),
+                    }
+                except Exception as exc:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "error",
+                        "latency_ms": elapsed_ms,
+                        "message": f"代理连接失败: {exc}",
+                    }
+            else:
+                # First check TCP port
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2.0)
+                result = sock.connect_ex((self.config.host, self.config.port))
+                sock.close()
+                if result != 0:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "warning",
+                        "latency_ms": elapsed_ms,
+                        "message": f"Port {self.config.port} on {self.config.host} is unreachable (errno: {result})",
+                    }
 
             # If credential is provided, test authentication
             if self.config.credential:
