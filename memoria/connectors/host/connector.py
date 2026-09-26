@@ -109,12 +109,7 @@ class HostConnector(BaseConnector):
         try:
             proxy_url = getattr(self.config, "proxy_url", None)
             if proxy_url:
-                from memoria.connectors.host.proxy import (
-                    create_proxy_socket,
-                    ProxyAuthError,
-                    ProxyServerUnreachableError,
-                    TargetUnreachableViaProxyError,
-                )
+                from memoria.connectors.host.proxy import create_proxy_socket
                 try:
                     probe_sock = create_proxy_socket(
                         proxy_url=proxy_url,

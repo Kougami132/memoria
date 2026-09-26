@@ -345,3 +345,29 @@ def test_connector_test_connection_proxy_failure_during_auth():
         assert "SSH authentication failed" not in res["message"]
 
 
+def test_connector_test_connection_without_proxy_auth_failure():
+    from memoria.connectors.host.connector import HostConnector
+    from memoria.connectors.host.models import HostConfig
+
+    config = HostConfig(
+        id="h-no-proxy-1",
+        name="No Proxy Host",
+        host="192.168.1.100",
+        port=22,
+        credential="sshpassword",
+        proxy_url="",
+    )
+    connector = HostConnector(config)
+
+    mock_sock = MagicMock()
+    mock_sock.connect_ex.return_value = 0
+    with patch("socket.socket", return_value=mock_sock), patch.object(
+        connector, "_create_ssh_client", side_effect=Exception("Authentication failed for deploy")
+    ):
+        res = connector.test_connection()
+        assert res["status"] == "error"
+        assert "SSH authentication failed: Authentication failed for deploy" in res["message"]
+        assert "ProxyServerUnreachableError" not in res["message"]
+
+
+
