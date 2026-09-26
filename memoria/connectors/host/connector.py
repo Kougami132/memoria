@@ -10,6 +10,12 @@ from memoria.connectors.base import BaseConnector, ResourceMetadata, ResourceTyp
 from memoria.connectors.host.guard import CommandGuard, CommandSafetyViolation
 from memoria.connectors.host.models import CommandResult, HostConfig, HostInfo
 from memoria.connectors.host.pool import SSHConnectionPool
+from memoria.connectors.host.proxy import (
+    ProxyAuthError,
+    ProxyError,
+    ProxyServerUnreachableError,
+    TargetUnreachableViaProxyError,
+)
 
 logger = logging.getLogger("memoria.connectors.host")
 
@@ -150,6 +156,20 @@ class HostConnector(BaseConnector):
                 try:
                     client = self._create_ssh_client()
                     client.close()
+                except (ProxyServerUnreachableError, ProxyAuthError, TargetUnreachableViaProxyError) as proxy_err:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "error",
+                        "latency_ms": elapsed_ms,
+                        "message": str(proxy_err),
+                    }
+                except ProxyError as proxy_err:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "error",
+                        "latency_ms": elapsed_ms,
+                        "message": f"代理连接失败: {proxy_err}",
+                    }
                 except Exception as auth_err:
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     return {

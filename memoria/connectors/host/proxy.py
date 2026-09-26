@@ -9,7 +9,7 @@ try:
 except ImportError:  # pragma: no cover
     socks = None  # type: ignore
 
-logger = logging.getLogger("memoria.connectors.host.proxy")
+logger = logging.getLogger(__name__)
 
 SUPPORTED_SCHEMES = ("http", "https", "socks5", "socks5h")
 

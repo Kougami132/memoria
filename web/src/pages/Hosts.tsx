@@ -438,7 +438,7 @@ export default function Hosts() {
                         )}
                         {hostItem.proxy_url_set && hostItem.proxy_url && (
                           <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30 gap-1 py-0.5 font-mono">
-                            <Zap className="w-3 h-3" />
+                            <Zap className="w-3 h-3 shrink-0" />
                             代理: {hostItem.proxy_url.toLowerCase().startsWith('socks5') ? 'SOCKS5' : 'HTTP'}
                           </Badge>
                         )}

@@ -309,3 +309,33 @@ def test_connector_test_connection_diagnostics():
         assert "Successfully connected" in res["message"]
         mock_sock.close.assert_called_once()
 
+
+def test_connector_test_connection_proxy_failure_during_auth():
+    from memoria.connectors.host.connector import HostConnector
+    from memoria.connectors.host.models import HostConfig
+
+    config = HostConfig(
+        id="h-proxy-3",
+        name="Proxied Host 3",
+        host="10.0.0.99",
+        port=22,
+        credential="sshpassword",
+        proxy_url="socks5://127.0.0.1:1080",
+    )
+    connector = HostConnector(config)
+
+    # First call to create_proxy_socket (probing) succeeds, second call during _create_ssh_client fails with proxy error
+    mock_probe_sock = MagicMock()
+    with patch(
+        "memoria.connectors.host.proxy.create_proxy_socket",
+        side_effect=[
+            mock_probe_sock,
+            ProxyServerUnreachableError("无法连接至代理服务器: Connection reset by peer"),
+        ],
+    ):
+        res = connector.test_connection()
+        assert res["status"] == "error"
+        assert "无法连接至代理服务器" in res["message"]
+        assert "SSH authentication failed" not in res["message"]
+
+

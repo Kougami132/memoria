@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/hosts", tags=["hosts"])
 
 
+def _clean_and_validate_proxy(v: Any) -> str | None:
+    if v is None:
+        return None
+    if isinstance(v, str):
+        stripped = v.strip()
+        if not stripped:
+            return ""
+        return validate_proxy_url(stripped)
+    return v
+
+
 class HostCreate(BaseModel):
     name: str = Field(..., min_length=1)
     host: str = Field(..., min_length=1)
@@ -34,14 +45,7 @@ class HostCreate(BaseModel):
     @field_validator("proxy_url", mode="before")
     @classmethod
     def validate_proxy(cls, v: Any) -> str | None:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            stripped = v.strip()
-            if not stripped:
-                return ""
-            return validate_proxy_url(stripped)
-        return v
+        return _clean_and_validate_proxy(v)
 
 
 class HostUpdate(BaseModel):
@@ -62,14 +66,7 @@ class HostUpdate(BaseModel):
     @field_validator("proxy_url", mode="before")
     @classmethod
     def validate_proxy(cls, v: Any) -> str | None:
-        if v is None:
-            return None
-        if isinstance(v, str):
-            stripped = v.strip()
-            if not stripped:
-                return ""
-            return validate_proxy_url(stripped)
-        return v
+        return _clean_and_validate_proxy(v)
 
 
 class HostOut(BaseModel):
