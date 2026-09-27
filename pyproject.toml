@@ -29,6 +29,8 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "jieba>=0.42.1",
     "PySocks>=1.7.1",
+    "paramiko>=3.0.0",
+    "cryptography>=41.0.0",
 ]
 
 [project.scripts]

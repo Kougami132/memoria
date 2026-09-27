@@ -370,4 +370,28 @@ def test_connector_test_connection_without_proxy_auth_failure():
         assert "ProxyServerUnreachableError" not in res["message"]
 
 
+def test_connector_test_connection_missing_paramiko():
+    from memoria.connectors.host.connector import HostConnector
+    from memoria.connectors.host.models import HostConfig
+
+    config = HostConfig(
+        id="h-no-paramiko",
+        name="No Paramiko Host",
+        host="192.168.1.100",
+        port=22,
+        credential="sshpassword",
+    )
+    connector = HostConnector(config)
+
+    mock_sock = MagicMock()
+    mock_sock.connect_ex.return_value = 0
+    with patch("socket.socket", return_value=mock_sock), patch.object(
+        connector, "_create_ssh_client", side_effect=ModuleNotFoundError("No module named 'paramiko'")
+    ):
+        res = connector.test_connection()
+        assert res["status"] == "error"
+        assert "未安装 SSH 客户端依赖 (paramiko)" in res["message"]
+
+
+
 

@@ -165,6 +165,13 @@ class HostConnector(BaseConnector):
                         "latency_ms": elapsed_ms,
                         "message": f"代理连接失败: {proxy_err}",
                     }
+                except (ImportError, ModuleNotFoundError) as imp_err:
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    return {
+                        "status": "error",
+                        "latency_ms": elapsed_ms,
+                        "message": f"未安装 SSH 客户端依赖 (paramiko): {imp_err}",
+                    }
                 except Exception as auth_err:
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     return {

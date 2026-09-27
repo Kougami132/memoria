@@ -1,3 +1,4 @@
+import re
 import tomllib
 import unittest
 from pathlib import Path
@@ -33,6 +34,27 @@ class PackagingTestCase(unittest.TestCase):
             missing,
             f"Subpackages exist on disk but are missing from pyproject.toml [tool.setuptools].packages: {missing}",
         )
+
+    def test_host_and_crypto_dependencies_included_in_pyproject(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        pyproject_path = repo_root / "pyproject.toml"
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+
+        deps = data.get("project", {}).get("dependencies", [])
+        dep_names = {re.split(r"[><=~!]", d)[0].strip().lower() for d in deps}
+
+        self.assertIn(
+            "paramiko",
+            dep_names,
+            "paramiko must be listed in pyproject.toml dependencies for host connector runtime",
+        )
+        self.assertIn(
+            "cryptography",
+            dep_names,
+            "cryptography must be listed in pyproject.toml dependencies for secret encryption",
+        )
+
 
 
 if __name__ == "__main__":
