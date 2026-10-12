@@ -1,4 +1,4 @@
-﻿const BASE = '/api'
+const BASE = '/api'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${BASE}${path}`, init)
@@ -7,37 +7,108 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json()
 }
 
-export interface KB { id: string; name: string; description: string; type: 'upload' | 'vault'; created_at: string }
-export interface Doc { id: string; kb_id: string; filename: string; chunk_count: number; source: 'upload' | 'vault'; path?: string; created_at: string }
-export interface UploadResult { doc_id: string; chunk_count: number; doc: Doc }
-export interface Bot {
-  id: string; name: string; model_key: string; system_prompt: string;
-  model_override: string | null; kb_ids: string[]; created_at: string
-  host_ids?: string[]
-  host_security_modes?: Record<string, HostSecurityMode>
-}
-export interface BotCreate {
-  name: string
-  model_key?: string
-  system_prompt?: string
-  kb_ids?: string[]
-  host_ids?: string[]
-  host_security_modes?: Record<string, HostSecurityMode>
-  model_override?: string
-}
-export interface BotUpdate {
+const json = (body: unknown) => ({
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export type ProviderProtocol =
+  | 'openai-completions'
+  | 'openai-responses'
+  | 'anthropic-messages'
+  | 'google-generative-ai'
+
+export interface ModelConfigItem {
+  id: string
   name?: string
-  model_key?: string
-  system_prompt?: string
-  kb_ids?: string[]
-  host_ids?: string[]
-  host_security_modes?: Record<string, HostSecurityMode>
-  model_override?: string
+  reasoning?: boolean
+  contextWindow?: number
+  maxTokens?: number
 }
-export interface Session { id: string; bot_id: string | null; session_type?: 'bot' | 'agentic'; title: string; created_at: string }
+
+export interface ModelProviderConfig {
+  id: string
+  name: string
+  protocol: ProviderProtocol
+  baseUrl: string
+  apiKey: string
+  apiKeyMasked?: string
+  hasApiKey?: boolean
+  enabled: boolean
+  models: ModelConfigItem[]
+}
+
+export interface AvailableModelOption {
+  provider: string
+  providerName: string
+  modelId: string
+  name: string
+  reasoning: boolean
+  supportedThinkingLevels: ThinkingLevel[]
+}
+
+export type HostSecurityMode = 'read_only' | 'ask_confirmation' | 'unrestricted'
+
+export interface ConversationScope {
+  kbIds: string[]
+  hostIds: string[]
+  hostSecurityModes: Record<string, HostSecurityMode>
+  webSearch: boolean
+  subagentEnabled: boolean
+}
+
+export interface Session {
+  id: string
+  durableId?: number
+  title: string
+  channel?: 'web' | 'openai' | 'qq'
+  modelProvider?: string
+  modelId?: string
+  thinkingLevel?: ThinkingLevel
+  scope?: ConversationScope
+  created_at: string
+  updated_at?: string
+}
+
+export interface KB {
+  id: string
+  name: string
+  description: string
+  type: 'upload' | 'vault'
+  created_at: string
+}
+
+export interface Doc {
+  id: string
+  kb_id: string
+  filename: string
+  chunk_count: number
+  source: 'upload' | 'vault'
+  path?: string
+  created_at: string
+}
+
+export interface UploadResult {
+  doc_id: string
+  chunk_count: number
+  doc: Doc
+}
+
 export interface Message {
-  id: string; session_id: string; role: 'user' | 'assistant'; content: string; status?: string; metadata?: Record<string, any>; created_at: string; sources: Source[]; trace?: AgentTrace | null
+  id: string
+  entry_id?: number
+  session_id: string
+  role: 'user' | 'assistant'
+  content: string
+  status?: string
+  metadata?: Record<string, any>
+  created_at: string
+  sources: Source[]
+  trace?: AgentTrace | null
 }
+
 export interface Source {
   text: string
   score: number
@@ -51,11 +122,12 @@ export interface Source {
   url?: string
   title?: string
 }
-export interface ChatResponse { answer: string; session_id: string; sources: Source[] }
+
 export interface AgentSource extends Source {
   kb_id: string
   db_doc_id?: string
 }
+
 export interface AgentTraceSummary {
   duration_ms?: number | null
   reasoning?: string | null
@@ -67,6 +139,7 @@ export interface AgentTraceSummary {
   prompt_tokens?: number | null
   completion_tokens?: number | null
 }
+
 export interface AgentTraceSpan {
   id?: string | null
   trace_id?: string | null
@@ -88,6 +161,19 @@ export interface AgentTraceSpan {
   } | null
   data?: Record<string, unknown>
   error?: unknown
+}
+
+export interface AgentTrace {
+  id?: string
+  session_id?: string
+  message_id?: string
+  trace_id: string
+  workflow_name?: string | null
+  group_id?: string | null
+  metadata: Record<string, unknown>
+  spans: AgentTraceSpan[]
+  summary: AgentTraceSummary
+  created_at?: string
 }
 
 export interface InvocationLog {
@@ -163,27 +249,19 @@ export interface QQBotEventsResponse {
   stats: QQBotStats
 }
 
-export interface AgentTrace {
-  id?: string
-  session_id?: string
-  message_id?: string
-  trace_id: string
-  workflow_name?: string | null
-  group_id?: string | null
-  metadata: Record<string, unknown>
-  spans: AgentTraceSpan[]
-  summary: AgentTraceSummary
-  created_at?: string
-}
-export interface ChatStreamMetaEvent { type: 'meta'; session_id: string; sources: Source[] }
-export interface ChatStreamDeltaEvent { type: 'delta'; delta: string }
-export interface ChatStreamStatusEvent { type: 'status'; message: string }
-export interface ChatStreamFinalEvent { type: 'final'; answer: string; session_id: string; sources: Source[] }
-export interface ChatStreamErrorEvent { type: 'error'; detail: string }
-export type ChatStreamEvent = ChatStreamMetaEvent | ChatStreamDeltaEvent | ChatStreamStatusEvent | ChatStreamFinalEvent | ChatStreamErrorEvent
 export interface Settings {
-  openai_base_url: string; openai_api_key: string; external_api_token: string; embedding_model: string;
-  llm_model: string; system_prompt: string; top_k: string; min_score?: string; chunk_size: string; chunk_overlap: string;
+  openai_base_url: string
+  openai_api_key: string
+  external_api_token: string
+  embedding_model: string
+  llm_model: string
+  default_provider?: string
+  default_thinking_level?: ThinkingLevel
+  system_prompt: string
+  top_k: string
+  min_score?: string
+  chunk_size: string
+  chunk_overlap: string
   vault_sync_interval_minutes: string
   host_dangerous_patterns?: string
   enable_web_search?: string | boolean
@@ -191,9 +269,20 @@ export interface Settings {
   web_search_api_key?: string
   web_search_endpoint?: string
 }
+
 export interface SettingsUpdate {
-  openai_base_url?: string; api_key?: string; external_api_token?: string; embedding_model?: string;
-  llm_model?: string; system_prompt?: string; top_k?: number; min_score?: number; chunk_size?: number; chunk_overlap?: number;
+  openai_base_url?: string
+  api_key?: string
+  external_api_token?: string
+  embedding_model?: string
+  llm_model?: string
+  default_provider?: string
+  default_thinking_level?: ThinkingLevel
+  system_prompt?: string
+  top_k?: number
+  min_score?: number
+  chunk_size?: number
+  chunk_overlap?: number
   vault_sync_interval_minutes?: number
   host_dangerous_patterns?: string[]
   enable_web_search?: boolean
@@ -202,37 +291,60 @@ export interface SettingsUpdate {
   web_search_endpoint?: string
 }
 
-const json = (body: unknown) => ({
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-})
-
+// ------------------------------------------------------------------
+// Knowledge Bases & Documents
+// ------------------------------------------------------------------
 export const listKBs = () => req<KB[]>('/knowledge-bases')
 export const createKB = (data: {
-  name: string; description?: string; type: 'upload' | 'vault';
-  vault_type?: 'local' | 'webdav';
-  local_path?: string; webdav_url?: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
+  name: string
+  description?: string
+  type: 'upload' | 'vault'
+  vault_type?: 'local' | 'webdav'
+  local_path?: string
+  webdav_url?: string
+  webdav_path?: string
+  webdav_username?: string
+  webdav_password?: string
 }) => req<KB>('/knowledge-bases', { method: 'POST', ...json(data) })
 export const updateKB = (id: string, data: { name?: string; description?: string }) =>
   req<KB>(`/knowledge-bases/${id}`, { method: 'PATCH', ...json(data) })
 export const deleteKB = (id: string) => req<void>(`/knowledge-bases/${id}`, { method: 'DELETE' })
 export const listDocs = (kbId: string) => req<Doc[]>(`/knowledge-bases/${kbId}/documents`)
 export const uploadDocument = (kbId: string, file: File) => {
-  const fd = new FormData(); fd.append('file', file)
+  const fd = new FormData()
+  fd.append('file', file)
   return req<UploadResult>(`/knowledge-bases/${kbId}/documents`, { method: 'POST', body: fd })
 }
 export const deleteDocument = (docId: string) => req<void>(`/documents/${docId}`, { method: 'DELETE' })
 
-export const listBots = () => req<Bot[]>('/bots')
-export const createBot = (data: BotCreate) => req<Bot>('/bots', { method: 'POST', ...json(data) })
-export const updateBot = (id: string, data: BotUpdate) =>
-  req<Bot>(`/bots/${id}`, { method: 'PUT', ...json(data) })
-export const deleteBot = (id: string) => req<void>(`/bots/${id}`, { method: 'DELETE' })
-export const listSessions = (botId: string) => req<Session[]>(`/bots/${botId}/sessions`)
+// ------------------------------------------------------------------
+// Multi-Model Providers
+// ------------------------------------------------------------------
+export const listProviders = () => req<ModelProviderConfig[]>('/providers')
+export const createProvider = (data: Partial<ModelProviderConfig>) =>
+  req<ModelProviderConfig>('/providers', { method: 'POST', ...json(data) })
+export const updateProvider = (id: string, data: Partial<ModelProviderConfig>) =>
+  req<ModelProviderConfig>(`/providers/${id}`, { method: 'PUT', ...json(data) })
+export const deleteProvider = (id: string) =>
+  req<void>(`/providers/${id}`, { method: 'DELETE' })
+export const listAvailableModels = () => req<AvailableModelOption[]>('/models/available')
 
-
+// ------------------------------------------------------------------
+// Unified Conversations & Native pi-durable Event Stream
+// ------------------------------------------------------------------
 export interface AgentStreamEvent {
-  type: 'init' | 'trace_span' | 'thought_delta' | 'answer_delta' | 'approval_required' | 'sources' | 'tool_start' | 'tool_end' | 'done' | 'error'
+  type:
+    | 'init'
+    | 'trace_span'
+    | 'thought_delta'
+    | 'answer_delta'
+    | 'approval_required'
+    | 'sources'
+    | 'tool_start'
+    | 'tool_end'
+    | 'inbox_update'
+    | 'done'
+    | 'error'
   phase?: 'start' | 'end'
   session_id?: string
   message_id?: string
@@ -253,42 +365,103 @@ export interface AgentStreamEvent {
   duration_ms?: number
   error?: string
   args?: Record<string, any>
+  inbox?: Array<{ id: number; mode: string }>
 }
 
-export async function* streamResponses(
-  model: string,
-  input: string,
+export const listAgentSessions = () => req<Session[]>('/conversations')
+export const getAgentSession = (id: string) => req<Session>(`/conversations/${id}`)
+export const createAgentSession = (data?: {
+  title?: string
+  modelProvider?: string
+  modelId?: string
+  thinkingLevel?: ThinkingLevel
+  scope?: Partial<ConversationScope>
+}) => req<Session>('/conversations', { method: 'POST', ...json(data ?? {}) })
+export const getAgentMessages = (sessionId: string) =>
+  req<Message[]>(`/conversations/${sessionId}/messages`)
+export const updateAgentSession = (
+  id: string,
+  data: {
+    title?: string
+    modelProvider?: string
+    modelId?: string
+    thinkingLevel?: ThinkingLevel
+    scope?: Partial<ConversationScope>
+  },
+) => req<Session>(`/conversations/${id}`, { method: 'PATCH', ...json(data) })
+export const deleteAgentSession = (id: string) =>
+  req<void>(`/conversations/${id}`, { method: 'DELETE' })
+export const truncateAgentSession = (id: string, data: { message_id: string; inclusive?: boolean }) =>
+  req<{ session_id: string; deleted_count: number }>(`/conversations/${id}/truncate`, {
+    method: 'POST',
+    ...json(data),
+  })
+export const abortAgentSession = (id: string, data?: { rollback?: boolean; message_id?: string }) =>
+  req<{ session_id: string; aborted: boolean }>(`/conversations/${id}/abort`, {
+    method: 'POST',
+    ...(data ? json(data) : {}),
+  })
+export const submitToConversation = (
+  id: string,
+  data: {
+    content: string
+    whenBusy?: 'steer' | 'followUp'
+    modelProvider?: string
+    modelId?: string
+    thinkingLevel?: ThinkingLevel
+    scope?: Partial<ConversationScope>
+    wait?: boolean
+  },
+) =>
+  req<{ conversation: Session; submissionId: number; status: string }>(`/conversations/${id}/submit`, {
+    method: 'POST',
+    ...json(data),
+  })
+
+export async function* streamAgentChat(
+  message: string,
   sessionId?: string,
   signal?: AbortSignal,
+  options?: {
+    modelProvider?: string
+    modelId?: string
+    thinkingLevel?: ThinkingLevel
+    scope?: Partial<ConversationScope>
+    whenBusy?: 'steer' | 'followUp'
+  },
 ): AsyncGenerator<AgentStreamEvent> {
-  const settings = await getSettings()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Memoria-Client': 'web',
+  // 1. Admit submission on pi-durable conversation
+  const targetId = sessionId || 'new'
+  const submitRes = await submitToConversation(targetId, {
+    content: message,
+    whenBusy: options?.whenBusy ?? 'followUp',
+    modelProvider: options?.modelProvider,
+    modelId: options?.modelId,
+    thinkingLevel: options?.thinkingLevel,
+    scope: options?.scope,
+  })
+
+  const activeSessionId = submitRes.conversation.id
+  yield {
+    type: 'init',
+    session_id: activeSessionId,
+    message_id: `msg_${submitRes.submissionId}`,
+    user_message_id: `user_${submitRes.submissionId}`,
   }
-  if (settings.external_api_token) {
-    headers.Authorization = `Bearer ${settings.external_api_token}`
-  }
-  const res = await fetch('/v1/responses', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model,
-      input,
-      conversation_id: sessionId,
-      stream: true,
-    }),
+
+  // 2. Attach to native pi-durable watchEvents SSE stream
+  const res = await fetch(`${BASE}/conversations/${activeSessionId}/events`, {
+    headers: { Accept: 'text/event-stream' },
     signal,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail ?? 'Responses stream request failed')
+  if (!res.ok || !res.body) {
+    throw new Error(`Failed to attach event stream: ${res.status}`)
   }
-  if (!res.body) throw new Error('ReadableStream not supported')
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  const toolStartTimes = new Map<string, number>()
 
   while (true) {
     const { done, value } = await reader.read()
@@ -297,115 +470,143 @@ export async function* streamResponses(
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim()
-      if (line.startsWith('data:')) {
-        const dataStr = line.slice(5).trim()
-        if (!dataStr || dataStr === '[DONE]') continue
-        try {
-          const parsed = JSON.parse(dataStr)
-          // Map OpenAI response SSE events to AgentStreamEvent
-          if (parsed.type === 'response.session_updated') {
-            yield {
-              type: 'init',
-              session_id: parsed.session_id,
-              message_id: parsed.message_id,
-              user_message_id: parsed.user_message_id,
-            }
-          } else if (parsed.type === 'response.thought.delta') {
-            yield {
-              type: 'thought_delta',
-              delta: parsed.delta,
-            }
-          } else if (parsed.type === 'response.approval_required') {
-            yield {
-              type: 'approval_required',
-              approval_id: parsed.approval_id,
-              host_id: parsed.host_id,
-              host_name: parsed.host_name,
-              command: parsed.command,
-            }
-          } else if (parsed.type === 'response.tool.start') {
-            yield {
-              type: 'tool_start',
-              tool_name: parsed.tool_name,
-              tool_agent: parsed.tool_agent,
-              args: parsed.args,
-            }
-          } else if (parsed.type === 'response.tool.end') {
-            yield {
-              type: 'tool_end',
-              tool_name: parsed.tool_name,
-              tool_agent: parsed.tool_agent,
-              duration_ms: parsed.duration_ms,
-              error: parsed.error,
-            }
-          } else if (parsed.type === 'response.text.delta') {
-            yield {
-              type: 'answer_delta',
-              delta: parsed.delta,
-            }
-          } else if (parsed.type === 'response.output_item.added') {
-            const spanObj = parsed.span || parsed.item
-            if (spanObj && (spanObj.type === 'tool_call' || spanObj.type === 'agent' || spanObj.type === 'guardrail' || spanObj.type === 'model' || spanObj.type === 'generation' || spanObj.type === 'tool' || spanObj.type === 'function' || spanObj.type === 'span')) {
-              yield {
-                type: 'trace_span',
-                phase: 'start',
-                span: spanObj,
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (!line.startsWith('data:')) continue
+      const dataStr = line.slice(5).trim()
+      if (!dataStr) continue
+      try {
+        const ev = JSON.parse(dataStr)
+        if (ev.type === 'snapshot') {
+          const snap = ev.snapshot
+          if (snap?.generation?.message?.content) {
+            for (const block of snap.generation.message.content) {
+              if (block.type === 'thinking' && block.thinking) {
+                yield { type: 'thought_delta', delta: block.thinking }
+              } else if (block.type === 'text' && block.text) {
+                yield { type: 'answer_delta', delta: block.text }
               }
-            }
-          } else if (parsed.type === 'response.output_item.done') {
-            const spanObj = parsed.span || parsed.item
-            if (spanObj && (spanObj.type === 'tool_call' || spanObj.type === 'agent' || spanObj.type === 'guardrail' || spanObj.type === 'model' || spanObj.type === 'generation' || spanObj.type === 'tool' || spanObj.type === 'function' || spanObj.type === 'span')) {
-              yield {
-                type: 'trace_span',
-                phase: 'end',
-                span: spanObj,
-              }
-            }
-          } else if (parsed.type === 'response.sources') {
-            yield {
-              type: 'sources',
-              sources: parsed.sources,
-            }
-          } else if (parsed.type === 'response.error') {
-            yield {
-              type: 'error',
-              detail: parsed.error?.message || 'Unknown stream error',
-            }
-          } else if (parsed.type === 'response.completed') {
-            yield {
-              type: 'done',
-              session_id: parsed.response?.conversation_id,
-              message_id: '',
-              answer: '',
             }
           }
-        } catch (e) {
-          console.warn('Failed to parse SSE line:', line, e)
+          // If the run already finished before we attached (fast response!), finish immediately
+          if (!snap?.run && !snap?.generation && (!snap?.tools || snap.tools.length === 0)) {
+            yield { type: 'done', session_id: activeSessionId }
+            return
+          }
+        } else if (ev.type === 'message_update' && Array.isArray(ev.changes)) {
+          for (const ch of ev.changes) {
+            if (ch.type === 'thinking_delta' && ch.delta) {
+              yield { type: 'thought_delta', delta: ch.delta }
+            } else if (ch.type === 'text_delta' && ch.delta) {
+              yield { type: 'answer_delta', delta: ch.delta }
+            }
+          }
+        } else if (ev.type === 'tool_execution_start') {
+          toolStartTimes.set(ev.toolCallId, Date.now())
+          const isSubagent = ev.toolName === 'delegate_subagent'
+          yield {
+            type: 'tool_start',
+            tool_name: ev.toolName,
+            tool_agent: isSubagent ? 'Subagent' : 'Agent',
+            args: ev.args,
+          }
+          yield {
+            type: 'trace_span',
+            phase: 'start',
+            span: {
+              id: ev.toolCallId,
+              type: 'tool',
+              name: ev.toolName,
+              agent_id: isSubagent ? 'subagent' : 'main',
+              agent_name: isSubagent ? 'Subagent' : 'Agent',
+              agent_role: isSubagent ? 'specialist' : 'orchestrator',
+              started_at: new Date().toISOString(),
+              data: { input: ev.args },
+            },
+          }
+        } else if (ev.type === 'tool_execution_update') {
+          if (ev.details?.sources && Array.isArray(ev.details.sources)) {
+            yield {
+              type: 'sources',
+              sources: ev.details.sources,
+            }
+          }
+          if (ev.details?.approval_id) {
+            yield {
+              type: 'approval_required',
+              approval_id: ev.details.approval_id,
+              host_id: ev.details.host_id,
+              host_name: ev.details.host_name,
+              command: ev.details.command,
+            }
+          }
+        } else if (ev.type === 'tool_execution_end') {
+          const started = toolStartTimes.get(ev.toolCallId) ?? Date.now()
+          const durationMs = Math.max(1, Date.now() - started)
+          const isSubagent = ev.toolName === 'delegate_subagent'
+          const toolMsg = ev.entry?.model?.[0]
+          const outText = Array.isArray(toolMsg?.content)
+            ? toolMsg.content
+                .filter((b: any) => b.type === 'text')
+                .map((b: any) => b.text)
+                .join('\n')
+            : ''
+          const errText = toolMsg?.isError ? outText || 'Tool execution failed' : undefined
+
+          yield {
+            type: 'tool_end',
+            tool_name: ev.toolName,
+            tool_agent: isSubagent ? 'Subagent' : 'Agent',
+            duration_ms: durationMs,
+            error: errText,
+          }
+          yield {
+            type: 'trace_span',
+            phase: 'end',
+            span: {
+              id: ev.toolCallId,
+              type: 'tool',
+              name: ev.toolName,
+              agent_id: isSubagent ? 'subagent' : 'main',
+              agent_name: isSubagent ? 'Subagent' : 'Agent',
+              agent_role: isSubagent ? 'specialist' : 'orchestrator',
+              duration_ms: durationMs,
+              ended_at: new Date().toISOString(),
+              data: {
+                output: outText,
+                details: toolMsg?.details,
+              },
+              error: errText,
+            },
+          }
+        } else if (ev.type === 'inbox_update') {
+          yield {
+            type: 'inbox_update',
+            inbox: ev.items,
+          }
+        } else if (ev.type === 'task_failed') {
+          yield {
+            type: 'error',
+            detail: ev.message || 'Task failed',
+          }
+          return
+        } else if (ev.type === 'run_end') {
+          yield {
+            type: 'done',
+            session_id: activeSessionId,
+          }
+          return
         }
+      } catch (err) {
+        console.warn('Failed to parse event:', line, err)
       }
     }
   }
 }
 
-export async function* streamAgentChat(
-  message: string,
-  sessionId?: string,
-  signal?: AbortSignal,
-): AsyncGenerator<AgentStreamEvent> {
-  yield* streamResponses('memoria-agent', message, sessionId, signal)
-}
-
-export async function* streamBotChat(
-  modelKey: string,
-  message: string,
-  sessionId?: string,
-  signal?: AbortSignal,
-): AsyncGenerator<AgentStreamEvent> {
-  yield* streamResponses(`bot:${modelKey}`, message, sessionId, signal)
-}
-
+// ------------------------------------------------------------------
+// Settings & QQ Settings
+// ------------------------------------------------------------------
 export interface QQSettings {
   enabled: string
   app_id: string
@@ -437,70 +638,6 @@ export interface QQSettingsUpdate {
   max_queue_size?: number
   run_timeout_seconds?: number
 }
-export const listAgentSessions = () => req<Session[]>('/agent-sessions')
-export const getAgentMessages = (sessionId: string) => req<Message[]>(`/agent-sessions/${sessionId}/messages`)
-export const updateAgentSession = (id: string, data: { title: string }) =>
-  req<Session>(`/agent-sessions/${id}`, { method: 'PATCH', ...json(data) })
-export const deleteAgentSession = (id: string) => req<void>(`/agent-sessions/${id}`, { method: 'DELETE' })
-export const truncateAgentSession = (id: string, data: { message_id: string; inclusive?: boolean }) =>
-  req<{ session_id: string; deleted_count: number }>(`/agent-sessions/${id}/truncate`, { method: 'POST', ...json(data) })
-export const abortAgentSession = (id: string, data?: { rollback?: boolean; message_id?: string }) =>
-  req<{ session_id: string; aborted: boolean }>(`/agent-sessions/${id}/abort`, { method: 'POST', ...(data ? json(data) : {}) })
-
-export async function chatStream(
-  botId: string,
-  message: string,
-  sessionId: string | undefined,
-  onEvent?: (event: ChatStreamEvent) => void,
-): Promise<ChatStreamFinalEvent> {
-  const r = await fetch(`${BASE}/chat/${botId}/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId }),
-  })
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
-  if (!r.body) throw new Error('Streaming is not supported by this browser')
-
-  const reader = r.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let final: ChatStreamFinalEvent | null = null
-
-  const handleLine = (line: string) => {
-    const trimmed = line.trim()
-    if (!trimmed) return
-    const event = JSON.parse(trimmed) as ChatStreamEvent
-    onEvent?.(event)
-    if (event.type === 'error') throw new Error(event.detail || 'Stream failed')
-    if (event.type === 'final') final = event
-  }
-
-  while (true) {
-    const { value, done } = await reader.read()
-    if (value) buffer += decoder.decode(value, { stream: !done })
-    let newlineIndex = buffer.indexOf('\n')
-    while (newlineIndex >= 0) {
-      handleLine(buffer.slice(0, newlineIndex))
-      buffer = buffer.slice(newlineIndex + 1)
-      newlineIndex = buffer.indexOf('\n')
-    }
-    if (done) break
-  }
-
-  if (buffer.trim()) handleLine(buffer)
-  if (!final) throw new Error('Stream ended before final response')
-  return final
-}
-
-export const getMessages = (sessionId: string) => req<Message[]>(`/sessions/${sessionId}/messages`)
-export const getSession = (sessionId: string) => req<Session>(`/sessions/${sessionId}`)
-export const updateSession = (id: string, data: { title: string }) =>
-  req<Session>(`/sessions/${id}`, { method: 'PATCH', ...json(data) })
-export const deleteSession = (id: string) => req<void>(`/sessions/${id}`, { method: 'DELETE' })
-export const truncateSession = (id: string, data: { message_id: string; inclusive?: boolean }) =>
-  req<{ session_id: string; deleted_count: number }>(`/sessions/${id}/truncate`, { method: 'POST', ...json(data) })
-export const abortSession = (id: string, data?: { rollback?: boolean; message_id?: string }) =>
-  req<{ session_id: string; aborted: boolean }>(`/sessions/${id}/abort`, { method: 'POST', ...(data ? json(data) : {}) })
 
 export const getSettings = () => req<Settings>('/settings')
 export const updateSettings = (data: SettingsUpdate) =>
@@ -511,18 +648,18 @@ export const fetchModels = (data?: { openai_base_url?: string; api_key?: string 
     ...json(data || {}),
   })
 export const testEmbedding = (data?: {
-  openai_base_url?: string;
-  api_key?: string;
-  embedding_model?: string;
+  openai_base_url?: string
+  api_key?: string
+  embedding_model?: string
 }) =>
   req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', {
     method: 'POST',
     ...json(data || {}),
   })
 export const testChat = (data?: {
-  openai_base_url?: string;
-  api_key?: string;
-  llm_model?: string;
+  openai_base_url?: string
+  api_key?: string
+  llm_model?: string
 }) =>
   req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', {
     method: 'POST',
@@ -534,15 +671,40 @@ export const updateQQSettings = (data: QQSettingsUpdate) =>
 export const getQQStatus = () =>
   req<{ status: string; last_error: string | null }>('/settings/qq/status')
 
+// ------------------------------------------------------------------
+// Vaults
+// ------------------------------------------------------------------
 export interface Vault {
-  id: string; kb_id: string; type: 'local' | 'webdav';
-  local_path?: string; webdav_url?: string; webdav_path?: string; webdav_username?: string;
-  last_synced_at: string | null; syncing: boolean; auto_sync: boolean; created_at: string;
+  id: string
+  kb_id: string
+  type: 'local' | 'webdav'
+  local_path?: string
+  webdav_url?: string
+  webdav_path?: string
+  webdav_username?: string
+  last_synced_at: string | null
+  syncing: boolean
+  auto_sync: boolean
+  created_at: string
 }
+
 export interface VaultCreate {
-  type: 'local' | 'webdav';
-  local_path?: string;
-  webdav_url?: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
+  type: 'local' | 'webdav'
+  local_path?: string
+  webdav_url?: string
+  webdav_path?: string
+  webdav_username?: string
+  webdav_password?: string
+}
+
+export interface VaultUpdate {
+  auto_sync?: boolean
+  type?: 'local' | 'webdav'
+  local_path?: string
+  webdav_url?: string
+  webdav_path?: string
+  webdav_username?: string
+  webdav_password?: string
 }
 
 export const getVault = (kbId: string) => req<Vault>(`/knowledge-bases/${kbId}/vault`)
@@ -554,16 +716,6 @@ export const syncVault = (kbId: string) =>
   req<{ status: string }>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'POST' })
 export const cancelVaultSync = (kbId: string): Promise<void> =>
   req<void>(`/knowledge-bases/${kbId}/vault/sync`, { method: 'DELETE' })
-export interface VaultUpdate {
-  auto_sync?: boolean
-  type?: 'local' | 'webdav'
-  local_path?: string
-  webdav_url?: string
-  webdav_path?: string
-  webdav_username?: string
-  webdav_password?: string
-}
-
 export const updateVault = (kbId: string, body: VaultUpdate): Promise<Vault> =>
   req<Vault>(`/knowledge-bases/${kbId}/vault`, { method: 'PATCH', ...json(body) })
 
@@ -588,20 +740,40 @@ export const importBackup = async (file: File): Promise<RestoreResult> => {
   return r.json()
 }
 
-export interface VaultPathEntry { name: string; path: string; type: 'directory' }
-export interface VaultPathBrowseResult { path: string; parent: string | null; entries: VaultPathEntry[] }
-export interface WebDAVTestResult { ok: boolean; file_count: number; path: string }
+export interface VaultPathEntry {
+  name: string
+  path: string
+  type: 'directory'
+}
+export interface VaultPathBrowseResult {
+  path: string
+  parent: string | null
+  entries: VaultPathEntry[]
+}
+export interface WebDAVTestResult {
+  ok: boolean
+  file_count: number
+  path: string
+}
 
 export const browseLocalVaultPath = (path?: string) =>
   req<VaultPathBrowseResult>('/vaults/browse-local', { method: 'POST', ...json({ path }) })
 export const browseWebDAVVaultPath = (data: {
-  webdav_url: string; webdav_username?: string; webdav_password?: string; path?: string;
+  webdav_url: string
+  webdav_username?: string
+  webdav_password?: string
+  path?: string
 }) => req<VaultPathBrowseResult>('/vaults/browse-webdav', { method: 'POST', ...json(data) })
 export const testWebDAVVault = (data: {
-  webdav_url: string; webdav_path?: string; webdav_username?: string; webdav_password?: string;
+  webdav_url: string
+  webdav_path?: string
+  webdav_username?: string
+  webdav_password?: string
 }) => req<WebDAVTestResult>('/vaults/test-webdav', { method: 'POST', ...json(data) })
-export type HostSecurityMode = 'read_only' | 'ask_confirmation' | 'unrestricted'
 
+// ------------------------------------------------------------------
+// Controlled Hosts
+// ------------------------------------------------------------------
 export interface Host {
   id: string
   name: string
@@ -612,6 +784,7 @@ export interface Host {
   credential_set: boolean
   proxy_url?: string
   proxy_url_set?: boolean
+  default_cwd?: string
   description: string
   tags: string[]
   safe_mode: boolean
@@ -621,6 +794,7 @@ export interface Host {
   created_at: string
   updated_at: string
 }
+
 export interface HostCreate {
   name: string
   host: string
@@ -629,20 +803,29 @@ export interface HostCreate {
   auth_type?: 'password' | 'key'
   credential?: string
   proxy_url?: string
+  default_cwd?: string
   description?: string
   tags?: string[]
   safe_mode?: boolean
   security_mode?: HostSecurityMode
 }
+
 export interface HostUpdate extends Partial<HostCreate> {}
-export interface TestHostResult { ok: boolean; message?: string; os_info?: string; latency_ms?: number }
+export interface TestHostResult {
+  ok: boolean
+  message?: string
+  os_info?: string
+  latency_ms?: number
+}
 
 export const listHosts = () => req<Host[]>('/hosts')
 export const getHost = (id: string) => req<Host>(`/hosts/${id}`)
 export const createHost = (data: HostCreate) => req<Host>('/hosts', { method: 'POST', ...json(data) })
-export const updateHost = (id: string, data: HostUpdate) => req<Host>(`/hosts/${id}`, { method: 'PUT', ...json(data) })
+export const updateHost = (id: string, data: HostUpdate) =>
+  req<Host>(`/hosts/${id}`, { method: 'PUT', ...json(data) })
 export const deleteHost = (id: string) => req<void>(`/hosts/${id}`, { method: 'DELETE' })
-export const testHostConnection = (id: string) => req<TestHostResult>(`/hosts/${id}/test`, { method: 'POST' })
+export const testHostConnection = (id: string) =>
+  req<TestHostResult>(`/hosts/${id}/test`, { method: 'POST' })
 
 export interface ApprovalRespondResult {
   id: string
@@ -657,6 +840,9 @@ export const respondHostApproval = (approvalId: string, approved: boolean) =>
     ...json({ approved }),
   })
 
+// ------------------------------------------------------------------
+// Logs
+// ------------------------------------------------------------------
 export const logsApi = {
   listInvocations: (params?: { limit?: number; offset?: number }) => {
     const q = new URLSearchParams()

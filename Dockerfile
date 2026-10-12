@@ -1,33 +1,28 @@
-# Stage 1: Build frontend
-FROM node:20-alpine AS frontend-builder
+# Stage 1: Build frontend SPA
+FROM node:22-alpine AS frontend-builder
 WORKDIR /app/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-# Stage 2: Application runtime
-FROM python:3.11-slim
+# Stage 2: Node.js 22+ TypeScript runtime (with built-in node:sqlite)
+FROM node:22-alpine
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
+ENV NODE_ENV=production \
     DB_PATH=/app/data/memoria.db \
-    CHROMA_PATH=/app/data/chroma \
-    UPLOAD_DIR=/app/data/uploads \
-    LOG_PATH=/app/data/memoria.log
+    PORT=8000
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache openssh-client curl
 
-COPY pyproject.toml ./
-COPY memoria/ ./memoria/
+COPY package*.json tsconfig.json ./
+RUN npm ci --omit=dev
+
+COPY shared/ ./shared/
+COPY src/ ./src/
 COPY --from=frontend-builder /app/memoria/static ./memoria/static
-
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
 
 RUN mkdir -p /app/data
 
@@ -36,4 +31,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-CMD ["memoria", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["node", "--experimental-strip-types", "src/index.ts"]

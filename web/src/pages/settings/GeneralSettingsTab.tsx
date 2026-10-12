@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, Save, Check, FlaskConical, KeyRound, MessageSquareCode, RefreshCw, Download, Database, Upload, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, Save, Check, FlaskConical, KeyRound, MessageSquareCode, RefreshCw, Download, Database, Upload, AlertCircle, Plus, Trash2, Layers } from 'lucide-react'
 import * as api from '@/api'
-import type { Settings, SettingsUpdate } from '@/api'
+import type { Settings, SettingsUpdate, ProviderProtocol } from '@/api'
 
 type TestState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
 type FetchState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
@@ -29,6 +29,53 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
   const [embedTest, setEmbedTest] = useState<TestState>({ status: 'idle' })
   const [chatTest, setChatTest] = useState<TestState>({ status: 'idle' })
   const [backupRestoreState, setBackupRestoreState] = useState<{ status: 'idle' | 'loading' | 'success' | 'error'; msg: string }>({ status: 'idle', msg: '' })
+
+  const { data: providers = [] } = useQuery({
+    queryKey: ['providers'],
+    queryFn: api.listProviders,
+  })
+  const [newProvName, setNewProvName] = useState('')
+  const [newProvProtocol, setNewProvProtocol] = useState<ProviderProtocol>('openai-completions')
+  const [newProvBaseUrl, setNewProvBaseUrl] = useState('')
+  const [newProvApiKey, setNewProvApiKey] = useState('')
+  const [newProvModelsText, setNewProvModelsText] = useState('')
+
+  const handleAddProvider = async () => {
+    if (!newProvName.trim() || !newProvBaseUrl.trim()) return
+    const models = newProvModelsText
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((id) => ({ id, name: id, reasoning: true }))
+    try {
+      await api.createProvider({
+        name: newProvName.trim(),
+        protocol: newProvProtocol,
+        baseUrl: newProvBaseUrl.trim(),
+        apiKey: newProvApiKey.trim(),
+        enabled: true,
+        models,
+      })
+      setNewProvName('')
+      setNewProvBaseUrl('')
+      setNewProvApiKey('')
+      setNewProvModelsText('')
+      qc.invalidateQueries({ queryKey: ['providers'] })
+      qc.invalidateQueries({ queryKey: ['available-models'] })
+    } catch (e: any) {
+      alert(`添加渠道失败: ${e.message || e}`)
+    }
+  }
+
+  const handleDeleteProvider = async (id: string) => {
+    try {
+      await api.deleteProvider(id)
+      qc.invalidateQueries({ queryKey: ['providers'] })
+      qc.invalidateQueries({ queryKey: ['available-models'] })
+    } catch (e: any) {
+      alert(`删除渠道失败: ${e.message || e}`)
+    }
+  }
 
   const initialBaselineRef = useRef<{ openai_api_key?: string; external_api_token?: string }>({})
   const hasInitializedRef = useRef(false)
@@ -351,6 +398,106 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
                 </Button>
               </div>
               {testBadge(chatTest)}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border-border bg-card shadow-xs">
+        <CardHeader className="pb-4">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-foreground" />
+            <CardTitle className="text-base font-semibold">多模型渠道管理 (pi-ai Providers)</CardTitle>
+          </div>
+          <CardDescription>
+            配置多个大模型厂商渠道（OpenAI 兼容 / Anthropic / Google Gemini），在 AI Agent 会话顶部随时切换模型与思考深度
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            {providers.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border bg-muted/20 text-xs"
+              >
+                <div className="space-y-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-foreground">{p.name}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-mono text-[10px]">
+                      {p.protocol}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground font-mono truncate">{p.baseUrl}</div>
+                  <div className="text-muted-foreground">
+                    模型: {p.models.map((m) => m.id).join(', ') || '未配置'}
+                  </div>
+                </div>
+                {p.id !== 'default' && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => void handleDeleteProvider(p.id)}
+                    className="text-muted-foreground hover:text-destructive shrink-0"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-3 border-t border-border space-y-3">
+            <div className="text-xs font-semibold text-muted-foreground">新增模型渠道</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                placeholder="渠道名称 (如: Anthropic / DeepSeek)"
+                value={newProvName}
+                onChange={(e) => setNewProvName(e.target.value)}
+                className="rounded-xl text-xs"
+              />
+              <select
+                value={newProvProtocol}
+                onChange={(e) => setNewProvProtocol(e.target.value as ProviderProtocol)}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-xs"
+              >
+                <option value="openai-completions">OpenAI Completions (/v1/chat/completions)</option>
+                <option value="openai-responses">OpenAI Responses (/v1/responses)</option>
+                <option value="anthropic-messages">Anthropic Messages (Claude)</option>
+                <option value="google-generative-ai">Google Generative AI (Gemini)</option>
+              </select>
+              <Input
+                placeholder="Base URL (如: https://api.anthropic.com)"
+                value={newProvBaseUrl}
+                onChange={(e) => setNewProvBaseUrl(e.target.value)}
+                className="rounded-xl text-xs font-mono"
+              />
+              <Input
+                type="password"
+                placeholder="API Key"
+                value={newProvApiKey}
+                onChange={(e) => setNewProvApiKey(e.target.value)}
+                className="rounded-xl text-xs font-mono"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="模型 ID 列表，逗号分隔 (如: claude-sonnet-4-5, claude-opus-4-5)"
+                value={newProvModelsText}
+                onChange={(e) => setNewProvModelsText(e.target.value)}
+                className="rounded-xl text-xs font-mono flex-1"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleAddProvider()}
+                disabled={!newProvName.trim() || !newProvBaseUrl.trim()}
+                className="rounded-xl gap-1 text-xs shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                添加渠道
+              </Button>
             </div>
           </div>
         </CardContent>
