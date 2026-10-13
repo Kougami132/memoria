@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
@@ -165,8 +166,7 @@ export default function QQBotTab({ qqSettings }: QQBotTabProps) {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client Secret</Label>
-              <Input
-                type="password"
+              <PasswordInput
                 value={String(qqForm.client_secret || '')}
                 onChange={setQQ('client_secret')}
                 placeholder="留空保持当前密钥"

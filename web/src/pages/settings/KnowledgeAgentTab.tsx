@@ -62,7 +62,7 @@ export default function KnowledgeAgentTab({ settings }: KnowledgeAgentTabProps) 
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">知识检索专员设置 (KnowledgeAgent)</h2>
+          <h2 className="text-xl font-bold tracking-tight">知识检索设置 (KnowledgeAgent)</h2>
           <p className="text-sm text-muted-foreground mt-0.5">调优 RAG 核心分块与语义相似度召回流水线参数</p>
         </div>
         <Button
@@ -71,7 +71,7 @@ export default function KnowledgeAgentTab({ settings }: KnowledgeAgentTabProps) 
           className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs cursor-pointer"
         >
           {saved ? <Check className="h-4 w-4 text-emerald-400" /> : <Save className="h-4 w-4" />}
-          {isSaving ? '保存中…' : saved ? '已保存专员配置' : '保存专员配置'}
+          {isSaving ? '保存中…' : saved ? '已保存配置' : '保存配置'}
         </Button>
       </div>
 
@@ -80,10 +80,10 @@ export default function KnowledgeAgentTab({ settings }: KnowledgeAgentTabProps) 
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-foreground" />
-            <CardTitle className="text-base font-semibold">专员机制与委托协作</CardTitle>
+            <CardTitle className="text-base font-semibold">检索机制与委托协作</CardTitle>
           </div>
           <CardDescription>
-            KnowledgeAgent 在 Multi-Agent 架构中作为专注于私有知识检索的专家专员工作
+            KnowledgeAgent 在 Multi-Agent 架构中作为专注于私有知识检索的专家工作
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -93,7 +93,7 @@ export default function KnowledgeAgentTab({ settings }: KnowledgeAgentTabProps) 
               编排主智能体（Orchestrator）在识别到用户提问涉及私有文档、业务知识库或专业参考时，会通过函数调用将检索子任务移交至 <strong>KnowledgeAgent</strong>。
             </p>
             <p>
-              专员结合语义分块切片算法与 Chroma 向量数据库进行余弦相似度召回，经过最低相似度过滤后提炼相关切片，再将高置信度事实上下文回传给主智能体进行融合推理。
+              系统结合语义分块切片算法与 SQLite 向量/全文检索进行余弦相似度召回，经过最低相似度过滤后提炼相关切片，再将高置信度事实上下文回传给主智能体进行融合推理。
             </p>
           </div>
 

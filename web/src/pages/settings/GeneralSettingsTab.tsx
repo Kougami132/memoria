@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, Save, Check, FlaskConical, KeyRound, MessageSquareCode, RefreshCw, Download, Database, Upload, AlertCircle, Plus, Trash2, Layers } from 'lucide-react'
+import { Save, Check, FlaskConical, KeyRound, MessageSquareCode, RefreshCw, Download, Database, Upload, AlertCircle, Plus, Trash2, Layers } from 'lucide-react'
 import * as api from '@/api'
 import type { Settings, SettingsUpdate, ProviderProtocol } from '@/api'
 
@@ -20,8 +21,6 @@ interface GeneralSettingsTabProps {
 export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps) {
   const qc = useQueryClient()
   const [form, setForm] = useState<Partial<Record<string, string>>>({})
-  const [showKey, setShowKey] = useState(false)
-  const [showExternalToken, setShowExternalToken] = useState(false)
   const [saved, setSaved] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [availableModels, setAvailableModels] = useState<string[]>([])
@@ -252,45 +251,21 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key (密钥)</Label>
-            <div className="flex gap-2">
-              <Input
-                type={showKey ? 'text' : 'password'}
-                placeholder="sk-…"
-                value={form.openai_api_key ?? ''}
-                onChange={set('openai_api_key')}
-                className="flex-1 rounded-xl border-border bg-background font-mono text-sm"
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                className="shrink-0 rounded-xl border-border"
-                onClick={() => setShowKey(v => !v)}
-              >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
+            <PasswordInput
+              placeholder="sk-…"
+              value={form.openai_api_key ?? ''}
+              onChange={set('openai_api_key')}
+              className="rounded-xl border-border bg-background font-mono text-sm"
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">外部 API Token (Bearer)</Label>
-            <div className="flex gap-2">
-              <Input
-                type={showExternalToken ? 'text' : 'password'}
-                placeholder="留空则不启用认证"
-                value={form.external_api_token ?? ''}
-                onChange={set('external_api_token')}
-                className="flex-1 rounded-xl border-border bg-background font-mono text-sm"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="shrink-0 rounded-xl border-border"
-                onClick={() => setShowExternalToken(v => !v)}
-                aria-label={showExternalToken ? '隐藏外部 API Token' : '显示外部 API Token'}
-              >
-                {showExternalToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
+            <PasswordInput
+              placeholder="留空则不启用认证"
+              value={form.external_api_token ?? ''}
+              onChange={set('external_api_token')}
+              className="rounded-xl border-border bg-background font-mono text-sm"
+            />
           </div>
 
           <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border">
@@ -472,8 +447,7 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
                 onChange={(e) => setNewProvBaseUrl(e.target.value)}
                 className="rounded-xl text-xs font-mono"
               />
-              <Input
-                type="password"
+              <PasswordInput
                 placeholder="API Key"
                 value={newProvApiKey}
                 onChange={(e) => setNewProvApiKey(e.target.value)}

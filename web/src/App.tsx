@@ -6,6 +6,7 @@ import AgenticChat from './pages/AgenticChat'
 import Hosts from './pages/Hosts'
 import Settings from './pages/Settings'
 import Logs from './pages/Logs'
+import About from './pages/About'
 
 const queryClient = new QueryClient()
 
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="logs" element={<Logs />} />
             <Route path="settings" element={<Settings />} />
             <Route path="settings/:tab" element={<Settings />} />
+            <Route path="about" element={<About />} />
             <Route path="*" element={<Navigate to="/agentic-chat" replace />} />
           </Route>
         </Routes>

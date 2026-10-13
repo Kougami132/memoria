@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import * as api from '@/api'
 import type { AgentTraceSpan, Message, Source } from '@/api'
+import { ScopeSelectorPopover } from '@/components/ScopeSelectorPopover'
 
 const mdComponents: Components = {
   p: ({ children }) => <p className="mb-3 leading-7 last:mb-0">{children}</p>,
@@ -100,7 +101,7 @@ const mdComponents: Components = {
 const TOOL_CN_MAP: Record<string, string> = {
   delegate_to_knowledge_agent: '委派知识库专家 (KnowledgeAgent)',
   delegate_to_host_agent: '委派主机运维专家 (HostAgent)',
-  delegate_to_web_agent: '委派联网检索专员 (WebAgent)',
+  delegate_to_web_agent: '委派联网检索 (WebAgent)',
   list_knowledge_bases: '查询可用知识库',
   search_knowledge_base: '检索知识库内容',
   read_knowledge_document: '查看知识库文档全文',
@@ -265,11 +266,29 @@ export function AgenticChat() {
     void persistConversationConfig({ scope: nextScope })
   }
 
+  const setKbIdsScope = (kbIds: string[]) => {
+    const nextScope: api.ConversationScope = {
+      ...scope,
+      kbIds,
+    }
+    setScope(nextScope)
+    void persistConversationConfig({ scope: nextScope })
+  }
+
   const toggleHostScope = (hostId: string) => {
     const exists = scope.hostIds.includes(hostId)
     const nextScope: api.ConversationScope = {
       ...scope,
       hostIds: exists ? scope.hostIds.filter((id) => id !== hostId) : [...scope.hostIds, hostId],
+    }
+    setScope(nextScope)
+    void persistConversationConfig({ scope: nextScope })
+  }
+
+  const setHostIdsScope = (hostIds: string[]) => {
+    const nextScope: api.ConversationScope = {
+      ...scope,
+      hostIds,
     }
     setScope(nextScope)
     void persistConversationConfig({ scope: nextScope })
@@ -878,69 +897,56 @@ export function AgenticChat() {
 
           {/* Scope Toggles Row (KBs, Hosts, Web Search) */}
           <div className="flex items-center gap-2 flex-wrap text-xs">
-            <span className="text-[11px] text-muted-foreground font-medium">会话挂载开关:</span>
+            <span className="text-[11px] text-muted-foreground font-medium">会话挂载:</span>
 
             {/* Web Search Toggle */}
             <button
               type="button"
               onClick={toggleWebSearchScope}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] transition-colors cursor-pointer ${
                 scope.webSearch
                   ? 'border-sky-500/50 bg-sky-500/10 text-sky-600 dark:text-sky-400 font-medium'
                   : 'border-border text-muted-foreground hover:bg-muted/60'
               }`}
+              title="切换当前会话是否允许联网检索"
             >
               <Globe className="w-3 h-3" />
               <span>联网搜索</span>
             </button>
 
-            {/* Knowledge Base Toggles */}
-            {kbs.map((kb) => {
-              const active = scope.kbIds.includes(kb.id)
-              return (
-                <button
-                  key={kb.id}
-                  type="button"
-                  onClick={() => toggleKbScope(kb.id)}
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] transition-colors cursor-pointer ${
-                    active
-                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium'
-                      : 'border-border text-muted-foreground hover:bg-muted/60'
-                  }`}
-                  title={kb.description || kb.name}
-                >
-                  <Database className="w-3 h-3" />
-                  <span>{kb.name}</span>
-                </button>
-              )
-            })}
+            {/* Knowledge Base Popover */}
+            <ScopeSelectorPopover
+              title="知识库"
+              icon={Database}
+              items={kbs.map((kb) => ({
+                id: kb.id,
+                name: kb.name,
+                subtitle: kb.description || (kb.type === 'vault' ? '外部仓库 (Vault)' : '文件知识库'),
+              }))}
+              selectedIds={scope.kbIds}
+              onToggle={toggleKbScope}
+              onSelectAll={() => setKbIdsScope(kbs.map((k) => k.id))}
+              onClearAll={() => setKbIdsScope([])}
+              accentType="emerald"
+              emptyMessage="暂无可用知识库，可在「知识库」页面中创建"
+            />
 
-            {/* Controlled Host Toggles */}
-            {hosts.map((h) => {
-              const active = scope.hostIds.includes(h.id)
-              return (
-                <button
-                  key={h.id}
-                  type="button"
-                  onClick={() => toggleHostScope(h.id)}
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] transition-colors cursor-pointer ${
-                    active
-                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium'
-                      : 'border-border text-muted-foreground hover:bg-muted/60'
-                  }`}
-                  title={`${h.username}@${h.host}:${h.port}`}
-                >
-                  <Server className="w-3 h-3" />
-                  <span>{h.name}</span>
-                </button>
-              )
-            })}
-
-            {kbs.length === 0 && hosts.length === 0 && (
-              <span className="text-[11px] text-muted-foreground/60">
-                (在「知识库」或「主机管理」添加资源后可在此按需勾选挂载)
-              </span>
-            )}
+            {/* Host Popover */}
+            <ScopeSelectorPopover
+              title="受控主机"
+              icon={Server}
+              items={hosts.map((h) => ({
+                id: h.id,
+                name: h.name,
+                subtitle: `${h.username}@${h.host}:${h.port || 22}`,
+              }))}
+              selectedIds={scope.hostIds}
+              onToggle={toggleHostScope}
+              onSelectAll={() => setHostIdsScope(hosts.map((h) => h.id))}
+              onClearAll={() => setHostIdsScope([])}
+              accentType="amber"
+              emptyMessage="暂无受控主机，可在「主机管理」中添加"
+            />
           </div>
         </div>
 

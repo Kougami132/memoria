@@ -10,7 +10,8 @@ import {
   PanelLeft,
   Sun,
   Moon,
-  Sparkle
+  Sparkle,
+  Info
 } from 'lucide-react'
 
 const navLinks = [
@@ -19,6 +20,7 @@ const navLinks = [
   { to: '/hosts', label: '主机管理', icon: Server },
   { to: '/logs', label: '日志', icon: ScrollText },
   { to: '/settings', label: '系统设置', icon: Settings },
+  { to: '/about', label: '关于', icon: Info },
 ]
 
 const newChatPaths = new Set(['/agentic-chat'])
@@ -109,10 +111,6 @@ export default function Layout() {
                   <span>{isDark ? '浅色模式' : '深色模式'}</span>
                 </div>
               </button>
-              <div className="px-3 py-1.5 flex items-center justify-between text-[11px] text-muted-foreground/60">
-                <span>Memoria AI</span>
-                <span>v0.2.0</span>
-              </div>
             </div>
           </div>
         ) : (

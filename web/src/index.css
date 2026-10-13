@@ -63,6 +63,12 @@
   #root {
     min-height: 100svh;
   }
+
+  /* Suppress Microsoft Edge / IE built-in reveal and clear buttons on password inputs */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
 }
 
 @keyframes bounce-dot {

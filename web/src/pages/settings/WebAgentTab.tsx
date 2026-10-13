@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
@@ -68,7 +69,7 @@ export default function WebAgentTab({ settings }: WebAgentTabProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">联网搜索专员设置 (WebAgent)</h2>
+          <h2 className="text-xl font-bold tracking-tight">联网搜索设置 (WebAgent)</h2>
           <p className="text-sm text-muted-foreground mt-0.5">配置外部互联网搜索引擎服务商、自建端点与 API 密钥凭据</p>
         </div>
         <Button
@@ -77,7 +78,7 @@ export default function WebAgentTab({ settings }: WebAgentTabProps) {
           className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs cursor-pointer"
         >
           {saved ? <Check className="h-4 w-4 text-emerald-400" /> : <Save className="h-4 w-4" />}
-          {isSaving ? '保存中…' : saved ? '已保存专员配置' : '保存专员配置'}
+          {isSaving ? '保存中…' : saved ? '已保存配置' : '保存配置'}
         </Button>
       </div>
 
@@ -95,7 +96,7 @@ export default function WebAgentTab({ settings }: WebAgentTabProps) {
                 onCheckedChange={checked => setForm(f => ({ ...f, enable_web_search: checked }))}
               />
               <Label htmlFor="enable-webagent-switch" className="text-xs font-medium cursor-pointer">
-                {form.enable_web_search ? '专员已启用' : '专员已停用'}
+                {form.enable_web_search ? '已启用' : '已停用'}
               </Label>
             </div>
           </div>
@@ -112,7 +113,7 @@ export default function WebAgentTab({ settings }: WebAgentTabProps) {
                   Local-First 离线保护中
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  联网搜索专员已处于关闭状态。系统对话与 Agent 决策将 100% 依赖本地私有知识库与已有知识，绝不产生任何外网搜索请求，杜绝模型幻觉与信息泄露风险。
+                  联网搜索功能已处于关闭状态。系统对话与 Agent 决策将 100% 依赖本地私有知识库与已有知识，绝不产生任何外网搜索请求，杜绝模型幻觉与信息泄露风险。
                 </p>
               </div>
             </div>
@@ -176,8 +177,7 @@ export default function WebAgentTab({ settings }: WebAgentTabProps) {
                     <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       API 密钥 (API Key)
                     </Label>
-                    <Input
-                      type="password"
+                    <PasswordInput
                       placeholder={form.web_search_provider === 'tavily' ? 'tvly-xxxxxxxxxxxx' : 'SerpAPI Secret Key'}
                       value={form.web_search_api_key}
                       onChange={e => setForm(f => ({ ...f, web_search_api_key: e.target.value }))}

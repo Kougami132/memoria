@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
@@ -351,7 +352,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
                 <Input placeholder="https://dav.example.com" value={webdavUrl} onChange={e => setWebdavUrl(e.target.value)} className="h-7 text-sm" />
                 <WebDAVPathPicker value={webdavPath} onChange={setWebdavPath} webdavUrl={webdavUrl} webdavUser={webdavUser} webdavPass={webdavPass} />
                 <Input placeholder="用户名" value={webdavUser} onChange={e => setWebdavUser(e.target.value)} className="h-7 text-sm" />
-                <Input placeholder="密码" type="password" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
+                <PasswordInput placeholder="密码" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
                 <WebDAVTestButton webdavUrl={webdavUrl} webdavPath={webdavPath} webdavUser={webdavUser} webdavPass={webdavPass} />
               </>
             )}
@@ -456,7 +457,7 @@ function VaultPanel({ kbId }: { kbId: string }) {
               <Input placeholder="https://dav.example.com" value={webdavUrl} onChange={e => setWebdavUrl(e.target.value)} className="h-7 text-sm" />
               <WebDAVPathPicker value={webdavPath} onChange={setWebdavPath} webdavUrl={webdavUrl} webdavUser={webdavUser} webdavPass={webdavPass} />
               <Input placeholder="用户名" value={webdavUser} onChange={e => setWebdavUser(e.target.value)} className="h-7 text-sm" />
-              <Input placeholder="新密码（留空保留原密码）" type="password" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
+              <PasswordInput placeholder="新密码（留空保留原密码）" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
               <WebDAVTestButton webdavUrl={webdavUrl} webdavPath={webdavPath} webdavUser={webdavUser} webdavPass={webdavPass} />
             </>
           )}
@@ -672,7 +673,7 @@ export default function KnowledgeBases() {
                     <Input placeholder="https://dav.example.com" value={webdavUrl} onChange={e => setWebdavUrl(e.target.value)} className="h-7 text-sm" />
                     <WebDAVPathPicker value={webdavPath} onChange={setWebdavPath} webdavUrl={webdavUrl} webdavUser={webdavUser} webdavPass={webdavPass} />
                     <Input placeholder="用户名" value={webdavUser} onChange={e => setWebdavUser(e.target.value)} className="h-7 text-sm" />
-                    <Input placeholder="密码" type="password" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
+                    <PasswordInput placeholder="密码" value={webdavPass} onChange={e => setWebdavPass(e.target.value)} className="h-7 text-sm" />
                     <WebDAVTestButton webdavUrl={webdavUrl} webdavPath={webdavPath} webdavUser={webdavUser} webdavPass={webdavPass} />
                   </>
                 )}

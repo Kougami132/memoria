@@ -878,3 +878,15 @@ export const logsApi = {
   },
   getSystemLogDownloadUrl: () => `${BASE}/logs/system/download`,
 }
+
+// ------------------------------------------------------------------
+// Health & System Info
+// ------------------------------------------------------------------
+export interface HealthStatus {
+  status: string
+  runtime: string
+  version: string
+}
+
+export const getHealth = () => req<HealthStatus>('/health')
+

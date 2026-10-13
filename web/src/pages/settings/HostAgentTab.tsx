@@ -76,7 +76,7 @@ export default function HostAgentTab({ settings }: HostAgentTabProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">主机运维专员设置 (HostAgent)</h2>
+          <h2 className="text-xl font-bold tracking-tight">主机运维设置 (HostAgent)</h2>
           <p className="text-sm text-muted-foreground mt-0.5">配置受控服务器命令安全审查规则与 CommandGuard 高危硬拦截黑名单</p>
         </div>
         <Button
@@ -85,7 +85,7 @@ export default function HostAgentTab({ settings }: HostAgentTabProps) {
           className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs cursor-pointer"
         >
           {saved ? <Check className="h-4 w-4 text-emerald-400" /> : <Save className="h-4 w-4" />}
-          {isSaving ? '保存中…' : saved ? '已保存专员配置' : '保存专员配置'}
+          {isSaving ? '保存中…' : saved ? '已保存配置' : '保存配置'}
         </Button>
       </div>
 
