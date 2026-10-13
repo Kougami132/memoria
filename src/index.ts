@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
 import { MemoriaAgentRuntime } from "./agent/runtime.ts";
 import { createApp } from "./server/app.ts";
@@ -52,6 +53,11 @@ export async function startServer(port = Number(process.env.PORT || 8000)) {
   return { runtime, app, server };
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`) {
+export function isMainModule(metaUrl: string, argv1 = process.argv[1]): boolean {
+  if (!argv1) return false;
+  return metaUrl === pathToFileURL(resolve(argv1)).href;
+}
+
+if (isMainModule(import.meta.url)) {
   void startServer();
 }

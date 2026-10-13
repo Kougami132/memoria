@@ -59,14 +59,54 @@ export class AppDatabase {
       mkdirSync(dirname(dbPath), { recursive: true });
     }
     this.raw = new DatabaseSync(dbPath);
-    this.raw.exec("PRAGMA journal_mode = WAL");
-    this.raw.exec("PRAGMA synchronous = NORMAL");
-    this.raw.exec("PRAGMA foreign_keys = ON");
-    this.raw.exec("PRAGMA busy_timeout = 5000");
-    this.initSchema();
+    try {
+      try {
+        this.raw.exec("PRAGMA journal_mode = WAL");
+        if (dbPath !== ":memory:") {
+          this.raw.exec("BEGIN IMMEDIATE; COMMIT;");
+        }
+      } catch {
+        this.raw.exec("PRAGMA locking_mode = EXCLUSIVE");
+        this.raw.exec("PRAGMA journal_mode = DELETE");
+        this.raw.exec("PRAGMA locking_mode = NORMAL");
+      }
+      this.raw.exec("PRAGMA synchronous = NORMAL");
+      this.raw.exec("PRAGMA foreign_keys = ON");
+      this.raw.exec("PRAGMA busy_timeout = 5000");
+      this.initSchema();
+    } catch (err) {
+      this.close();
+      throw err;
+    }
+  }
+
+  private hasTable(tableName: string): boolean {
+    const row = this.raw
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(tableName);
+    return Boolean(row);
+  }
+
+  private hasColumn(tableName: string, columnName: string): boolean {
+    if (!this.hasTable(tableName)) return false;
+    const cols = this.raw.prepare(`PRAGMA table_info("${tableName}")`).all() as Array<{ name: string }>;
+    return cols.some((c) => c.name === columnName);
   }
 
   private initSchema(): void {
+    if (this.hasTable("vault_files") && !this.hasColumn("vault_files", "kb_id")) {
+      this.raw.exec("DROP TABLE vault_files");
+    }
+    if (this.hasTable("tasks") && this.hasColumn("tasks", "task_type")) {
+      this.raw.exec("DROP TABLE tasks");
+    }
+    if (this.hasTable("bot_host_links")) {
+      this.raw.exec("DROP TABLE bot_host_links");
+    }
+    if (this.hasTable("bot_kb_links")) {
+      this.raw.exec("DROP TABLE bot_kb_links");
+    }
+
     this.raw.exec(`
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
@@ -216,6 +256,45 @@ export class AppDatabase {
         details TEXT
       );
     `);
+
+    if (this.hasTable("runtime_settings")) {
+      this.raw.exec(`
+        INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+        SELECT "key", value, updated_at FROM runtime_settings
+      `);
+    }
+    if (this.hasTable("api_invocation_logs")) {
+      this.raw.exec(`
+        INSERT OR IGNORE INTO invocation_logs (
+          id, timestamp, endpoint, method, model, status_code, duration_ms,
+          prompt_tokens, completion_tokens, total_tokens, session_id, error_msg
+        )
+        SELECT
+          id, timestamp, endpoint, method, model, status_code, duration_ms,
+          prompt_tokens, completion_tokens, total_tokens, session_id, error_msg
+        FROM api_invocation_logs
+      `);
+    }
+    if (this.hasTable("documents") && this.hasColumn("documents", "kb_id")) {
+      this.raw.exec(`
+        INSERT OR IGNORE INTO kb_documents (id, kb_id, filename, path, source, content, chunk_count, created_at)
+        SELECT id, kb_id, filename, path, source, '', COALESCE(chunk_count, 0), created_at FROM documents;
+        DROP TABLE documents;
+      `);
+    }
+    if (!this.hasColumn("hosts", "default_cwd")) {
+      this.raw.exec("ALTER TABLE hosts ADD COLUMN default_cwd TEXT NOT NULL DEFAULT ''");
+    }
+    if (!this.hasColumn("hosts", "tags_json")) {
+      this.raw.exec("ALTER TABLE hosts ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (this.hasColumn("hosts", "tags")) {
+      this.raw.exec(`
+        UPDATE hosts
+        SET tags_json = COALESCE(tags, '[]')
+        WHERE (tags_json = '[]' OR tags_json = '') AND tags IS NOT NULL AND tags != ''
+      `);
+    }
 
     this.ensureDefaultProvider();
   }

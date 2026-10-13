@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   fauxAssistantMessage,
@@ -9,6 +13,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { MemoriaAgentRuntime } from "../src/agent/runtime.ts";
 import { AppDatabase } from "../src/db/database.ts";
+import { isMainModule } from "../src/index.ts";
 import { createApp } from "../src/server/app.ts";
 
 describe("M1: pi-durable TS Foundation, Multi-Provider Settings, Scope Toggles & Subagent", () => {
@@ -212,5 +217,65 @@ describe("M1: pi-durable TS Foundation, Multi-Provider Settings, Scope Toggles &
     expect(watched).toBeDefined();
     expect(watched!.stream.snapshot.agent.thinkingLevel).toBe("low");
     await watched!.stream.stop();
+  });
+
+  it("detects main module entrypoint across Windows/POSIX absolute and relative argv[1] paths", () => {
+    const entryPath = resolve("src/index.ts");
+    const entryUrl = pathToFileURL(entryPath).href;
+    expect(isMainModule(entryUrl, fileURLToPath(entryUrl))).toBe(true);
+    expect(isMainModule(entryUrl, "src/index.ts")).toBe(true);
+    expect(isMainModule(entryUrl, resolve("src/server/app.ts"))).toBe(false);
+    expect(isMainModule(entryUrl, undefined)).toBe(false);
+  });
+
+  it("migrates legacy v1 SQLite database schema and boots runtime without table conflicts", async () => {
+    const tempDir = mkdtempSync(join("./data", "test-v1-"));
+    const dbPath = join(tempDir, "legacy.db");
+    let migratedDb: AppDatabase | undefined;
+    let migratedRuntime: MemoriaAgentRuntime | undefined;
+    try {
+      const legacy = new DatabaseSync(dbPath);
+      legacy.exec(`
+        CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY);
+        CREATE TABLE runtime_settings ("key" VARCHAR NOT NULL PRIMARY KEY, value VARCHAR NOT NULL, updated_at VARCHAR NOT NULL);
+        INSERT INTO runtime_settings ("key", value, updated_at) VALUES ('llm_model', 'legacy-gpt', '2026-09-01T00:00:00Z');
+        CREATE TABLE hosts (
+          id VARCHAR NOT NULL PRIMARY KEY,
+          name VARCHAR NOT NULL,
+          host VARCHAR NOT NULL,
+          port INTEGER NOT NULL,
+          username VARCHAR NOT NULL,
+          auth_type VARCHAR NOT NULL,
+          credential TEXT,
+          description VARCHAR,
+          tags TEXT,
+          safe_mode INTEGER NOT NULL,
+          security_mode VARCHAR NOT NULL,
+          os_info VARCHAR,
+          status VARCHAR,
+          created_at VARCHAR NOT NULL,
+          updated_at VARCHAR NOT NULL,
+          proxy_url TEXT DEFAULT ''
+        );
+        INSERT INTO hosts VALUES ('h1', 'LegacyHost', '10.0.0.1', 22, 'root', 'password', '', 'desc', '["prod"]', 1, 'ask_confirmation', '', 'inactive', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '');
+        CREATE TABLE knowledge_bases (id VARCHAR NOT NULL PRIMARY KEY, name VARCHAR NOT NULL, description VARCHAR, type VARCHAR NOT NULL, created_at VARCHAR NOT NULL);
+        CREATE TABLE documents (id VARCHAR NOT NULL PRIMARY KEY, kb_id VARCHAR NOT NULL, filename VARCHAR NOT NULL, path VARCHAR NOT NULL, chunk_count INTEGER, source VARCHAR NOT NULL, created_at VARCHAR NOT NULL);
+        CREATE TABLE tasks (id VARCHAR NOT NULL PRIMARY KEY, task_type VARCHAR NOT NULL, payload TEXT NOT NULL, status VARCHAR NOT NULL, created_at VARCHAR NOT NULL, updated_at VARCHAR NOT NULL);
+        CREATE TABLE vault_files (id VARCHAR NOT NULL PRIMARY KEY, vault_id VARCHAR NOT NULL, rel_path VARCHAR NOT NULL, file_hash VARCHAR NOT NULL, doc_id VARCHAR, synced_at VARCHAR NOT NULL);
+      `);
+      legacy.close();
+
+      migratedDb = new AppDatabase(dbPath);
+      migratedRuntime = await MemoriaAgentRuntime.create({ db: migratedDb });
+      expect(migratedRuntime.db.getEffectiveSettings().llm_model).toBe("legacy-gpt");
+      const hosts = migratedRuntime.db.listHosts();
+      expect(hosts).toHaveLength(1);
+      expect(hosts[0]?.name).toBe("LegacyHost");
+      expect(hosts[0]?.tags).toEqual(["prod"]);
+    } finally {
+      await migratedRuntime?.close();
+      migratedDb?.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
