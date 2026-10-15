@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
 import net from "node:net";
+import ssh2, { type ConnectConfig } from "ssh2";
+const { Client } = ssh2;
 import type { HostSecurityMode } from "../../shared/types.ts";
 import { DEFAULT_HOST_DANGEROUS_PATTERNS, type AppDatabase } from "../db/database.ts";
 import { decryptSecret, encryptSecret } from "./crypto.ts";
@@ -38,6 +39,130 @@ export type HostTransportRunner = (
   },
   command: string,
 ) => Promise<HostExecutionOutput>;
+
+export async function executeSshCommand(
+  host: {
+    host: string;
+    port: number;
+    username: string;
+    auth_type: "password" | "key";
+    credential?: string;
+    proxy_url?: string;
+  },
+  command: string,
+  timeoutMs = 15000,
+): Promise<HostExecutionOutput> {
+  let sock: net.Socket | undefined;
+  if (host.proxy_url) {
+    sock = await createProxyTunnelSocket(host.proxy_url, host.host, host.port, Math.min(timeoutMs, 5000));
+  }
+
+  return new Promise((resolve, reject) => {
+    const conn = new Client();
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      try {
+        conn.end();
+        conn.destroy();
+      } catch {
+        // ignore
+      }
+      if (sock && !sock.destroyed) {
+        try {
+          sock.destroy();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const done = (err: Error | null, res?: HostExecutionOutput) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (err) reject(err);
+      else resolve(res!);
+    };
+
+    timer = setTimeout(() => {
+      done(new Error(`SSH 操作超时 (${timeoutMs}ms)`));
+    }, timeoutMs);
+
+    conn.on("ready", () => {
+      conn.exec(command, (err, stream) => {
+        if (err) return done(err);
+        let stdout = "";
+        let stderr = "";
+        stream.on("data", (data: Buffer) => {
+          stdout += data.toString("utf8");
+        });
+        stream.stderr.on("data", (data: Buffer) => {
+          stderr += data.toString("utf8");
+        });
+        stream.on("close", (code: number | null, signal: string | null) => {
+          done(null, {
+            exitCode: typeof code === "number" ? code : (signal ? 128 : 0),
+            stdout,
+            stderr,
+          });
+        });
+        stream.on("error", (streamErr: Error) => {
+          done(streamErr);
+        });
+      });
+    });
+
+    conn.on("error", (err: any) => {
+      if (err?.level === "client-authentication") {
+        done(new Error(`SSH 认证失败: 用户名或密码/私钥错误 (${err.message || "auth failed"})`));
+      } else {
+        done(err);
+      }
+    });
+
+    conn.on("close", () => {
+      if (!settled) {
+        done(new Error("SSH 连接已关闭"));
+      }
+    });
+
+    const connectConfig: ConnectConfig = {
+      username: host.username || "root",
+      readyTimeout: Math.min(timeoutMs, 10000),
+      keepaliveInterval: 5000,
+    };
+
+    if (sock) {
+      connectConfig.sock = sock;
+    } else {
+      connectConfig.host = host.host;
+      connectConfig.port = host.port;
+    }
+
+    if (host.auth_type === "key") {
+      if (host.credential) {
+        connectConfig.privateKey = host.credential;
+      }
+    } else {
+      if (host.credential) {
+        connectConfig.password = host.credential;
+      }
+    }
+
+    if (!host.credential && process.env.SSH_AUTH_SOCK) {
+      connectConfig.agent = process.env.SSH_AUTH_SOCK;
+    }
+
+    try {
+      conn.connect(connectConfig);
+    } catch (err: any) {
+      done(err);
+    }
+  });
+}
 
 export class HostManager {
   readonly db: AppDatabase;
@@ -270,38 +395,26 @@ export class HostManager {
         return { ok: false, status: "error", latency_ms: latency, message: res.stderr || "SSH 命令执行失败" };
       }
 
-      if (host.proxy_url) {
-        const sock = await createProxyTunnelSocket(host.proxy_url, host.host, host.port, 4000);
-        sock.destroy();
-      } else {
-        await new Promise<void>((resolve, reject) => {
-          const sock = net.createConnection({ host: host.host, port: host.port });
-          const timer = setTimeout(() => {
-            sock.destroy();
-            reject(new Error(`连接目标主机 ${host.host}:${host.port} 超时`));
-          }, 3000);
-          sock.once("connect", () => {
-            clearTimeout(timer);
-            sock.destroy();
-            resolve();
-          });
-          sock.once("error", (err) => {
-            clearTimeout(timer);
-            sock.destroy();
-            reject(new Error(`无法连接目标主机 ${host.host}:${host.port}: ${err.message}`));
-          });
-        });
+      const res = await executeSshCommand(host, "uname -sr", 8000);
+      const latency = Math.max(1, Date.now() - start);
+      if (res.exitCode === 0) {
+        const osInfo = res.stdout.trim() || "Linux";
+        this.updateHost(hostId, { status: "active", os_info: osInfo });
+        return {
+          ok: true,
+          status: "active",
+          latency_ms: latency,
+          os_info: osInfo,
+          message: "连接成功",
+        };
       }
 
-      const latency = Math.max(1, Date.now() - start);
-      const osInfo = host.os_info || "SSH Port Reachable";
-      this.updateHost(hostId, { status: "active", os_info: osInfo });
+      this.updateHost(hostId, { status: "error" });
       return {
-        ok: true,
-        status: "active",
+        ok: false,
+        status: "error",
         latency_ms: latency,
-        os_info: osInfo,
-        message: "连接成功",
+        message: res.stderr.trim() || res.stdout.trim() || "SSH 命令执行失败",
       };
     } catch (err: any) {
       const latency = Math.max(1, Date.now() - start);
@@ -355,34 +468,12 @@ export class HostManager {
       return { exitCode: res.exitCode, output: combined };
     }
 
-    // Fallback to system ssh client in non-mock environments
-    return new Promise((resolve, reject) => {
-      const args = [
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "ConnectTimeout=5",
-        "-p",
-        String(host.port),
-        `${host.username}@${host.host}`,
-        finalCmd,
-      ];
-      const proc = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.on("data", (d) => {
-        stdout += d.toString("utf8");
-      });
-      proc.stderr.on("data", (d) => {
-        stderr += d.toString("utf8");
-      });
-      proc.on("error", (err) => reject(err));
-      proc.on("close", (code) => {
-        const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-        resolve({ exitCode: code ?? 1, output: combined });
-      });
-    });
+    try {
+      const res = await executeSshCommand(host, finalCmd);
+      const combined = [res.stdout, res.stderr].filter(Boolean).join("\n").trim();
+      return { exitCode: res.exitCode, output: combined };
+    } catch (err: any) {
+      return { exitCode: 255, output: err?.message || String(err) };
+    }
   }
 }

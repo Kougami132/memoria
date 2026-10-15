@@ -1,4 +1,6 @@
+import { generateKeyPairSync } from "node:crypto";
 import net from "node:net";
+import ssh2 from "ssh2";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -129,6 +131,87 @@ describe("M3: Controlled Hosts, AES-GCM Encryption, Proxy Tunneling & pi-durable
       expect(res2.message).toContain("代理认证失败");
     } finally {
       proxyServer.close();
+    }
+  });
+
+  it("authenticates via ssh2 with password credential and executes command or reports auth failure", async () => {
+    runtime.hostManager.setCustomRunner(undefined);
+
+    const { privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "pkcs1", format: "pem" },
+      privateKeyEncoding: { type: "pkcs1", format: "pem" },
+    });
+
+    const sshServer = new ssh2.Server({ hostKeys: [privateKey] }, (client) => {
+      client
+        .on("authentication", (ctx) => {
+          if (ctx.method === "password" && ctx.username === "root" && ctx.password === "nas-pass-secret") {
+            ctx.accept();
+          } else {
+            ctx.reject(["password"]);
+          }
+        })
+        .on("ready", () => {
+          client.on("session", (accept) => {
+            const session = accept();
+            session.on("exec", (acceptExec, _rejectExec, info) => {
+              const stream = acceptExec();
+              if (info.command === "uname -sr") {
+                stream.write("Linux MockNAS 6.1.0\n");
+              } else {
+                stream.write(`executed: ${info.command}\n`);
+              }
+              stream.exit(0);
+              stream.end();
+            });
+          });
+        });
+    });
+
+    await new Promise<void>((resolve) => sshServer.listen(0, "127.0.0.1", resolve));
+    const sshPort = (sshServer.address() as net.AddressInfo).port;
+
+    try {
+      // 1. Success with valid credentials
+      const validHost = runtime.hostManager.createHost({
+        name: "Valid NAS Host",
+        host: "127.0.0.1",
+        port: sshPort,
+        username: "root",
+        auth_type: "password",
+        credential: "nas-pass-secret",
+      });
+
+      const testOk = await runtime.hostManager.testConnection(validHost.id);
+      expect(testOk.ok).toBe(true);
+      expect(testOk.status).toBe("active");
+      expect(testOk.os_info).toBe("Linux MockNAS 6.1.0");
+
+      const runOk = await runtime.hostManager.runOnHost(validHost.id, "uptime");
+      expect(runOk.exitCode).toBe(0);
+      expect(runOk.output).toContain("executed: uptime");
+
+      // 2. Failure with invalid password
+      const invalidHost = runtime.hostManager.createHost({
+        name: "Invalid NAS Host",
+        host: "127.0.0.1",
+        port: sshPort,
+        username: "root",
+        auth_type: "password",
+        credential: "wrong-password",
+      });
+
+      const testBad = await runtime.hostManager.testConnection(invalidHost.id);
+      expect(testBad.ok).toBe(false);
+      expect(testBad.status).toBe("error");
+      expect(testBad.message).toContain("SSH 认证失败");
+
+      const runBad = await runtime.hostManager.runOnHost(invalidHost.id, "uptime");
+      expect(runBad.exitCode).toBe(255);
+      expect(runBad.output).toContain("SSH 认证失败");
+    } finally {
+      sshServer.close();
     }
   });
 
