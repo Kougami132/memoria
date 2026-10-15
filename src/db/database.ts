@@ -733,6 +733,117 @@ export class AppDatabase {
     return Number(res.changes) > 0;
   }
 
+  truncateConversationEntries(durableId: number, targetEntryId: number, inclusive = true): number {
+    const rows = this.raw
+      .prepare("SELECT id, record FROM entries WHERE conversation_id = ? ORDER BY id ASC")
+      .all(durableId) as Array<{ id: number; record: string }>;
+    if (rows.length === 0) return 0;
+
+    const ids = rows.map((r) => r.id);
+    const idx = ids.indexOf(targetEntryId);
+    if (idx === -1) return 0;
+
+    let startIndex = idx;
+    if (inclusive) {
+      try {
+        const rec = JSON.parse(rows[idx].record);
+        if (rec.kind === "pi.assistant") {
+          let i = idx - 1;
+          while (i >= 0) {
+            const prevRec = JSON.parse(rows[i].record);
+            if (
+              prevRec.kind === "pi.tool-result" ||
+              (prevRec.kind === "pi.assistant" &&
+                prevRec.model?.[0]?.content?.some((b: any) => b.type === "toolCall"))
+            ) {
+              startIndex = i;
+              i--;
+            } else {
+              break;
+            }
+          }
+        }
+      } catch {}
+    } else {
+      startIndex = idx + 1;
+    }
+
+    const targetIds = ids.slice(startIndex);
+    if (targetIds.length === 0) return 0;
+
+    const ph = targetIds.map(() => "?").join(",");
+    this.raw
+      .prepare(`DELETE FROM entries WHERE conversation_id = ? AND id IN (${ph})`)
+      .run(durableId, ...targetIds);
+
+    const subRows = this.raw
+      .prepare("SELECT id, record FROM submissions WHERE conversation_id = ?")
+      .all(durableId) as Array<{ id: number; record: string }>;
+    const subIdsToDelete: number[] = [];
+    for (const sub of subRows) {
+      try {
+        const rec = JSON.parse(sub.record);
+        if (
+          (rec.entry && targetIds.includes(rec.entry)) ||
+          (rec.answer && targetIds.includes(rec.answer)) ||
+          targetIds.includes(sub.id)
+        ) {
+          subIdsToDelete.push(sub.id);
+        }
+      } catch {}
+    }
+    if (subIdsToDelete.length > 0) {
+      const subPh = subIdsToDelete.map(() => "?").join(",");
+      this.raw.prepare(`DELETE FROM submissions WHERE id IN (${subPh})`).run(...subIdsToDelete);
+    }
+
+    const taskRows = this.raw
+      .prepare("SELECT id, record FROM tasks WHERE conversation_id = ?")
+      .all(durableId) as Array<{ id: number; record: string }>;
+    const taskIdsToDelete: number[] = [];
+    for (const task of taskRows) {
+      try {
+        const rec = JSON.parse(task.record);
+        if (
+          targetIds.includes(task.id) ||
+          (rec.checkpoint?.assistant && targetIds.includes(rec.checkpoint.assistant)) ||
+          (rec.checkpoint?.cutoff && targetIds.includes(rec.checkpoint.cutoff))
+        ) {
+          taskIdsToDelete.push(task.id);
+        }
+      } catch {}
+    }
+    if (taskIdsToDelete.length > 0) {
+      const taskPh = taskIdsToDelete.map(() => "?").join(",");
+      this.raw.prepare(`DELETE FROM tasks WHERE id IN (${taskPh})`).run(...taskIdsToDelete);
+    }
+
+    const allDeletedIds = Array.from(new Set([...targetIds, ...subIdsToDelete, ...taskIdsToDelete]));
+    if (allDeletedIds.length > 0) {
+      const allPh = allDeletedIds.map(() => "?").join(",");
+      this.raw.prepare(`DELETE FROM record_ids WHERE id IN (${allPh})`).run(...allDeletedIds);
+    }
+
+    const remainingCount = (
+      this.raw
+        .prepare("SELECT COUNT(*) as c FROM entries WHERE conversation_id = ?")
+        .get(durableId) as { c: number }
+    )?.c ?? 0;
+
+    const now = nowIso();
+    if (remainingCount === 0) {
+      this.raw
+        .prepare("UPDATE app_conversations SET title = '新对话', updated_at = ? WHERE durable_id = ?")
+        .run(now, durableId);
+    } else {
+      this.raw
+        .prepare("UPDATE app_conversations SET updated_at = ? WHERE durable_id = ?")
+        .run(now, durableId);
+    }
+
+    return targetIds.length;
+  }
+
   // ------------------------------------------------------------------
   // Knowledge Bases & Hosts (Metadata for Scope Toggles & Management)
   // ------------------------------------------------------------------

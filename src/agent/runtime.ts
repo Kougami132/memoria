@@ -148,6 +148,7 @@ export class MemoriaAgentRuntime {
           extensions: [extensionsBundle.base, extensionsBundle.subagent],
           progress: { partialIntervalMs: 80, outputIntervalMs: 80 },
           toolExecution: "parallel",
+          contextRetentionMs: 0,
         },
         conversationCreated: async (tx, conv) => {
           const eff = db.getEffectiveSettings();
@@ -374,6 +375,27 @@ export class MemoriaAgentRuntime {
     if (!conv) return false;
     await conv.abort(context, { background: true });
     return true;
+  }
+
+  async truncateConversation(
+    id: string,
+    messageId: string,
+    inclusive = true,
+    context: Context = BACKGROUND_CONTEXT,
+  ): Promise<{ session_id: string; deleted_count: number } | undefined> {
+    const existing = this.db.getConversation(id);
+    if (!existing) return undefined;
+
+    await this.abortConversation(id, context).catch(() => {});
+
+    const rawId = String(messageId).replace(/^msg_/, "").trim();
+    const entryId = Number(rawId);
+    if (Number.isNaN(entryId)) {
+      return { session_id: existing.id, deleted_count: 0 };
+    }
+
+    const deletedCount = this.db.truncateConversationEntries(existing.durableId, entryId, inclusive);
+    return { session_id: existing.id, deleted_count: deletedCount };
   }
 
   async getConversationMessages(

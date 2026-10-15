@@ -228,7 +228,7 @@ export function createMemoriaExtensions(
                 },
                 context,
               );
-              const decision = await hostManager.approvalManager.waitForDecision(approval.id);
+              const decision = await hostManager.approvalManager.waitForDecision(approval.id, context.abortSignal);
               if (decision !== "approved") {
                 return {
                   content: [

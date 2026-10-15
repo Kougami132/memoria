@@ -278,4 +278,96 @@ describe("M1: pi-durable TS Foundation, Multi-Provider Settings, Scope Toggles &
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("truncates conversation messages, supports resend, and aborts with rollback", async () => {
+    faux.setResponses([
+      fauxAssistantMessage([fauxText("World 1")]),
+      fauxAssistantMessage([fauxText("Good 1")]),
+      fauxAssistantMessage([fauxText("Sunny")]),
+    ]);
+
+    const createConvRes = await app.request("/api/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Truncate Test",
+        modelProvider: "faux",
+        modelId: "faux-reasoner",
+      }),
+    });
+    expect(createConvRes.status).toBe(201);
+    const conv = (await createConvRes.json()) as any;
+
+    // Submit Q1
+    await app.request(`/api/conversations/${conv.id}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "Hello", wait: true }),
+    });
+
+    // Submit Q2
+    await app.request(`/api/conversations/${conv.id}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "How are you?", wait: true }),
+    });
+
+    const msgs1Res = await app.request(`/api/conversations/${conv.id}/messages`);
+    expect(msgs1Res.status).toBe(200);
+    const msgs1 = (await msgs1Res.json()) as any[];
+    expect(msgs1).toHaveLength(4);
+
+    // Truncate from Q2 (msgs1[2])
+    const truncRes = await app.request(`/api/conversations/${conv.id}/truncate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: msgs1[2].id, inclusive: true }),
+    });
+    expect(truncRes.status).toBe(200);
+    const truncData = (await truncRes.json()) as any;
+    expect(truncData.deleted_count).toBe(2);
+
+    // Verify messages after truncate
+    const msgs2Res = await app.request(`/api/conversations/${conv.id}/messages`);
+    const msgs2 = (await msgs2Res.json()) as any[];
+    expect(msgs2).toHaveLength(2);
+    expect(msgs2[0].content).toBe("Hello");
+    expect(msgs2[1].content).toBe("World 1");
+
+    // Resend edited Q2
+    await app.request(`/api/conversations/${conv.id}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "How is the weather?", wait: true }),
+    });
+
+    const msgs3Res = await app.request(`/api/conversations/${conv.id}/messages`);
+    const msgs3 = (await msgs3Res.json()) as any[];
+    expect(msgs3).toHaveLength(4);
+    expect(msgs3[2].content).toBe("How is the weather?");
+    expect(msgs3[3].content).toBe("Sunny");
+
+    // Test legacy route alias
+    const legacyTruncRes = await app.request(`/api/agent-sessions/${conv.id}/truncate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: "msg_9999", inclusive: true }),
+    });
+    expect(legacyTruncRes.status).toBe(200);
+    expect((await legacyTruncRes.json()) as any).toEqual({
+      session_id: conv.id,
+      deleted_count: 0,
+    });
+
+    // Test abort with rollback
+    const abortRes = await app.request(`/api/conversations/${conv.id}/abort`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rollback: true, message_id: msgs3[2].id }),
+    });
+    expect(abortRes.status).toBe(200);
+
+    const msgsAfterAbort = (await (await app.request(`/api/conversations/${conv.id}/messages`)).json()) as any[];
+    expect(msgsAfterAbort).toHaveLength(2);
+  });
 });

@@ -612,7 +612,9 @@ export function AgenticChat() {
     setEditingMessageId(null)
     try {
       await api.truncateAgentSession(activeSessionId, { message_id: messageId, inclusive: true })
-      const targetIdx = messages.findIndex((m) => m.id === messageId)
+      const targetIdx = messages.findIndex(
+        (m) => m.id === messageId || m.id === 'msg_' + messageId || 'msg_' + m.id === messageId,
+      )
       const keptMessages = targetIdx >= 0 ? messages.slice(0, targetIdx) : messages
       const userMsg: Message = {
         id: 'temp-' + Date.now(),
@@ -635,7 +637,9 @@ export function AgenticChat() {
 
   const handleRegenerate = async (assistantMsgId: string) => {
     if (!activeSessionId || isResponding) return
-    const targetIdx = messages.findIndex((m) => m.id === assistantMsgId)
+    const targetIdx = messages.findIndex(
+      (m) => m.id === assistantMsgId || m.id === 'msg_' + assistantMsgId || 'msg_' + m.id === assistantMsgId,
+    )
     if (targetIdx < 0) return
 
     // Find preceding user message
@@ -648,9 +652,7 @@ export function AgenticChat() {
     }
     if (!lastUserMsg) return
 
-    await api.truncateAgentSession(activeSessionId, { message_id: assistantMsgId, inclusive: true })
-    setMessages(messages.slice(0, targetIdx))
-    await executeAgentStream(lastUserMsg.content, activeSessionId, lastUserMsg.id)
+    await handleEditAndResend(lastUserMsg.id, lastUserMsg.content)
   }
 
   const handleSteer = async (whenBusy: 'steer' | 'followUp' = 'steer') => {

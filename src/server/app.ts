@@ -562,12 +562,50 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
 
   const abortHandler = async (c: any) => {
     const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
     const aborted = await runtime.abortConversation(id);
     if (!aborted) return c.json({ detail: "Conversation not found" }, 404);
+
+    if (body?.rollback) {
+      const conv = db.getConversation(id);
+      if (conv) {
+        let targetMsgId = body.message_id;
+        if (!targetMsgId) {
+          const msgs = await runtime.getConversationMessages(id);
+          if (msgs && msgs.length > 0) {
+            for (let i = msgs.length - 1; i >= 0; i--) {
+              if (msgs[i].role === "user") {
+                targetMsgId = msgs[i].id;
+                break;
+              }
+            }
+          }
+        }
+        if (targetMsgId) {
+          await runtime.truncateConversation(id, targetMsgId, true);
+        }
+      }
+    }
+
     return c.json({ session_id: id, aborted: true });
   };
   app.post("/api/conversations/:id/abort", abortHandler);
   app.post("/api/agent-sessions/:id/abort", abortHandler);
+  app.post("/api/sessions/:id/abort", abortHandler);
+
+  const truncateHandler = async (c: any) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
+    if (!body?.message_id) {
+      return c.json({ detail: "message_id is required" }, 400);
+    }
+    const res = await runtime.truncateConversation(id, body.message_id, body.inclusive !== false);
+    if (!res) return c.json({ detail: "Conversation not found" }, 404);
+    return c.json(res);
+  };
+  app.post("/api/conversations/:id/truncate", truncateHandler);
+  app.post("/api/agent-sessions/:id/truncate", truncateHandler);
+  app.post("/api/sessions/:id/truncate", truncateHandler);
 
   app.post("/api/conversations/:id/compact", async (c) => {
     const id = c.req.param("id");
