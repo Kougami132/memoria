@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -6,7 +6,7 @@ import { PasswordInput } from '@/components/ui/password-input'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { Plus, ChevronDown, ChevronRight, FileText, Trash2, Upload, Database, FolderOpen, RefreshCw, Unlink, Pencil, Check, X } from 'lucide-react'
+import { Plus, ChevronDown, ChevronRight, FileText, Trash2, Upload, Database, FolderOpen, RefreshCw, Unlink, Pencil, Check, X, Clock } from 'lucide-react'
 import * as api from '@/api'
 
 
@@ -555,6 +555,150 @@ function DocList({ kb }: { kb: api.KB }) {
   )
 }
 
+function VaultSchedulerPopover() {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
+  const { data: schedulerStatus, refetch: refetchScheduler } = useQuery({
+    queryKey: ['vault-scheduler'],
+    queryFn: api.getVaultSchedulerStatus,
+    refetchInterval: open ? 5000 : false,
+  })
+
+  const [intervalVal, setIntervalVal] = useState<string>('')
+  const [saved, setSaved] = useState(false)
+  const [triggering, setTriggering] = useState(false)
+
+  useEffect(() => {
+    if (settings?.vault_sync_interval_minutes) {
+      setIntervalVal(settings.vault_sync_interval_minutes)
+    }
+  }, [settings?.vault_sync_interval_minutes])
+
+  const handleSaveInterval = async () => {
+    const mins = Math.max(1, Number(intervalVal) || 15)
+    try {
+      await api.updateSettings({ vault_sync_interval_minutes: mins })
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      qc.invalidateQueries({ queryKey: ['vault-scheduler'] })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e: any) {
+      alert(`保存失败: ${e.message || e}`)
+    }
+  }
+
+  const handleTriggerAll = async () => {
+    setTriggering(true)
+    try {
+      await api.triggerVaultScheduler()
+      qc.invalidateQueries({ queryKey: ['vault'] })
+      refetchScheduler()
+      setTimeout(() => setTriggering(false), 1500)
+    } catch (e: any) {
+      alert(`触发同步失败: ${e.message || e}`)
+      setTriggering(false)
+    }
+  }
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        className="gap-1.5 rounded-xl border-border text-xs cursor-pointer h-9 px-3"
+      >
+        <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+        <span>定时同步调度</span>
+        {schedulerStatus && schedulerStatus.autoSyncVaultCount > 0 && (
+          <span className="ml-1 px-1.5 py-0.2 rounded-full bg-secondary text-[10px] text-muted-foreground font-mono">
+            {schedulerStatus.autoSyncVaultCount} 仓库
+          </span>
+        )}
+      </Button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-11 z-50 w-80 p-4 rounded-2xl border border-border bg-card shadow-xl text-xs space-y-3.5 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                <Clock className="w-4 h-4 text-primary" />
+                <span>Vault 自动增量同步调度</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                全局后台轮询周期（分钟）
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min="1"
+                  value={intervalVal}
+                  onChange={(e) => setIntervalVal(e.target.value)}
+                  placeholder="15"
+                  className="rounded-xl h-8 text-xs font-mono"
+                />
+                <Button
+                  size="sm"
+                  onClick={handleSaveInterval}
+                  className="rounded-xl h-8 text-xs shrink-0 cursor-pointer"
+                >
+                  {saved ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : '保存'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-muted/40 border border-border/80 space-y-1 text-[11px] text-muted-foreground">
+              <div className="flex justify-between">
+                <span>纳入轮询仓库:</span>
+                <span className="font-semibold text-foreground">
+                  {schedulerStatus?.autoSyncVaultCount ?? 0} 个
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>后台定时器:</span>
+                <span className={schedulerStatus?.running ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
+                  {schedulerStatus?.running ? `运行中 (每 ${schedulerStatus.intervalMinutes} 分钟)` : "未启动"}
+                </span>
+              </div>
+              {schedulerStatus?.lastPollAt && (
+                <div className="flex justify-between">
+                  <span>最近扫描:</span>
+                  <span className="font-mono text-foreground">
+                    {new Date(schedulerStatus.lastPollAt).toLocaleTimeString()}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTriggerAll}
+              disabled={triggering}
+              className="w-full gap-1.5 rounded-xl text-xs h-8 cursor-pointer"
+            >
+              <RefreshCw className={`w-3 h-3 ${triggering ? 'animate-spin' : ''}`} />
+              {triggering ? '正在触发全量扫描…' : '立即执行一次全量扫描'}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function KnowledgeBases() {
   const qc = useQueryClient()
   const { data: kbs = [] } = useQuery({ queryKey: ['kbs'], queryFn: api.listKBs })
@@ -632,15 +776,18 @@ export default function KnowledgeBases() {
 
   return (
     <div className="p-8 w-[860px] max-w-full mx-auto space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">知识库</h1>
           <p className="text-sm text-muted-foreground mt-1">管理文档集合，为机器人提供知识来源</p>
         </div>
-        <Button variant="default" onClick={() => setShowForm(v => !v)} className="gap-2 shrink-0">
-          <Plus className="h-4 w-4" />
-          新建知识库
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <VaultSchedulerPopover />
+          <Button variant="default" onClick={() => setShowForm(v => !v)} className="gap-2 shrink-0">
+            <Plus className="h-4 w-4" />
+            新建知识库
+          </Button>
+        </div>
       </div>
 
       {showForm && (

@@ -275,6 +275,22 @@ export class AppDatabase {
         FROM api_invocation_logs
       `);
     }
+
+    // ADR 0008: Migrate legacy openai_base_url / openai_api_key to embedding_base_url / embedding_api_key
+    try {
+      const legacyUrlRow = this.raw.prepare("SELECT value FROM app_settings WHERE key = 'openai_base_url'").get() as { value: string } | undefined;
+      const newUrlRow = this.raw.prepare("SELECT value FROM app_settings WHERE key = 'embedding_base_url'").get() as { value: string } | undefined;
+      if (legacyUrlRow?.value && !newUrlRow) {
+        this.setSetting("embedding_base_url", legacyUrlRow.value);
+      }
+      const legacyKeyRow = this.raw.prepare("SELECT value FROM app_settings WHERE key = 'openai_api_key'").get() as { value: string } | undefined;
+      const newKeyRow = this.raw.prepare("SELECT value FROM app_settings WHERE key = 'embedding_api_key'").get() as { value: string } | undefined;
+      if (legacyKeyRow?.value && !newKeyRow) {
+        this.setSetting("embedding_api_key", legacyKeyRow.value);
+      }
+    } catch {
+      // ignore
+    }
     if (this.hasTable("documents") && this.hasColumn("documents", "kb_id")) {
       this.raw.exec(`
         INSERT OR IGNORE INTO kb_documents (id, kb_id, filename, path, source, content, chunk_count, created_at)
@@ -332,19 +348,23 @@ export class AppDatabase {
 
   getEffectiveSettings(): SettingsMap {
     const overrides = this.getAllRawSettings();
-    const rawBaseUrl = overrides.openai_base_url || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-    let normalizedUrl = rawBaseUrl.replace(/\/+$/, "");
-    if (!normalizedUrl.endsWith("/v1")) {
-      normalizedUrl += "/v1";
+    const rawEmbedUrl = overrides.embedding_base_url || overrides.openai_base_url || process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+    let normalizedEmbedUrl = rawEmbedUrl.replace(/\/+$/, "");
+    if (!normalizedEmbedUrl.endsWith("/v1") && !normalizedEmbedUrl.includes("anthropic") && !normalizedEmbedUrl.includes("googleapis")) {
+      normalizedEmbedUrl += "/v1";
     }
 
+    const embedApiKey = overrides.embedding_api_key ?? overrides.openai_api_key ?? process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
     const llmModel = overrides.llm_model || process.env.LLM_MODEL || "deepseek-v4-flash";
     const embeddingModel = overrides.embedding_model || process.env.EMBEDDING_MODEL || "text-embedding-3-large";
 
     return {
-      openai_base_url: normalizedUrl,
-      openai_api_key: overrides.openai_api_key ?? process.env.OPENAI_API_KEY ?? "",
+      embedding_base_url: normalizedEmbedUrl,
+      embedding_api_key: embedApiKey,
+      openai_base_url: normalizedEmbedUrl,
+      openai_api_key: embedApiKey,
       external_api_token: overrides.external_api_token ?? process.env.EXTERNAL_API_TOKEN ?? "",
+      embedding_provider: overrides.embedding_provider || overrides.default_provider || "default",
       embedding_model: embeddingModel,
       llm_model: llmModel,
       default_provider: overrides.default_provider || "default",
@@ -430,34 +450,7 @@ export class AppDatabase {
   }
 
   syncDefaultProviderFromSettings(): void {
-    const eff = this.getEffectiveSettings();
-    const row = this.raw
-      .prepare("SELECT models_json FROM model_providers WHERE id = 'default'")
-      .get() as { models_json: string } | undefined;
-    let models: Array<{ id: string; name?: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number }> = [];
-    if (row) {
-      try {
-        models = JSON.parse(row.models_json);
-      } catch {
-        models = [];
-      }
-    }
-    if (!models.some((m) => m.id === eff.llm_model)) {
-      models.unshift({
-        id: eff.llm_model,
-        name: eff.llm_model,
-        reasoning: true,
-        contextWindow: 128000,
-        maxTokens: 8192,
-      });
-    }
-    this.raw
-      .prepare(
-        `UPDATE model_providers
-         SET base_url = ?, api_key = ?, models_json = ?, updated_at = ?
-         WHERE id = 'default'`,
-      )
-      .run(eff.openai_base_url, eff.openai_api_key, JSON.stringify(models), nowIso());
+    // Deprecated per ADR 0008: Providers are now managed independently without implicit overrides.
   }
 
   listProviders(includeRawSecrets = false): ModelProviderConfig[] {
@@ -575,16 +568,7 @@ export class AppDatabase {
         );
     }
 
-    if (id === "default") {
-      this.setSetting("openai_base_url", baseUrl);
-      if (resolvedKey) {
-        this.setSetting("openai_api_key", resolvedKey);
-      }
-      if (models.length > 0 && models[0]?.id) {
-        this.setSetting("llm_model", models[0].id);
-      }
-    }
-
+    // ADR 0008: Provider configs are now completely decoupled from embedding settings.
     return this.listProviders(false).find((p) => p.id === id)!;
   }
 

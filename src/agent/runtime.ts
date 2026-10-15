@@ -163,6 +163,9 @@ export class MemoriaAgentRuntime {
     );
 
     harness.resume();
+    const eff = db.getEffectiveSettings();
+    vaultManager.startPolling(Number(eff.vault_sync_interval_minutes) || 15);
+
     return new MemoriaAgentRuntime(
       db,
       pipeline,

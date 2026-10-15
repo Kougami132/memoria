@@ -209,10 +209,86 @@ export class VaultManager {
   readonly db: AppDatabase;
   readonly pipeline: HybridRagPipeline;
   private readonly cancelControllers = new Map<string, AbortController>();
+  private pollingTimer?: NodeJS.Timeout;
+  private pollingIntervalMinutes: number = 15;
+  private isPollingActive: boolean = false;
+  private lastPollAt?: string;
 
   constructor(db: AppDatabase, pipeline: HybridRagPipeline) {
     this.db = db;
     this.pipeline = pipeline;
+  }
+
+  startPolling(intervalMinutes?: number): void {
+    if (intervalMinutes && intervalMinutes > 0) {
+      this.pollingIntervalMinutes = intervalMinutes;
+    }
+    this.stopPolling();
+    const intervalMs = Math.max(1, this.pollingIntervalMinutes) * 60 * 1000;
+    this.pollingTimer = setInterval(() => {
+      void this.runPollCycle().catch((err) => {
+        console.warn("[VaultScheduler] Uncaught error in poll cycle:", err);
+      });
+    }, intervalMs);
+    // Don't keep the Node.js event loop alive if everything else exits
+    this.pollingTimer.unref();
+  }
+
+  stopPolling(): void {
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = undefined;
+    }
+  }
+
+  setPollingInterval(minutes: number): void {
+    const validMinutes = Math.max(1, Number(minutes) || 15);
+    this.pollingIntervalMinutes = validMinutes;
+    if (this.pollingTimer) {
+      this.startPolling(validMinutes);
+    }
+  }
+
+  getSchedulerStatus(): {
+    running: boolean;
+    intervalMinutes: number;
+    isPollingActive: boolean;
+    lastPollAt?: string;
+    autoSyncVaultCount: number;
+  } {
+    const row = this.db.raw
+      .prepare("SELECT COUNT(*) as count FROM vaults WHERE auto_sync = 1")
+      .get() as { count: number } | undefined;
+    return {
+      running: Boolean(this.pollingTimer),
+      intervalMinutes: this.pollingIntervalMinutes,
+      isPollingActive: this.isPollingActive,
+      lastPollAt: this.lastPollAt,
+      autoSyncVaultCount: Number(row?.count || 0),
+    };
+  }
+
+  async runPollCycle(): Promise<void> {
+    if (this.isPollingActive) {
+      return;
+    }
+    this.isPollingActive = true;
+    try {
+      const candidates = this.db.raw
+        .prepare("SELECT kb_id, id FROM vaults WHERE auto_sync = 1 AND syncing = 0")
+        .all() as Array<{ kb_id: string; id: string }>;
+
+      for (const item of candidates) {
+        try {
+          await this.syncVault(item.kb_id);
+        } catch (err) {
+          console.warn(`[VaultScheduler] Periodic sync failed for vault ${item.id} (kb: ${item.kb_id}):`, err);
+        }
+      }
+      this.lastPollAt = nowIso();
+    } finally {
+      this.isPollingActive = false;
+    }
   }
 
   getVaultByKb(kbId: string, includeSecret = false): Record<string, any> | undefined {

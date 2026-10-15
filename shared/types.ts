@@ -59,9 +59,12 @@ export interface AvailableModelOption {
 }
 
 export interface SettingsMap {
+  embedding_base_url: string;
+  embedding_api_key: string;
   openai_base_url: string;
   openai_api_key: string;
   external_api_token: string;
+  embedding_provider: string;
   embedding_model: string;
   llm_model: string;
   default_provider: string;

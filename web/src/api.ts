@@ -250,9 +250,12 @@ export interface QQBotEventsResponse {
 }
 
 export interface Settings {
+  embedding_base_url?: string
+  embedding_api_key?: string
   openai_base_url: string
   openai_api_key: string
   external_api_token: string
+  embedding_provider?: string
   embedding_model: string
   llm_model: string
   default_provider?: string
@@ -271,9 +274,12 @@ export interface Settings {
 }
 
 export interface SettingsUpdate {
+  embedding_base_url?: string
+  embedding_api_key?: string
   openai_base_url?: string
   api_key?: string
   external_api_token?: string
+  embedding_provider?: string
   embedding_model?: string
   llm_model?: string
   default_provider?: string
@@ -289,6 +295,14 @@ export interface SettingsUpdate {
   web_search_provider?: string
   web_search_api_key?: string
   web_search_endpoint?: string
+}
+
+export interface VaultSchedulerStatus {
+  running: boolean
+  intervalMinutes: number
+  isPollingActive: boolean
+  lastPollAt?: string
+  autoSyncVaultCount: number
 }
 
 // ------------------------------------------------------------------
@@ -642,7 +656,15 @@ export interface QQSettingsUpdate {
 export const getSettings = () => req<Settings>('/settings')
 export const updateSettings = (data: SettingsUpdate) =>
   req<Settings>('/settings', { method: 'PUT', ...json(data) })
-export const fetchModels = (data?: { openai_base_url?: string; api_key?: string }) =>
+export const fetchModels = (data?: {
+  providerId?: string
+  baseUrl?: string
+  api_key?: string
+  apiKey?: string
+  openai_base_url?: string
+  embedding_base_url?: string
+  embedding_api_key?: string
+}) =>
   req<{ models: string[] }>('/settings/fetch-models', {
     method: 'POST',
     ...json(data || {}),
@@ -650,18 +672,28 @@ export const fetchModels = (data?: { openai_base_url?: string; api_key?: string 
 export const testEmbedding = (data?: {
   openai_base_url?: string
   api_key?: string
+  embedding_base_url?: string
+  embedding_api_key?: string
+  embedding_provider?: string
   embedding_model?: string
 }) =>
-  req<{ ok: boolean; dimensions: number }>('/settings/test-embedding', {
+  req<{ ok: boolean; dimensions: number; elapsed_ms?: number }>('/settings/test-embedding', {
     method: 'POST',
     ...json(data || {}),
   })
+export const getVaultSchedulerStatus = () => req<VaultSchedulerStatus>('/vaults/scheduler')
+export const triggerVaultScheduler = () =>
+  req<{ ok: boolean; message: string }>('/vaults/scheduler/trigger', { method: 'POST' })
 export const testChat = (data?: {
+  providerId?: string
+  modelId?: string
+  baseUrl?: string
+  apiKey?: string
   openai_base_url?: string
   api_key?: string
   llm_model?: string
 }) =>
-  req<{ ok: boolean; elapsed_ms: number }>('/settings/test-chat', {
+  req<{ ok: boolean; elapsed_ms: number; detail?: string }>('/settings/test-chat', {
     method: 'POST',
     ...json(data || {}),
   })

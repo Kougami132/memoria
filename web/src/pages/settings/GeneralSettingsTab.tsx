@@ -1,18 +1,24 @@
 import { useState, useEffect, useRef } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Save, Check, FlaskConical, KeyRound, MessageSquareCode, RefreshCw, Download, Database, Upload, AlertCircle, Plus, Trash2, Layers } from 'lucide-react'
+import {
+  Save,
+  Check,
+  MessageSquareCode,
+  Download,
+  Database,
+  Upload,
+  AlertCircle,
+  ShieldCheck,
+  Copy,
+  Wand2,
+} from 'lucide-react'
 import * as api from '@/api'
-import type { Settings, SettingsUpdate, ProviderProtocol } from '@/api'
-
-type TestState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
-type FetchState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; msg: string } | { status: 'err'; msg: string }
+import type { Settings, SettingsUpdate } from '@/api'
 
 interface GeneralSettingsTabProps {
   settings?: Settings
@@ -23,102 +29,36 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
   const [form, setForm] = useState<Partial<Record<string, string>>>({})
   const [saved, setSaved] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [availableModels, setAvailableModels] = useState<string[]>([])
-  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' })
-  const [embedTest, setEmbedTest] = useState<TestState>({ status: 'idle' })
-  const [chatTest, setChatTest] = useState<TestState>({ status: 'idle' })
-  const [backupRestoreState, setBackupRestoreState] = useState<{ status: 'idle' | 'loading' | 'success' | 'error'; msg: string }>({ status: 'idle', msg: '' })
+  const [copiedCurl, setCopiedCurl] = useState(false)
+  const [backupRestoreState, setBackupRestoreState] = useState<{
+    status: 'idle' | 'loading' | 'success' | 'error'
+    msg: string
+  }>({ status: 'idle', msg: '' })
 
-  const { data: providers = [] } = useQuery({
-    queryKey: ['providers'],
-    queryFn: api.listProviders,
-  })
-  const [newProvName, setNewProvName] = useState('')
-  const [newProvProtocol, setNewProvProtocol] = useState<ProviderProtocol>('openai-completions')
-  const [newProvBaseUrl, setNewProvBaseUrl] = useState('')
-  const [newProvApiKey, setNewProvApiKey] = useState('')
-  const [newProvModelsText, setNewProvModelsText] = useState('')
-
-  const handleAddProvider = async () => {
-    if (!newProvName.trim() || !newProvBaseUrl.trim()) return
-    const models = newProvModelsText
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((id) => ({ id, name: id, reasoning: true }))
-    try {
-      await api.createProvider({
-        name: newProvName.trim(),
-        protocol: newProvProtocol,
-        baseUrl: newProvBaseUrl.trim(),
-        apiKey: newProvApiKey.trim(),
-        enabled: true,
-        models,
-      })
-      setNewProvName('')
-      setNewProvBaseUrl('')
-      setNewProvApiKey('')
-      setNewProvModelsText('')
-      qc.invalidateQueries({ queryKey: ['providers'] })
-      qc.invalidateQueries({ queryKey: ['available-models'] })
-    } catch (e: any) {
-      alert(`添加渠道失败: ${e.message || e}`)
-    }
-  }
-
-  const handleDeleteProvider = async (id: string) => {
-    try {
-      await api.deleteProvider(id)
-      qc.invalidateQueries({ queryKey: ['providers'] })
-      qc.invalidateQueries({ queryKey: ['available-models'] })
-    } catch (e: any) {
-      alert(`删除渠道失败: ${e.message || e}`)
-    }
-  }
-
-  const initialBaselineRef = useRef<{ openai_api_key?: string; external_api_token?: string }>({})
+  const initialBaselineRef = useRef<{ external_api_token?: string }>({})
   const hasInitializedRef = useRef(false)
 
   useEffect(() => {
     if (settings && !hasInitializedRef.current) {
       hasInitializedRef.current = true
       initialBaselineRef.current = {
-        openai_api_key: settings.openai_api_key,
         external_api_token: settings.external_api_token,
       }
       setForm({
-        openai_base_url: settings.openai_base_url ?? '',
-        openai_api_key: settings.openai_api_key ?? '',
         external_api_token: settings.external_api_token ?? '',
-        embedding_model: settings.embedding_model ?? '',
-        llm_model: settings.llm_model ?? '',
         system_prompt: settings.system_prompt ?? '',
-        vault_sync_interval_minutes: settings.vault_sync_interval_minutes ?? '15',
       })
-      const initialModels = new Set<string>()
-      if (settings.embedding_model) initialModels.add(settings.embedding_model)
-      if (settings.llm_model) initialModels.add(settings.llm_model)
-      if (initialModels.size > 0) {
-        setAvailableModels(Array.from(initialModels))
-      }
     }
   }, [settings])
 
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-    setForm(f => ({ ...f, [key]: e.target.value }))
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const handleSave = async () => {
     setIsSaving(true)
     try {
       const payload: SettingsUpdate = {
-        openai_base_url: form.openai_base_url,
-        embedding_model: form.embedding_model,
-        llm_model: form.llm_model,
         system_prompt: form.system_prompt,
-        vault_sync_interval_minutes: form.vault_sync_interval_minutes ? Number(form.vault_sync_interval_minutes) : undefined,
-      }
-      if (form.openai_api_key !== initialBaselineRef.current.openai_api_key) {
-        payload.api_key = form.openai_api_key
       }
       if (form.external_api_token !== initialBaselineRef.current.external_api_token) {
         payload.external_api_token = form.external_api_token
@@ -126,7 +66,6 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
 
       await api.updateSettings(payload)
       initialBaselineRef.current = {
-        openai_api_key: form.openai_api_key,
         external_api_token: form.external_api_token,
       }
       qc.invalidateQueries({ queryKey: ['settings'] })
@@ -140,48 +79,31 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
     }
   }
 
-  const handleFetchModels = async () => {
-    const baseUrl = form.openai_base_url || ''
-    if (!baseUrl.trim()) {
-      setFetchState({ status: 'err', msg: '请先填写 API Base URL' })
-      return
+  const handleGenerateSecureToken = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    let rand = ''
+    const array = new Uint8Array(24)
+    crypto.getRandomValues(array)
+    for (let i = 0; i < array.length; i++) {
+      rand += chars[array[i] % chars.length]
     }
-    setFetchState({ status: 'loading' })
-    try {
-      const res = await api.fetchModels({
-        openai_base_url: form.openai_base_url,
-        api_key: form.openai_api_key !== initialBaselineRef.current.openai_api_key ? form.openai_api_key : undefined,
-      })
-      const list = res.models || []
-      const combined = Array.from(new Set([
-        ...(form.embedding_model ? [form.embedding_model] : []),
-        ...(form.llm_model ? [form.llm_model] : []),
-        ...list,
-      ]))
-      setAvailableModels(combined)
-      setFetchState({ status: 'ok', msg: `成功获取 ${list.length} 个模型` })
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setFetchState({ status: 'err', msg: `获取模型失败: ${msg}` })
-    }
+    const token = `memoria_sec_${rand}`
+    setForm((f) => ({ ...f, external_api_token: token }))
   }
 
-  const runTest = (fn: () => Promise<{ ok: boolean; dimensions?: number; elapsed_ms?: number }>,
-                   setTest: (s: TestState) => void) => async () => {
-    setTest({ status: 'loading' })
-    try {
-      const r = await fn()
-      setTest({ status: 'ok', msg: r.dimensions != null ? `✓ 连接正常 (${r.dimensions}维)` : `✓ 响应成功 (${r.elapsed_ms}ms)` })
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setTest({ status: 'err', msg: `✗ ${msg}` })
-    }
+  const handleCopyCurl = () => {
+    const origin = window.location.origin
+    const token = form.external_api_token ? form.external_api_token : 'YOUR_TOKEN'
+    const snippet = `curl -X POST "${origin}/v1/chat/completions" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${token}" \\\n  -d '{\n    "model": "${settings?.llm_model || 'deepseek-v4-flash'}",\n    "messages": [{"role": "user", "content": "你好"}]\n  }'`
+    navigator.clipboard.writeText(snippet)
+    setCopiedCurl(true)
+    setTimeout(() => setCopiedCurl(false), 2500)
   }
 
   const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!confirm('恢复备份将覆盖当前系统的数据库、向量库(Chroma)及上传文件。确认继续导入？')) {
+    if (!confirm('恢复备份将覆盖当前系统的数据库、向量检索切片及上传文件。确认继续导入？')) {
       e.target.value = ''
       return
     }
@@ -190,7 +112,7 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
       const res = await api.importBackup(file)
       setBackupRestoreState({
         status: 'success',
-        msg: `恢复成功！恢复了 ${res.kbs_count} 个知识库，${res.vaults_count} 个笔记仓库。若新机网络或挂载路径变动，请至知识库管理页修改 Vault 配置。`
+        msg: `恢复成功！恢复了 ${res.kbs_count} 个知识库，${res.vaults_count} 个笔记仓库。若新机网络或挂载路径变动，请至知识库管理页修改 Vault 配置。`,
       })
       qc.invalidateQueries()
     } catch (err: any) {
@@ -200,288 +122,86 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
     }
   }
 
-  const testBadge = (s: TestState) => {
-    if (s.status === 'idle') return null
-    if (s.status === 'loading') return <span className="text-xs text-muted-foreground">测试中…</span>
-    if (s.status === 'ok') return <span className="text-xs text-emerald-600 dark:text-emerald-400 break-all">{s.msg}</span>
-    return <span className="text-xs text-destructive break-all">{s.msg}</span>
-  }
-
-  const fetchBadge = (s: FetchState) => {
-    if (s.status === 'idle') return null
-    if (s.status === 'loading') return <span className="text-xs text-muted-foreground">获取模型中…</span>
-    if (s.status === 'ok') return <span className="text-xs text-emerald-600 dark:text-emerald-400 break-all">{s.msg}</span>
-    return <span className="text-xs text-destructive break-all">{s.msg}</span>
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">全局基础设置</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">配置大模型服务商、外部鉴权凭据、通用提示词及数据冷备份</p>
+          <h2 className="text-xl font-bold tracking-tight">通用与安全设置</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            管理外部 API 接入安全鉴权、系统通用提示词及全量数据冷备份
+          </p>
         </div>
         <Button
           onClick={handleSave}
           disabled={isSaving}
-          className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs"
+          className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs cursor-pointer"
         >
           {saved ? <Check className="h-4 w-4 text-emerald-400" /> : <Save className="h-4 w-4" />}
-          {isSaving ? '保存中…' : saved ? '已保存全局设置' : '保存全局设置'}
+          {isSaving ? '保存中…' : saved ? '已保存' : '保存'}
         </Button>
       </div>
 
+      {/* 1. 外部 API 访问凭据 (External API Security) */}
       <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4 text-foreground" />
-            <CardTitle className="text-base font-semibold">API 与模型服务</CardTitle>
+            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <CardTitle className="text-base font-semibold">外部 API 访问凭据 (External API Security)</CardTitle>
           </div>
-          <CardDescription>兼容 OpenAI 规范的任何大模型与向量嵌入服务接口</CardDescription>
+          <CardDescription>
+            供第三方工具（如 NextChat、沉浸式翻译、Raycast、OpenWebUI 或移动端快捷指令）通过 Bearer Token 访问本系统 <code>/v1/chat/completions</code> 统一智能体服务
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL (API 地址)</Label>
-            <Input
-              placeholder="https://api.openai.com/v1"
-              value={form.openai_base_url ?? ''}
-              onChange={set('openai_base_url')}
-              className="rounded-xl border-border bg-background"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key (密钥)</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                外部鉴权 Bearer Token
+              </Label>
+              <button
+                type="button"
+                onClick={handleGenerateSecureToken}
+                className="text-xs text-primary hover:underline flex items-center gap-1 cursor-pointer font-medium"
+              >
+                <Wand2 className="w-3 h-3" />
+                生成随机高强度 Token
+              </button>
+            </div>
             <PasswordInput
-              placeholder="sk-…"
-              value={form.openai_api_key ?? ''}
-              onChange={set('openai_api_key')}
-              className="rounded-xl border-border bg-background font-mono text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">外部 API Token (Bearer)</Label>
-            <PasswordInput
-              placeholder="留空则不启用认证"
+              placeholder="留空则不启用外部身份认证（允许任意匿名调用）"
               value={form.external_api_token ?? ''}
               onChange={set('external_api_token')}
               className="rounded-xl border-border bg-background font-mono text-sm"
             />
+            <p className="text-[11px] text-muted-foreground">
+              {form.external_api_token
+                ? '已配置鉴权 Token：所有外部客户端在请求 /v1 接口时必须在 HTTP 请求头中附带 Authorization: Bearer <Token>'
+                : '当前未配置 Token：外部请求无需验证身份即可直接调用'}
+            </p>
           </div>
 
-          <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleFetchModels}
-                disabled={fetchState.status === 'loading'}
-                className="gap-1.5 rounded-xl border-border text-xs"
-              >
-                <Download className="h-3.5 w-3.5" />
-                {fetchState.status === 'loading' ? '获取模型中…' : '获取模型列表'}
-              </Button>
-              {fetchBadge(fetchState)}
-            </div>
-            {availableModels.length > 0 && (
-              <span className="text-xs text-muted-foreground">
-                已加载 {availableModels.length} 个可用模型
-              </span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量嵌入模型</Label>
-              <div className="flex gap-2 items-center">
-                <div className="flex-1">
-                  <Select
-                    value={form.embedding_model ?? ''}
-                    onValueChange={val => setForm(f => ({ ...f, embedding_model: val }))}
-                    disabled={availableModels.length === 0}
-                  >
-                    <SelectTrigger className="rounded-xl border-border bg-background font-mono text-xs h-9">
-                      <SelectValue placeholder={availableModels.length === 0 ? "请先点击获取模型列表" : "从列表中选择嵌入模型"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableModels.map(m => (
-                        <SelectItem key={m} value={m} className="font-mono text-xs">
-                          {m}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs h-9"
-                  disabled={embedTest.status === 'loading' || !form.embedding_model}
-                  onClick={runTest(
-                    () =>
-                      api.testEmbedding({
-                        openai_base_url: form.openai_base_url,
-                        api_key: form.openai_api_key !== initialBaselineRef.current.openai_api_key ? form.openai_api_key : undefined,
-                        embedding_model: form.embedding_model,
-                      }),
-                    setEmbedTest
-                  )}
-                >
-                  <FlaskConical className="h-3.5 w-3.5" />
-                  测试
-                </Button>
-              </div>
-              {testBadge(embedTest)}
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">对话生成模型</Label>
-              <div className="flex gap-2 items-center">
-                <div className="flex-1">
-                  <Select
-                    value={form.llm_model ?? ''}
-                    onValueChange={val => setForm(f => ({ ...f, llm_model: val }))}
-                    disabled={availableModels.length === 0}
-                  >
-                    <SelectTrigger className="rounded-xl border-border bg-background font-mono text-xs h-9">
-                      <SelectValue placeholder={availableModels.length === 0 ? "请先点击获取模型列表" : "从列表中选择对话模型"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableModels.map(m => (
-                        <SelectItem key={m} value={m} className="font-mono text-xs">
-                          {m}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 gap-1.5 rounded-xl border-border text-xs h-9"
-                  disabled={chatTest.status === 'loading' || !form.llm_model}
-                  onClick={runTest(
-                    () =>
-                      api.testChat({
-                        openai_base_url: form.openai_base_url,
-                        api_key: form.openai_api_key !== initialBaselineRef.current.openai_api_key ? form.openai_api_key : undefined,
-                        llm_model: form.llm_model,
-                      }),
-                    setChatTest
-                  )}
-                >
-                  <FlaskConical className="h-3.5 w-3.5" />
-                  测试
-                </Button>
-              </div>
-              {testBadge(chatTest)}
-            </div>
+          <div className="pt-2 flex items-center justify-between border-t border-border">
+            <span className="text-xs text-muted-foreground">需要接入指南或调试命令？</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleCopyCurl}
+              className="gap-1.5 rounded-xl border-border text-xs cursor-pointer"
+            >
+              {copiedCurl ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedCurl ? '已复制调试命令' : '复制 cURL 请求示例'}
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="rounded-2xl border-border bg-card shadow-xs">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-foreground" />
-            <CardTitle className="text-base font-semibold">多模型渠道管理 (pi-ai Providers)</CardTitle>
-          </div>
-          <CardDescription>
-            配置多个大模型厂商渠道（OpenAI 兼容 / Anthropic / Google Gemini），在 AI Agent 会话顶部随时切换模型与思考深度
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            {providers.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border bg-muted/20 text-xs"
-              >
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-foreground">{p.name}</span>
-                    <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-mono text-[10px]">
-                      {p.protocol}
-                    </span>
-                  </div>
-                  <div className="text-muted-foreground font-mono truncate">{p.baseUrl}</div>
-                  <div className="text-muted-foreground">
-                    模型: {p.models.map((m) => m.id).join(', ') || '未配置'}
-                  </div>
-                </div>
-                {p.id !== 'default' && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => void handleDeleteProvider(p.id)}
-                    className="text-muted-foreground hover:text-destructive shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="pt-3 border-t border-border space-y-3">
-            <div className="text-xs font-semibold text-muted-foreground">新增模型渠道</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                placeholder="渠道名称 (如: Anthropic / DeepSeek)"
-                value={newProvName}
-                onChange={(e) => setNewProvName(e.target.value)}
-                className="rounded-xl text-xs"
-              />
-              <select
-                value={newProvProtocol}
-                onChange={(e) => setNewProvProtocol(e.target.value as ProviderProtocol)}
-                className="rounded-xl border border-border bg-background px-3 py-2 text-xs"
-              >
-                <option value="openai-completions">OpenAI Completions (/v1/chat/completions)</option>
-                <option value="openai-responses">OpenAI Responses (/v1/responses)</option>
-                <option value="anthropic-messages">Anthropic Messages (Claude)</option>
-                <option value="google-generative-ai">Google Generative AI (Gemini)</option>
-              </select>
-              <Input
-                placeholder="Base URL (如: https://api.anthropic.com)"
-                value={newProvBaseUrl}
-                onChange={(e) => setNewProvBaseUrl(e.target.value)}
-                className="rounded-xl text-xs font-mono"
-              />
-              <PasswordInput
-                placeholder="API Key"
-                value={newProvApiKey}
-                onChange={(e) => setNewProvApiKey(e.target.value)}
-                className="rounded-xl text-xs font-mono"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Input
-                placeholder="模型 ID 列表，逗号分隔 (如: claude-sonnet-4-5, claude-opus-4-5)"
-                value={newProvModelsText}
-                onChange={(e) => setNewProvModelsText(e.target.value)}
-                className="rounded-xl text-xs font-mono flex-1"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void handleAddProvider()}
-                disabled={!newProvName.trim() || !newProvBaseUrl.trim()}
-                className="rounded-xl gap-1 text-xs shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                添加渠道
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* 2. 系统通用提示词 */}
       <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
             <MessageSquareCode className="w-4 h-4 text-foreground" />
-            <CardTitle className="text-base font-semibold">系统通用提示词</CardTitle>
+            <CardTitle className="text-base font-semibold">系统通用提示词 (System Prompt)</CardTitle>
           </div>
           <CardDescription>用于未单独配置系统提示词的对话与兜底处理</CardDescription>
         </CardHeader>
@@ -496,29 +216,7 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
         </CardContent>
       </Card>
 
-      <Card className="rounded-2xl border-border bg-card shadow-xs">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2">
-            <RefreshCw className="w-4 h-4 text-foreground" />
-            <CardTitle className="text-base font-semibold">Vault 笔记库同步</CardTitle>
-          </div>
-          <CardDescription>Obsidian / 本地 Markdown 笔记的自动增量同步设置</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5 max-w-xs">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">同步间隔（分钟）</Label>
-            <Input
-              type="number"
-              min="1"
-              placeholder="15"
-              value={form.vault_sync_interval_minutes ?? ''}
-              onChange={set('vault_sync_interval_minutes')}
-              className="rounded-xl border-border bg-background"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* 3. 系统数据迁移与冷备份 */}
       <Card className="rounded-2xl border-border bg-card shadow-xs">
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
@@ -526,7 +224,7 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
             <CardTitle className="text-base font-semibold">系统数据迁移与冷备份</CardTitle>
           </div>
           <CardDescription>
-            完整打包 SQLite 数据库、向量数据库(Chroma)和上传文档，用于跨机器无损迁移并保留 Embedding 结果
+            完整打包 SQLite 数据库、向量检索数据及上传文档，用于跨机器无损迁移并保留 Embedding 结果
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -566,19 +264,21 @@ export default function GeneralSettingsTab({ settings }: GeneralSettingsTabProps
           </div>
 
           {backupRestoreState.status !== 'idle' && (
-            <div className={`p-3 rounded-xl text-xs border flex items-start gap-2 ${
-              backupRestoreState.status === 'loading'
-                ? 'bg-muted/50 border-border text-foreground'
-                : backupRestoreState.status === 'success'
-                ? 'bg-emerald-50/50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800 dark:text-emerald-300'
-                : 'bg-destructive/10 border-destructive/30 text-destructive'
-            }`}>
+            <div
+              className={`p-3 rounded-xl text-xs border flex items-start gap-2 ${
+                backupRestoreState.status === 'loading'
+                  ? 'bg-muted/50 border-border text-foreground'
+                  : backupRestoreState.status === 'success'
+                  ? 'bg-emerald-50/50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800 dark:text-emerald-300'
+                  : 'bg-destructive/10 border-destructive/30 text-destructive'
+              }`}
+            >
               {backupRestoreState.status === 'success' ? (
                 <Check className="w-4 h-4 shrink-0 mt-0.5" />
               ) : backupRestoreState.status === 'error' ? (
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               ) : (
-                <RefreshCw className="w-4 h-4 shrink-0 mt-0.5 animate-spin" />
+                <Database className="w-4 h-4 shrink-0 mt-0.5 animate-spin" />
               )}
               <span>{backupRestoreState.msg}</span>
             </div>

@@ -35,7 +35,10 @@
 | **主机代理连接** | `HostProxy` (`proxy_url`) | 为受管主机建立的出口隧道，支持 `http://`、`https://`、`socks5://`、`socks5h://`（默认远程 DNS 解析），凭据经 AES-256-GCM 加密存储并脱敏回显。 |
 | **主机安全模式** | `SecurityMode` | 主机安全等级：`read_only`（仅白名单只读）、`ask_confirmation`（交互审批挂起）、`unrestricted`（非高危黑名单直接执行）。 |
 | **安全审批流** | `ApprovalFlow` | 命中需确认指令时，工具任务通过 `api.details()` 发布待审批单并挂起等待，由管理员在 Web 或 QQ 会话中批准或拒绝后恢复执行。 |
-| **模型渠道** | `ModelProvider` | 在系统设置中配置的 LLM 与 Embedding 服务商端点、API 密钥及可用模型列表。 |
+| **模型渠道** | `ModelProvider` | 在系统设置中配置的 LLM 对话厂商端点（OpenAI 兼容 / Anthropic / Gemini）、协议类型、API 密钥与模型列表，所有渠道在系统中平等治理，并支持在线可视化编辑。 |
+| **向量嵌入引擎** | `EmbeddingEngine` | 专供知识库 RAG 的向量化基座配置（`embedding_base_url`, `embedding_api_key`, `embedding_model`），与对话渠道正交解耦，可独立指向本地 Ollama 或外部嵌入服务。 |
+| **外部鉴权凭据** | `ExternalApiSecurity` | 供外部第三方客户端（如 NextChat、沉浸式翻译、Raycast）通过 Bearer Token 访问本系统 API 的访问凭据（`external_api_token`）。 |
+| **笔记库调度器** | `VaultScheduler` | 位于知识库模块的后台轮询调度器，按全局同步周期自动串行扫描开启了 `auto_sync` 的 Vault 仓库并执行增量 RAG 摄取。 |
 | **QQ 通道网关** | `QQGateway` | 基于腾讯开放平台官方 WebSocket 协议的异步消息网关，负责心跳、重连、白名单策略与命令审批交互。 |
 
 ---
@@ -87,4 +90,5 @@
 - **[ADR-0004](adr/0004-agent-configuration-modularization.md)**: 系统设置采用水平分段 Tab、URL 深链接、Keep-Alive 保活挂载与差量提交（Differential Payloads）。
 - **[ADR-0005](adr/0005-deep-host-execution-and-pipeline-pruning.md)**: 主机命令安全校验（`CommandGuard`）、审批生命周期与一次性授权下沉为内聚深模块。
 - **[ADR-0006](adr/0006-host-proxy-tunneling.md)**: 受控主机支持 `proxy_url`（HTTP CONNECT 与 SOCKS5 远程 DNS 解析）、凭据强加密与分层连通性诊断。
-- **[ADR-0007](adr/0007-pi-durable-typescript-rewrite.md)** *(最新核心架构)*: 全面重构为基于 `@earendil-works/pi-durable@1.1.0` 与单文件 `node:sqlite` 的全栈 TypeScript 架构；砍掉冗余 `Chat`/`Bots` 模块，统一为单主 Agent + 会话级作用域开关 + 按需 Subagent；向量与 BM25 检索收敛至单文件 SQLite（`Float32Array` BLOB + `FTS5`）。
+- **[ADR-0007](adr/0007-pi-durable-typescript-rewrite.md)**: 全面重构为基于 `@earendil-works/pi-durable@1.1.0` 与单文件 `node:sqlite` 的全栈 TypeScript 架构；砍掉冗余 `Chat`/`Bots` 模块，统一为单主 Agent + 会话级作用域开关 + 按需 Subagent；向量与 BM25 检索收敛至单文件 SQLite（`Float32Array` BLOB + `FTS5`）。
+- **[ADR-0008](adr/0008-settings-orthogonality-and-provider-unification.md)** *(最新配置治理)*: 系统全局设置职责正交化（拆分独立向量嵌入、对话渠道与外部鉴权凭据）；多模型渠道平等化与在线编辑能力；Vault 笔记库同步管理收敛至知识库页面并补齐后台串行定时轮询器。

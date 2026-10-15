@@ -1,15 +1,16 @@
 import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Sliders, Database, Server, Globe, Radio } from 'lucide-react'
+import { Sliders, Database, Server, Globe, Radio, Cpu } from 'lucide-react'
 import * as api from '@/api'
 import GeneralSettingsTab from './settings/GeneralSettingsTab'
+import ModelsTab from './settings/ModelsTab'
 import KnowledgeAgentTab from './settings/KnowledgeAgentTab'
 import HostAgentTab from './settings/HostAgentTab'
 import WebAgentTab from './settings/WebAgentTab'
 import QQBotTab from './settings/QQBotTab'
 
-const VALID_TABS = ['general', 'knowledge-agent', 'host-agent', 'web-agent', 'qq-bot'] as const
+const VALID_TABS = ['general', 'models', 'knowledge-agent', 'host-agent', 'web-agent', 'qq-bot'] as const
 type TabKey = typeof VALID_TABS[number]
 
 interface TabItem {
@@ -19,7 +20,8 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
-  { id: 'general', label: '全局基础', icon: Sliders },
+  { id: 'general', label: '通用设置', icon: Sliders },
+  { id: 'models', label: '模型服务', icon: Cpu },
   { id: 'knowledge-agent', label: '知识检索', icon: Database },
   { id: 'host-agent', label: '主机运维', icon: Server },
   { id: 'web-agent', label: '联网搜索', icon: Globe },
@@ -67,13 +69,13 @@ export default function Settings() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">系统设置</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          管理全局模型基座、领域智能体扩展及通道网关配置
+          管理系统通用参数、大模型服务商基座、知识库索引与通道网关
         </p>
       </div>
 
       {/* Underline Tab Navigation Bar */}
       <nav className="flex items-center gap-1 border-b border-border text-sm overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {TABS.map(item => {
+        {TABS.map((item) => {
           const isActive = activeTab === item.id
           const Icon = item.icon
           return (
@@ -97,6 +99,10 @@ export default function Settings() {
       {/* Tab Panels with Keep-Alive Mounting */}
       <div className={activeTab === 'general' ? 'block' : 'hidden'}>
         <GeneralSettingsTab settings={settings} />
+      </div>
+
+      <div className={activeTab === 'models' ? 'block' : 'hidden'}>
+        <ModelsTab settings={settings} />
       </div>
 
       <div className={activeTab === 'knowledge-agent' ? 'block' : 'hidden'}>

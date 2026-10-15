@@ -36,6 +36,7 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
     const eff = db.getEffectiveSettings();
     return c.json({
       ...eff,
+      embedding_api_key: maskSecret(eff.embedding_api_key),
       openai_api_key: maskSecret(eff.openai_api_key),
       external_api_token: maskSecret(eff.external_api_token),
       web_search_api_key: maskSecret(eff.web_search_api_key),
@@ -46,12 +47,25 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
     const body = await c.req.json().catch(() => ({}));
     const rawSettings = db.getAllRawSettings();
 
+    if (typeof body.embedding_base_url === "string" && body.embedding_base_url.trim()) {
+      db.setSetting("embedding_base_url", body.embedding_base_url.trim());
+    }
     if (typeof body.openai_base_url === "string" && body.openai_base_url.trim()) {
       db.setSetting("openai_base_url", body.openai_base_url.trim());
+      if (!body.embedding_base_url) {
+        db.setSetting("embedding_base_url", body.openai_base_url.trim());
+      }
+    }
+    const rawEmbedKey = body.embedding_api_key;
+    if (typeof rawEmbedKey === "string" && !rawEmbedKey.includes("****") && rawEmbedKey !== "******") {
+      db.setSetting("embedding_api_key", rawEmbedKey.trim());
     }
     const rawKey = body.api_key ?? body.openai_api_key;
     if (typeof rawKey === "string" && !rawKey.includes("****") && rawKey !== "******") {
       db.setSetting("openai_api_key", rawKey.trim());
+      if (rawEmbedKey === undefined) {
+        db.setSetting("embedding_api_key", rawKey.trim());
+      }
     }
     if (
       typeof body.external_api_token === "string" &&
@@ -88,7 +102,9 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
       db.setSetting("chunk_overlap", String(body.chunk_overlap));
     }
     if (body.vault_sync_interval_minutes !== undefined) {
-      db.setSetting("vault_sync_interval_minutes", String(body.vault_sync_interval_minutes));
+      const mins = Math.max(1, Number(body.vault_sync_interval_minutes) || 15);
+      db.setSetting("vault_sync_interval_minutes", String(mins));
+      vaultManager.setPollingInterval(mins);
     }
     if (Array.isArray(body.host_dangerous_patterns)) {
       db.setSetting("host_dangerous_patterns", JSON.stringify(body.host_dangerous_patterns));
@@ -184,18 +200,49 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
   app.post("/api/settings/fetch-models", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const eff = db.getEffectiveSettings();
-    let baseUrl = (body.openai_base_url || body.baseUrl || eff.openai_base_url).replace(/\/+$/, "");
+
+    let baseUrl = (
+      body.baseUrl ||
+      body.embedding_base_url ||
+      body.openai_base_url ||
+      eff.embedding_base_url
+    ).replace(/\/+$/, "");
+
+    let rawKey = body.apiKey || body.api_key || body.embedding_api_key;
+    if (typeof rawKey === "string" && (rawKey.includes("****") || rawKey === "******" || !rawKey.trim())) {
+      rawKey = undefined;
+    }
+
+    // If providerId is passed and no unmasked key provided, fetch secret key from DB
+    if (body.providerId) {
+      const providers = db.listProviders(true);
+      const match = providers.find((p) => p.id === body.providerId);
+      if (match) {
+        if (!baseUrl || baseUrl === eff.embedding_base_url) {
+          baseUrl = match.baseUrl.replace(/\/+$/, "");
+        }
+        if (!rawKey && match.apiKey) {
+          rawKey = match.apiKey;
+        }
+      }
+    }
+
+    if (!rawKey) {
+      rawKey = eff.embedding_api_key;
+    }
+
     if (!baseUrl.endsWith("/v1") && !baseUrl.includes("anthropic") && !baseUrl.includes("googleapis")) {
       baseUrl += "/v1";
     }
-    const rawKey = body.api_key && !String(body.api_key).includes("****") ? body.api_key : eff.openai_api_key;
+
     try {
       const resp = await fetch(`${baseUrl}/models`, {
         headers: rawKey ? { Authorization: `Bearer ${rawKey}` } : {},
         signal: AbortSignal.timeout(10000),
       });
       if (!resp.ok) {
-        return c.json({ detail: `HTTP ${resp.status}` }, 502);
+        const errorText = await resp.text().catch(() => "");
+        return c.json({ detail: `HTTP ${resp.status}: ${errorText}` }, 502);
       }
       const data = (await resp.json()) as { data?: Array<{ id: string }> };
       const models = Array.isArray(data?.data) ? data.data.map((m) => m.id) : [];
@@ -206,12 +253,126 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
   });
 
   app.post("/api/settings/test-chat", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const eff = db.getEffectiveSettings();
+    const providerId = body.providerId || body.provider || eff.default_provider || "default";
+    const model = body.modelId || body.model || body.llm_model || eff.llm_model || "deepseek-v4-flash";
+
+    const providers = db.listProviders(true);
+    const targetProvider = providers.find((p) => p.id === providerId) || providers[0];
+
     const start = Date.now();
-    return c.json({ ok: true, elapsed_ms: Math.max(1, Date.now() - start) });
+    if (!targetProvider) {
+      return c.json({ ok: false, detail: "未找到对应的服务商渠道" }, 404);
+    }
+
+    let baseUrl = (body.baseUrl || targetProvider.baseUrl).replace(/\/+$/, "");
+    let apiKey = body.apiKey || targetProvider.apiKey;
+
+    try {
+      if (targetProvider.protocol === "anthropic-messages") {
+        const resp = await fetch(`${baseUrl}/v1/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 10,
+            messages: [{ role: "user", content: "Hi" }],
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!resp.ok) {
+          return c.json({ ok: false, detail: `Anthropic HTTP ${resp.status}: ${await resp.text().catch(() => "")}` }, 400);
+        }
+      } else {
+        // OpenAI Completions compatible
+        let endpoint = baseUrl;
+        if (!endpoint.endsWith("/v1") && !endpoint.includes("/v1/")) {
+          endpoint += "/v1";
+        }
+        const resp = await fetch(`${endpoint}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: "Hi" }],
+            max_tokens: 5,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!resp.ok) {
+          return c.json({ ok: false, detail: `HTTP ${resp.status}: ${await resp.text().catch(() => "")}` }, 400);
+        }
+      }
+      return c.json({ ok: true, elapsed_ms: Math.max(1, Date.now() - start), model });
+    } catch (err: any) {
+      return c.json({ ok: false, detail: err?.message || String(err) }, 502);
+    }
   });
 
   const handleTestEmbedding = async (c: any) => {
-    return c.json({ ok: true, dimensions: 1536 });
+    const body = await c.req.json().catch(() => ({}));
+    const eff = db.getEffectiveSettings();
+    let baseUrl = (
+      body.embedding_base_url ||
+      body.openai_base_url ||
+      body.baseUrl ||
+      eff.embedding_base_url
+    ).replace(/\/+$/, "");
+    let rawKey =
+      body.embedding_api_key && !String(body.embedding_api_key).includes("****")
+        ? body.embedding_api_key
+        : body.api_key && !String(body.api_key).includes("****")
+        ? body.api_key
+        : eff.embedding_api_key;
+
+    const providerId = body.embedding_provider || eff.embedding_provider;
+    if (providerId) {
+      const providers = db.listProviders(true);
+      const match = providers.find((p) => p.id === providerId);
+      if (match?.baseUrl) {
+        baseUrl = match.baseUrl.replace(/\/+$/, "");
+        if (match.apiKey) {
+          rawKey = match.apiKey;
+        }
+      }
+    }
+
+    if (!baseUrl.endsWith("/v1") && !baseUrl.includes("anthropic") && !baseUrl.includes("googleapis")) {
+      baseUrl += "/v1";
+    }
+    const model = body.embedding_model || eff.embedding_model;
+
+    const start = Date.now();
+    try {
+      const resp = await fetch(`${baseUrl}/embeddings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(rawKey ? { Authorization: `Bearer ${rawKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model,
+          input: ["test"],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resp.ok) {
+        return c.json({ ok: false, detail: `HTTP ${resp.status}: ${await resp.text().catch(() => "")}` }, 400);
+      }
+      const data = (await resp.json()) as { data?: Array<{ embedding: number[] }> };
+      const dims = data?.data?.[0]?.embedding?.length || 1536;
+      return c.json({ ok: true, dimensions: dims, elapsed_ms: Date.now() - start });
+    } catch (e: any) {
+      return c.json({ ok: false, detail: e.message || String(e) }, 502);
+    }
   };
   app.post("/api/settings/test-embedding", handleTestEmbedding);
   app.post("/api/settings/test-embed", handleTestEmbedding);
@@ -522,6 +683,15 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
   });
 
   // Vault Routes
+  app.get("/api/vaults/scheduler", (c) => {
+    return c.json(vaultManager.getSchedulerStatus());
+  });
+
+  app.post("/api/vaults/scheduler/trigger", async (c) => {
+    void vaultManager.runPollCycle().catch(() => {});
+    return c.json({ ok: true, message: "Sync triggered" });
+  });
+
   app.get("/api/knowledge-bases/:id/vault", (c) => {
     const vault = vaultManager.getVaultByKb(c.req.param("id"));
     if (!vault) return c.json({ detail: "Vault not found" }, 404);

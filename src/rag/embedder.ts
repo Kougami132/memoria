@@ -80,23 +80,37 @@ export class HybridEmbedder implements Embedder {
   async embed(texts: string[]): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
     const eff = this.db.getEffectiveSettings();
+    let apiKey = eff.embedding_api_key || eff.openai_api_key;
+    let baseUrl = eff.embedding_base_url || eff.openai_base_url;
+
+    if (eff.embedding_provider) {
+      const providers = this.db.listProviders(true);
+      const match = providers.find((p) => p.id === eff.embedding_provider);
+      if (match?.baseUrl) {
+        baseUrl = match.baseUrl;
+        if (match.apiKey) {
+          apiKey = match.apiKey;
+        }
+      }
+    }
+
     const useMock =
       this.forceLocal ||
       process.env.USE_MOCK === "true" ||
-      !eff.openai_api_key ||
-      eff.openai_api_key === "mock" ||
-      eff.openai_base_url.includes("localhost");
+      !apiKey ||
+      apiKey === "mock" ||
+      baseUrl.includes("localhost");
 
     if (useMock) {
       return texts.map((t) => computeDeterministicEmbedding(t));
     }
 
     try {
-      const resp = await fetch(`${eff.openai_base_url}/embeddings`, {
+      const resp = await fetch(`${baseUrl}/embeddings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${eff.openai_api_key}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: eff.embedding_model,

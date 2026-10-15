@@ -116,7 +116,7 @@ export default function QQBotTab({ qqSettings }: QQBotTabProps) {
           className="rounded-xl bg-foreground text-background hover:opacity-90 gap-2 shadow-xs cursor-pointer"
         >
           {saved ? <Check className="h-4 w-4 text-emerald-400" /> : <Save className="h-4 w-4" />}
-          {isSaving ? '保存中…' : saved ? '已保存通道配置' : '保存通道配置'}
+          {isSaving ? '保存中…' : saved ? '已保存' : '保存'}
         </Button>
       </div>
 
