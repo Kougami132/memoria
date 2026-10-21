@@ -1,4 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
+import { Readable } from "node:stream";
+import { resolve } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -11,6 +14,56 @@ import type {
 import { maskSecret } from "../db/database.ts";
 import type { MemoriaAgentRuntime } from "../agent/runtime.ts";
 import { browseLocalPath, normalizeWebdavPath, WebDAVVaultConnector } from "../vault/syncer.ts";
+
+const LOG_TAIL_BUFFER_BYTES = 512 * 1024;
+const LOG_LINE_RE =
+  /^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s+(INFO|WARNING|WARN|ERROR|DEBUG|CRITICAL)\s+(.*?)\s*(?:—|-)\s*(.*)$/;
+
+export function resolveLogFilePath(): string {
+  const candidates = [resolve("data", "memoria.log"), resolve("memoria.log")];
+  return candidates.find((p) => existsSync(p)) ?? candidates[0];
+}
+
+/** 只读文件尾部若干字节，避免把大日志整个读进内存。 */
+function readTail(filePath: string, maxBytes = LOG_TAIL_BUFFER_BYTES): string {
+  const size = statSync(filePath).size;
+  const readSize = Math.min(size, maxBytes);
+  const buffer = Buffer.alloc(readSize);
+  const fd = openSync(filePath, "r");
+  try {
+    readSync(fd, buffer, 0, readSize, size - readSize);
+  } finally {
+    closeSync(fd);
+  }
+  return buffer.toString("utf8");
+}
+
+export function parseSystemLogLines(rawText: string) {
+  const items: Array<{ timestamp: string; level: string; component: string; message: string; raw: string }> = [];
+  let current: (typeof items)[number] | undefined;
+  for (const line of rawText.split(/\r?\n/)) {
+    const m = LOG_LINE_RE.exec(line);
+    if (m) {
+      if (current) items.push(current);
+      const [, ts, lvl, comp, msg] = m;
+      current = {
+        timestamp: ts,
+        level: lvl === "WARNING" ? "WARN" : lvl,
+        component: comp.trim(),
+        message: msg.trim(),
+        raw: line,
+      };
+    } else if (current) {
+      // 多行堆栈/续行归并到上一条
+      current.message += `\n${line}`;
+      current.raw += `\n${line}`;
+    } else if (line.trim()) {
+      items.push({ timestamp: "", level: "INFO", component: "", message: line, raw: line });
+    }
+  }
+  if (current) items.push(current);
+  return items;
+}
 
 export function createApp(runtime: MemoriaAgentRuntime): Hono {
   const app = new Hono();
@@ -988,7 +1041,57 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
   });
 
   app.get("/api/logs/system", (c) => {
-    return c.json({ status: "ok", file_exists: false, total: 0, items: [] });
+    const lines = Math.min(1000, Math.max(10, Number(c.req.query("lines") || 200)));
+    const level = (c.req.query("level") || "").toUpperCase();
+    const search = (c.req.query("search") || "").trim().toLowerCase();
+
+    const logPath = resolveLogFilePath();
+    if (!existsSync(logPath)) {
+      return c.json({
+        status: "ok",
+        file_exists: false,
+        total: 0,
+        items: [],
+        message: `日志文件 ${logPath} 尚未生成`,
+      });
+    }
+
+    let items = parseSystemLogLines(readTail(logPath));
+    if (level && level !== "ALL") {
+      const target = level === "WARNING" ? "WARN" : level;
+      items = items.filter((it) => it.level === target);
+    }
+    if (search) {
+      items = items.filter(
+        (it) =>
+          it.message.toLowerCase().includes(search) ||
+          it.component.toLowerCase().includes(search) ||
+          it.raw.toLowerCase().includes(search),
+      );
+    }
+
+    const result = items.slice(-lines);
+    return c.json({
+      status: "ok",
+      file_exists: true,
+      file_size: statSync(logPath).size,
+      total: result.length,
+      items: result,
+    });
+  });
+
+  app.get("/api/logs/system/download", (c) => {
+    const logPath = resolveLogFilePath();
+    if (!existsSync(logPath)) {
+      return c.json({ detail: `Log file ${logPath} does not exist` }, 404);
+    }
+    // 日志可能很大（百 MB 级），必须流式下发而不是整体读入内存。
+    const stream = Readable.toWeb(createReadStream(logPath)) as ReadableStream;
+    return c.body(stream, 200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Length": String(statSync(logPath).size),
+      "Content-Disposition": 'attachment; filename="memoria.log"',
+    });
   });
 
   // ------------------------------------------------------------------

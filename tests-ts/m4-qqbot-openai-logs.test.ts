@@ -154,7 +154,9 @@ describe("M4: QQ Bot Gateway/Policy/Approval, /v1/chat/completions & Audit Logs"
       fauxAssistantMessage([fauxText("Jellyfin 容器已重启完成。")]),
     ]);
 
-    const admitRes = await app.request("/api/conversations/new/submit", {
+    // 审批必须由发起它的同一个 QQ 会话批准，因此这里直接用该 QQ 会话 id 发起。
+    const qqConvId = "qq_c2c_user_123";
+    const admitRes = await app.request(`/api/conversations/${qqConvId}/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -186,7 +188,8 @@ describe("M4: QQ Bot Gateway/Policy/Approval, /v1/chat/completions & Audit Logs"
     await conv!.waitForIdle(BACKGROUND_CONTEXT);
 
     const msgs = await runtime.getConversationMessages(admitBody.conversation.id);
-    expect(msgs![1].content).toContain("Jellyfin 容器已重启完成");
+    const lastAssistant = [...msgs!].reverse().find((m) => m.role === "assistant");
+    expect(lastAssistant?.content).toContain("Jellyfin 容器已重启完成");
 
     // Verify QQ events logged
     const qqLogsRes = await app.request("/api/logs/qqbot/events");

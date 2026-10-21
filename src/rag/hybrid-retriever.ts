@@ -70,6 +70,12 @@ export interface RetrievedChunk {
   source: string;
 }
 
+export interface RetrieveResult {
+  chunks: RetrievedChunk[];
+  /** 向量路被跳过时的原因（退化为纯 BM25 检索）。 */
+  degradedReason?: string;
+}
+
 export class HybridRagPipeline {
   readonly db: AppDatabase;
   readonly embedder: Embedder;
@@ -91,7 +97,8 @@ export class HybridRagPipeline {
 
     const fullText = parseDocumentBuffer(params.contentBuffer, params.filename);
     const chunks = splitTextIntoChunks(fullText, chunkSize, chunkOverlap);
-    const embeddings = chunks.length > 0 ? await this.embedder.embed(chunks) : [];
+    const embedded = chunks.length > 0 ? await this.embedder.embed(chunks) : { vectors: [] };
+    const embeddings = embedded.vectors;
 
     const docId = `doc_${randomUUID().slice(0, 10)}`;
     const now = new Date().toISOString();
@@ -189,11 +196,23 @@ export class HybridRagPipeline {
     topK?: number;
     minScore?: number;
   }): Promise<RetrievedChunk[]> {
+    return (await this.retrieveDetailed(params)).chunks;
+  }
+
+  /** 带降级信息的检索：向量路不可用时仅走 BM25，并回报原因。 */
+  async retrieveDetailed(params: {
+    kbIds: string[];
+    query: string;
+    topK?: number;
+    minScore?: number;
+  }): Promise<RetrieveResult> {
     const { kbIds, query } = params;
-    if (!kbIds.length || !query.trim()) return [];
+    if (!kbIds.length || !query.trim()) return { chunks: [] };
 
     const eff = this.db.getEffectiveSettings();
     const topK = params.topK ?? (Number(eff.top_k) || 5);
+    // min_score 是知识库检索的硬门槛（设置页承诺的行为）。
+    const minScore = params.minScore ?? (Number(eff.min_score) || 0);
     const candidateLimit = Math.max(topK * 4, 20);
     const placeholders = kbIds.map(() => "?").join(",");
 
@@ -216,24 +235,38 @@ export class HybridRagPipeline {
       source: string;
     }>;
 
-    if (allChunks.length === 0) return [];
+    if (allChunks.length === 0) return { chunks: [] };
 
     const chunkMap = new Map(allChunks.map((c) => [c.id, c]));
 
     // 2. Dense vector cosine ranking
-    const [queryVec] = await this.embedder.embed([query]);
+    const embedded = await this.embedder.embed([query]);
+    const queryVec = embedded.vectors[0];
+    let degradedReason = embedded.degradedReason;
     const denseScored: Array<{ id: string; score: number }> = [];
-    if (queryVec) {
-      for (const chunk of allChunks) {
-        if (chunk.embedding) {
-          const vec = blobToFloat32(chunk.embedding);
-          const sim = cosineSimilarity(queryVec, vec);
-          denseScored.push({ id: chunk.id, score: sim });
-        } else if (chunk.text.toLowerCase().includes(query.toLowerCase())) {
-          denseScored.push({ id: chunk.id, score: 0.75 });
+    // 降级时必须整条跳过向量路：哈希向量算出的余弦分不代表语义，
+    // 即使维度刚好一致（如历史降级期间入库的同类向量）也不能参与融合。
+    if (queryVec && !degradedReason) {
+      // 库内向量维度与本次查询不一致时，余弦相似度无意义：直接放弃向量路。
+      const dims = new Set(
+        allChunks.filter((c) => c.embedding).map((c) => blobToFloat32(c.embedding!).length),
+      );
+      const mismatch = dims.size > 0 && !(dims.size === 1 && dims.has(queryVec.length));
+      if (mismatch) {
+        degradedReason =
+          `向量维度不一致（库内 ${[...dims].join("/")} 维，查询 ${queryVec.length} 维），已跳过向量检索`;
+      } else {
+        for (const chunk of allChunks) {
+          if (chunk.embedding) {
+            const vec = blobToFloat32(chunk.embedding);
+            const sim = cosineSimilarity(queryVec, vec);
+            denseScored.push({ id: chunk.id, score: sim });
+          } else if (chunk.text.toLowerCase().includes(query.toLowerCase())) {
+            denseScored.push({ id: chunk.id, score: 0.75 });
+          }
         }
+        denseScored.sort((a, b) => b.score - a.score);
       }
-      denseScored.sort((a, b) => b.score - a.score);
     }
     const denseTop = denseScored.slice(0, candidateLimit);
 
@@ -307,6 +340,8 @@ export class HybridRagPipeline {
     }
 
     merged.sort((a, b) => b.score - a.score);
-    return merged.slice(0, topK);
+    // 用严格大于：finalScore 被上限 0.99 截断，只要用 >= 就永远无法过滤掉满分结果。
+    const filtered = minScore > 0 ? merged.filter((c) => c.score > minScore) : merged;
+    return { chunks: filtered.slice(0, topK), degradedReason };
   }
 }

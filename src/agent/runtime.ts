@@ -611,6 +611,7 @@ export class MemoriaAgentRuntime {
   }
 
   async close(context: Context = BACKGROUND_CONTEXT): Promise<void> {
+    await this.qqBot.stop();
     await this.harness.close(context);
     this.db.close();
   }

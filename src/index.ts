@@ -50,6 +50,12 @@ export async function startServer(port = Number(process.env.PORT || 8000)) {
   });
 
   console.log(`[Memoria 2.0] pi-durable TypeScript server listening on http://localhost:${port}`);
+
+  // QQ 通道只在保存设置时曾被动重载，服务启动后必须主动拉起，否则网关永远不会连接。
+  await runtime.qqBot.reload().catch((err: unknown) => {
+    console.error("[Memoria 2.0] QQ 网关启动失败:", err instanceof Error ? err.message : err);
+  });
+
   return { runtime, app, server };
 }
 

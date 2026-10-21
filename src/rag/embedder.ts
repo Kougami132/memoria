@@ -1,7 +1,16 @@
 import type { AppDatabase } from "../db/database.ts";
 
+/** ensureDefaultProvider() 自动创建的占位渠道地址（未配置任何密钥时）。 */
+const PLACEHOLDER_BASE_URL = "https://api.openai.com/v1";
+
+export interface EmbedOutcome {
+  vectors: Float32Array[];
+  /** 远程嵌入不可用、已降级时的原因；正常路径为 undefined。 */
+  degradedReason?: string;
+}
+
 export interface Embedder {
-  embed(texts: string[]): Promise<Float32Array[]>;
+  embed(texts: string[]): Promise<EmbedOutcome>;
 }
 
 export function float32ToBlob(vec: Float32Array): Uint8Array {
@@ -15,7 +24,11 @@ export function blobToFloat32(blob: Uint8Array | Buffer): Float32Array {
 }
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  const len = Math.min(a.length, b.length);
+  // 维度必须严格一致：不同模型的向量截断相减只会得到无意义的噪声分数。
+  if (a.length !== b.length) {
+    throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
+  }
+  const len = a.length;
   if (len === 0) return 0;
   let dot = 0;
   let normA = 0;
@@ -77,20 +90,25 @@ export class HybridEmbedder implements Embedder {
     this.forceLocal = Boolean(options?.forceLocal);
   }
 
-  async embed(texts: string[]): Promise<Float32Array[]> {
-    if (texts.length === 0) return [];
+  async embed(texts: string[]): Promise<EmbedOutcome> {
+    if (texts.length === 0) return { vectors: [] };
     const eff = this.db.getEffectiveSettings();
     let apiKey = eff.embedding_api_key || eff.openai_api_key;
     let baseUrl = eff.embedding_base_url || eff.openai_base_url;
 
+    // 只有 provider 真正持有配置时才覆盖。
+    // ensureDefaultProvider() 会在启动时写入一条 base_url=api.openai.com / api_key 为空的占位记录，
+    // 若让它覆盖，用户全局配置的 embedding 端点会被静默重置并导致误降级。
+    // 注意：不能用「有无密钥」或「是否内网」判定可用性 —— 自建 Ollama 等本地端点合法且无密钥。
     if (eff.embedding_provider) {
       const providers = this.db.listProviders(true);
       const match = providers.find((p) => p.id === eff.embedding_provider);
-      if (match?.baseUrl) {
-        baseUrl = match.baseUrl;
-        if (match.apiKey) {
-          apiKey = match.apiKey;
-        }
+      const providerUrl = match?.baseUrl?.trim() ?? "";
+      const providerKey = match?.apiKey?.trim() ?? "";
+      const isStub = !providerKey && providerUrl.replace(/\/+$/, "") === PLACEHOLDER_BASE_URL;
+      if (providerUrl && !isStub) {
+        baseUrl = providerUrl;
+        if (providerKey) apiKey = providerKey;
       }
     }
 
@@ -102,7 +120,12 @@ export class HybridEmbedder implements Embedder {
       baseUrl.includes("localhost");
 
     if (useMock) {
-      return texts.map((t) => computeDeterministicEmbedding(t));
+      return {
+        vectors: texts.map((t) => computeDeterministicEmbedding(t)),
+        degradedReason: this.forceLocal
+          ? "本地哈希嵌入模式（forceLocal）"
+          : "未配置嵌入 API Key，使用本地哈希向量",
+      };
     }
 
     try {
@@ -123,12 +146,15 @@ export class HybridEmbedder implements Embedder {
       }
       const data = (await resp.json()) as { data?: Array<{ embedding: number[] }> };
       if (Array.isArray(data?.data) && data.data.length === texts.length) {
-        return data.data.map((d) => new Float32Array(d.embedding));
+        return { vectors: data.data.map((d) => new Float32Array(d.embedding)) };
       }
-    } catch {
-      // Fallback to deterministic local embedding when remote endpoint is unreachable
+      throw new Error("Embedding response shape mismatch");
+    } catch (err) {
+      // 远程不可用时不再伪装成正常向量：调用方据此退化为纯 BM25 检索。
+      return {
+        vectors: texts.map((t) => computeDeterministicEmbedding(t)),
+        degradedReason: `嵌入服务不可用(${err instanceof Error ? err.message : String(err)})，已退化为本地哈希向量`,
+      };
     }
-
-    return texts.map((t) => computeDeterministicEmbedding(t));
   }
 }

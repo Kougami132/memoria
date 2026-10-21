@@ -97,7 +97,7 @@ export function createMemoriaExtensions(
             };
           }
 
-          const hits = await pipeline.retrieve({
+          const { chunks: hits, degradedReason } = await pipeline.retrieveDetailed({
             kbIds: targetKbs,
             query: args.query,
             topK: args.top_k,
@@ -112,20 +112,34 @@ export function createMemoriaExtensions(
             path: r.path ?? null,
             source: r.source,
           }));
-          await api.details({ sources }, context);
+          await api.details({ sources, degraded_reason: degradedReason ?? null }, context);
+
+          // 降级时必须告知模型：关键词检索的召回范围比向量检索窄，避免其过度断言。
+          const degradedNote = degradedReason
+            ? `⚠️ 向量检索不可用（${degradedReason}），本次结果仅来自关键词（BM25）匹配，召回可能不完整。若未找到相关内容，请告知用户知识库检索已降级，不要自行推测。\n\n`
+            : "";
 
           if (hits.length === 0) {
             return {
-              content: [{ type: "text", text: `未找到与 "${args.query}" 相关的知识库片段。` }],
+              content: [
+                {
+                  type: "text",
+                  text: degradedNote
+                    ? `${degradedNote}未找到与 "${args.query}" 相关的知识库片段。`
+                    : `未找到与 "${args.query}" 相关的知识库片段。`,
+                },
+              ],
             };
           }
 
-          const formatted = hits
-            .map(
-              (r, i) =>
-                `[#${i + 1}] (${r.filename}, score=${r.score}, doc_id=${r.doc_id}, kb_id=${r.kb_id}):\n${r.text}`,
-            )
-            .join("\n\n---\n\n");
+          const formatted =
+            degradedNote +
+            hits
+              .map(
+                (r, i) =>
+                  `[#${i + 1}] (${r.filename}, score=${r.score}, doc_id=${r.doc_id}, kb_id=${r.kb_id}):\n${r.text}`,
+              )
+              .join("\n\n---\n\n");
           return {
             content: [{ type: "text", text: formatted }],
           };
