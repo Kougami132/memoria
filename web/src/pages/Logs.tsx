@@ -207,9 +207,12 @@ export default function Logs() {
     [invocations]
   )
   const avgInvocationLatency = useMemo(() => {
-    if (!invocations.length) return 0
-    const sum = invocations.reduce((acc, cur) => acc + (cur.duration_ms || 0), 0)
-    return Math.round(sum / invocations.length)
+    // 只统计成功请求：鉴权拒绝在解析请求前就被拦下，没有真实耗时可言，
+    // 把它们的 0ms 算进来会系统性拉低该指标。
+    const ok = invocations.filter((l) => l.status_code >= 200 && l.status_code < 300)
+    if (!ok.length) return 0
+    const sum = ok.reduce((acc, cur) => acc + (cur.duration_ms || 0), 0)
+    return Math.round(sum / ok.length)
   }, [invocations])
 
   return (

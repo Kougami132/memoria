@@ -82,12 +82,13 @@ describe("M4: QQ Bot Gateway/Policy/Approval, /v1/chat/completions & Audit Logs"
     expect(chatBody.choices[0].message.content).toContain("系统一切正常。");
 
     // 4. Verify audit log in /api/logs/invocations
+    //    鉴权拒绝同样入账（步骤 1 的 401），因此这里按状态码取成功那条。
     const logsRes = await app.request("/api/logs/invocations");
     expect(logsRes.status).toBe(200);
     const logsBody = (await logsRes.json()) as any;
-    expect(logsBody.items.length).toBe(1);
-    expect(logsBody.items[0].endpoint).toBe("/v1/chat/completions");
-    expect(logsBody.items[0].status_code).toBe(200);
+    const ok = logsBody.items.find((i: any) => i.status_code === 200);
+    expect(ok.endpoint).toBe("/v1/chat/completions");
+    expect(logsBody.items.some((i: any) => i.status_code === 401)).toBe(true);
   });
 
   it("splits QQ Markdown preserving code fences, enforces allowlist, and approves SSH commands from QQ", async () => {

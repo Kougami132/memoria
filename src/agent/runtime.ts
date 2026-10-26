@@ -20,6 +20,7 @@ import type {
   ConversationSummary,
   ThinkingLevel,
 } from "../../shared/types.ts";
+import { createLogger } from "../logging.ts";
 import { AppDatabase, DEFAULT_SCOPE } from "../db/database.ts";
 import { HostManager, type HostTransportRunner } from "../host/executor.ts";
 import { QQBotService } from "../qqbot/service.ts";
@@ -166,6 +167,9 @@ export class MemoriaAgentRuntime {
     harness.resume();
     const eff = db.getEffectiveSettings();
     vaultManager.startPolling(Number(eff.vault_sync_interval_minutes) || 15);
+    createLogger("memoria.agent.runtime").info(
+      `运行时已启动 (llm=${eff.llm_model || "-"}, 同步间隔=${eff.vault_sync_interval_minutes || 15}min)`,
+    );
 
     return new MemoriaAgentRuntime(
       db,

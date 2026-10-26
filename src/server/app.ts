@@ -1,7 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
 import { Readable } from "node:stream";
-import { resolve } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -12,16 +11,18 @@ import type {
   ThinkingLevel,
 } from "../../shared/types.ts";
 import { maskSecret } from "../db/database.ts";
+import { createLogger, resolveLogPath } from "../logging.ts";
 import type { MemoriaAgentRuntime } from "../agent/runtime.ts";
 import { browseLocalPath, normalizeWebdavPath, WebDAVVaultConnector } from "../vault/syncer.ts";
 
 const LOG_TAIL_BUFFER_BYTES = 512 * 1024;
+// 组件名可能自带连字符（如 memoria.vault-syncer），因此分隔符前后必须带空白，
+// 否则 `-` 会把组件名截断。
 const LOG_LINE_RE =
-  /^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s+(INFO|WARNING|WARN|ERROR|DEBUG|CRITICAL)\s+(.*?)\s*(?:—|-)\s*(.*)$/;
+  /^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s+(INFO|WARNING|WARN|ERROR|DEBUG|CRITICAL)\s+(.*?)\s+(?:—|-)\s*(.*)$/;
 
 export function resolveLogFilePath(): string {
-  const candidates = [resolve("data", "memoria.log"), resolve("memoria.log")];
-  return candidates.find((p) => existsSync(p)) ?? candidates[0];
+  return resolveLogPath();
 }
 
 /** 只读文件尾部若干字节，避免把大日志整个读进内存。 */
@@ -41,7 +42,8 @@ function readTail(filePath: string, maxBytes = LOG_TAIL_BUFFER_BYTES): string {
 export function parseSystemLogLines(rawText: string) {
   const items: Array<{ timestamp: string; level: string; component: string; message: string; raw: string }> = [];
   let current: (typeof items)[number] | undefined;
-  for (const line of rawText.split(/\r?\n/)) {
+  // 文件末尾的换行不是续行，否则会被并进最后一条记录的消息里。
+  for (const line of rawText.replace(/\r?\n+$/, "").split(/\r?\n/)) {
     const m = LOG_LINE_RE.exec(line);
     if (m) {
       if (current) items.push(current);
@@ -68,8 +70,18 @@ export function parseSystemLogLines(rawText: string) {
 export function createApp(runtime: MemoriaAgentRuntime): Hono {
   const app = new Hono();
   const { db, modelsManager, pipeline, vaultManager, hostManager, qqBot } = runtime;
+  const log = createLogger("memoria.server.app");
 
   app.use("*", cors());
+
+  // 未捕获的路由异常默认只会变成一个空的 500 响应，现场线索全部丢失。
+  // 只把详情写进日志：`/v1/*` 在未配置 external_api_token 时不设防，
+  // 把内部错误消息回显给调用方等于把堆栈线索送到外部。
+  app.onError((err, c) => {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error(`${c.req.method} ${c.req.path} 未捕获异常: ${message}`);
+    return c.json({ detail: "Internal Server Error" }, 500);
+  });
 
   // ------------------------------------------------------------------
   // Health
@@ -1104,6 +1116,15 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
       const authHeader = c.req.header("Authorization") || "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
       if (token !== expectedToken) {
+        // 记录被拒的调用，但不记录 token 值本身（成功与失败都一样）。
+        db.logInvocation({
+          endpoint: c.req.path,
+          method: c.req.method,
+          model: "-",
+          statusCode: 401,
+          durationMs: 0,
+          errorMsg: "Invalid or missing Bearer token",
+        });
         return c.json({ error: { message: "Invalid or missing Bearer token", type: "auth_error" } }, 401);
       }
     }
@@ -1144,6 +1165,14 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
           : "";
 
     if (!prompt.trim()) {
+      db.logInvocation({
+        endpoint: "/v1/chat/completions",
+        method: "POST",
+        model: modelStr,
+        statusCode: 400,
+        durationMs: Math.max(1, Date.now() - start),
+        errorMsg: "No user message found in messages[]",
+      });
       return c.json({ error: { message: "No user message found in messages[]" } }, 400);
     }
 
@@ -1164,88 +1193,104 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
           hostIds: hostManager.listPublicHosts().map((h) => h.id),
         };
 
-    const { summary, submission } = await runtime.submitMessage({
-      conversationId: sessionId,
-      content: prompt,
-      modelProvider,
-      modelId,
-      scope: defaultScope,
-    });
+    try {
+      const { summary, submission } = await runtime.submitMessage({
+        conversationId: sessionId,
+        content: prompt,
+        modelProvider,
+        modelId,
+        scope: defaultScope,
+      });
 
-    await submission.wait(BACKGROUND_CONTEXT);
-    const convMsgs = (await runtime.getConversationMessages(summary.id)) ?? [];
-    const lastAsst = [...convMsgs].reverse().find((m) => m.role === "assistant");
-    const reasoning = lastAsst?.trace?.summary?.reasoning || "";
-    const answerText = lastAsst?.content || "";
-    const fullContent = reasoning ? `<thought>\n${reasoning}\n</thought>\n\n${answerText}` : answerText;
-    const usageSummary = lastAsst?.trace?.summary;
-    const promptTokens = usageSummary?.prompt_tokens ?? 0;
-    const completionTokens = usageSummary?.completion_tokens ?? 0;
-    const totalTokens = usageSummary?.total_tokens ?? promptTokens + completionTokens;
+      await submission.wait(BACKGROUND_CONTEXT);
+      const convMsgs = (await runtime.getConversationMessages(summary.id)) ?? [];
+      const lastAsst = [...convMsgs].reverse().find((m) => m.role === "assistant");
+      const reasoning = lastAsst?.trace?.summary?.reasoning || "";
+      const answerText = lastAsst?.content || "";
+      const fullContent = reasoning ? `<thought>\n${reasoning}\n</thought>\n\n${answerText}` : answerText;
+      const usageSummary = lastAsst?.trace?.summary;
+      const promptTokens = usageSummary?.prompt_tokens ?? 0;
+      const completionTokens = usageSummary?.completion_tokens ?? 0;
+      const totalTokens = usageSummary?.total_tokens ?? promptTokens + completionTokens;
 
-    db.logInvocation({
-      endpoint: "/v1/chat/completions",
-      method: "POST",
-      model: modelStr,
-      statusCode: 200,
-      durationMs: Math.max(1, Date.now() - start),
-      promptTokens,
-      completionTokens,
-      totalTokens,
-      sessionId: summary.id,
-    });
+      db.logInvocation({
+        endpoint: "/v1/chat/completions",
+        method: "POST",
+        model: modelStr,
+        statusCode: 200,
+        durationMs: Math.max(1, Date.now() - start),
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        sessionId: summary.id,
+      });
 
-    const completionId = `chatcmpl_${submission.id}`;
-    const created = Math.floor(Date.now() / 1000);
+      const completionId = `chatcmpl_${submission.id}`;
+      const created = Math.floor(Date.now() / 1000);
 
-    if (body.stream) {
-      return streamSSE(c, async (stream) => {
-        if (reasoning) {
+      if (body.stream) {
+        return streamSSE(c, async (stream) => {
+          if (reasoning) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                id: completionId,
+                object: "chat.completion.chunk",
+                created,
+                model: modelStr,
+                choices: [{ index: 0, delta: { role: "assistant", content: `<thought>\n${reasoning}\n</thought>\n\n` }, finish_reason: null }],
+              }),
+            });
+          }
           await stream.writeSSE({
             data: JSON.stringify({
               id: completionId,
               object: "chat.completion.chunk",
               created,
               model: modelStr,
-              choices: [{ index: 0, delta: { role: "assistant", content: `<thought>\n${reasoning}\n</thought>\n\n` }, finish_reason: null }],
+              choices: [{ index: 0, delta: { content: answerText }, finish_reason: "stop" }],
             }),
           });
-        }
-        await stream.writeSSE({
-          data: JSON.stringify({
-            id: completionId,
-            object: "chat.completion.chunk",
-            created,
-            model: modelStr,
-            choices: [{ index: 0, delta: { content: answerText }, finish_reason: "stop" }],
-          }),
+          await stream.writeSSE({ data: "[DONE]" });
         });
-        await stream.writeSSE({ data: "[DONE]" });
-      });
-    }
+      }
 
-    return c.json({
-      id: completionId,
-      object: "chat.completion",
-      created,
-      model: modelStr,
-      conversation_id: summary.id,
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: "assistant",
-            content: fullContent,
+      return c.json({
+        id: completionId,
+        object: "chat.completion",
+        created,
+        model: modelStr,
+        conversation_id: summary.id,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: fullContent,
+            },
+            finish_reason: "stop",
           },
-          finish_reason: "stop",
+        ],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
         },
-      ],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens,
-      },
-    });
+      });
+    } catch (err: unknown) {
+      // 失败请求同样要进调用日志，否则面板只在成功时才有数据，
+      // 恰恰在最需要排障的时刻是空的。
+      const message = err instanceof Error ? err.message : String(err);
+      db.logInvocation({
+        endpoint: "/v1/chat/completions",
+        method: "POST",
+        model: modelStr,
+        statusCode: 500,
+        durationMs: Math.max(1, Date.now() - start),
+        sessionId: sessionId ?? null,
+        errorMsg: message,
+      });
+      return c.json({ error: { message, type: "internal_error" } }, 500);
+    }
   });
 
   return app;

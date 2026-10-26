@@ -3,7 +3,10 @@ import { extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
 import { MemoriaAgentRuntime } from "./agent/runtime.ts";
+import { createLogger } from "./logging.ts";
 import { createApp } from "./server/app.ts";
+
+const log = createLogger("memoria.server.index");
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -49,11 +52,15 @@ export async function startServer(port = Number(process.env.PORT || 8000)) {
     port,
   });
 
+  // 双写是有意的：stdout 供容器/Docker 日志采集，文件供 Web 控制台「系统日志」面板。
   console.log(`[Memoria 2.0] pi-durable TypeScript server listening on http://localhost:${port}`);
+  log.info(`HTTP 服务已启动 listening on http://localhost:${port}`);
 
   // QQ 通道只在保存设置时曾被动重载，服务启动后必须主动拉起，否则网关永远不会连接。
   await runtime.qqBot.reload().catch((err: unknown) => {
-    console.error("[Memoria 2.0] QQ 网关启动失败:", err instanceof Error ? err.message : err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[Memoria 2.0] QQ 网关启动失败:", message);
+    log.error(`QQ 网关启动失败: ${message}`);
   });
 
   return { runtime, app, server };

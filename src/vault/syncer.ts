@@ -3,8 +3,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { AppDatabase } from "../db/database.ts";
+import { createLogger } from "../logging.ts";
 import type { HybridRagPipeline } from "../rag/hybrid-retriever.ts";
 import { SUPPORTED_EXTENSIONS } from "../rag/parser.ts";
+
+const log = createLogger("memoria.vault.syncer");
 
 function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -227,7 +230,7 @@ export class VaultManager {
     const intervalMs = Math.max(1, this.pollingIntervalMinutes) * 60 * 1000;
     this.pollingTimer = setInterval(() => {
       void this.runPollCycle().catch((err) => {
-        console.warn("[VaultScheduler] Uncaught error in poll cycle:", err);
+        log.error(`Vault 轮询周期未捕获异常: ${err instanceof Error ? err.message : String(err)}`);
       });
     }, intervalMs);
     // Don't keep the Node.js event loop alive if everything else exits
@@ -282,7 +285,9 @@ export class VaultManager {
         try {
           await this.syncVault(item.kb_id);
         } catch (err) {
-          console.warn(`[VaultScheduler] Periodic sync failed for vault ${item.id} (kb: ${item.kb_id}):`, err);
+          log.warn(
+            `Vault 同步失败 vault=${item.id} kb=${item.kb_id}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
       this.lastPollAt = nowIso();
