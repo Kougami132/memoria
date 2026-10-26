@@ -207,6 +207,7 @@ export function AgenticChat() {
 
   const [modelProvider, setModelProvider] = useState<string>('default')
   const [modelId, setModelId] = useState<string>('')
+  const lastDefaultModelRef = useRef<string | null>(null)
   const [thinkingLevel, setThinkingLevel] = useState<api.ThinkingLevel>('medium')
   const [scope, setScope] = useState<api.ConversationScope>({
     kbIds: [],
@@ -216,26 +217,25 @@ export function AgenticChat() {
     subagentEnabled: true,
   })
 
-  // Sync defaults when settings/models load and no session is active
+  // 模型以系统设置为准（会话不固持模型）：默认模型一变，页面立刻跟随，
+  // 否则老会话重发时会把会话里过时的模型原样传回后端。
   useEffect(() => {
-    if (!activeSessionId && settings) {
-      if (!modelId && settings.llm_model) {
-        setModelProvider(settings.default_provider || 'default')
-        setModelId(settings.llm_model)
-      }
-      if (settings.default_thinking_level) {
-        setThinkingLevel(settings.default_thinking_level)
-      }
+    if (!settings?.llm_model) return
+    const next = `${settings.default_provider || 'default'}::${settings.llm_model}`
+    if (lastDefaultModelRef.current === next) return
+    lastDefaultModelRef.current = next
+    setModelProvider(settings.default_provider || 'default')
+    setModelId(settings.llm_model)
+    if (settings.default_thinking_level) {
+      setThinkingLevel(settings.default_thinking_level)
     }
-  }, [activeSessionId, settings, modelId])
+  }, [settings])
 
   // Sync conversation config when switching active session
   useEffect(() => {
     if (!activeSessionId) return
     const activeSess = sessions.find((s) => s.id === activeSessionId)
     if (activeSess) {
-      if (activeSess.modelProvider) setModelProvider(activeSess.modelProvider)
-      if (activeSess.modelId) setModelId(activeSess.modelId)
       if (activeSess.thinkingLevel) setThinkingLevel(activeSess.thinkingLevel)
       if (activeSess.scope) setScope(activeSess.scope)
     }

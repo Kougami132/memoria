@@ -330,12 +330,20 @@ export class MemoriaAgentRuntime {
   ) {
     const { summary, conversation } = await this.getOrCreateConversation(params.conversationId, context);
 
-    if (params.modelProvider || params.modelId || params.thinkingLevel || params.scope) {
+    // 会话不固持模型：未显式指定时每次提交都重新解析当前全局默认，
+    // 否则在系统设置里改了默认模型，老会话重发仍会走旧模型。
+    const eff = this.db.getEffectiveSettings();
+    const nextProvider = params.modelProvider || eff.default_provider || "default";
+    const nextModelId = params.modelId || eff.llm_model;
+    const modelChanged =
+      nextProvider !== summary.modelProvider || nextModelId !== summary.modelId;
+
+    if (modelChanged || params.thinkingLevel || params.scope) {
       await this.configureConversation(
         summary.id,
         {
-          modelProvider: params.modelProvider,
-          modelId: params.modelId,
+          modelProvider: nextProvider,
+          modelId: nextModelId,
           thinkingLevel: params.thinkingLevel,
           scope: params.scope,
         },

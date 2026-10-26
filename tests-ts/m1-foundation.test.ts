@@ -35,6 +35,10 @@ describe("M1: pi-durable TS Foundation, Multi-Provider Settings, Scope Toggles &
       db,
       customProviders: [faux.provider],
     });
+    // 未显式指定模型时提交会跟随全局默认，测试里必须把全局默认也指向 faux，
+    // 否则请求会落到真实网络端点。
+    db.setSetting("default_provider", "faux");
+    db.setSetting("llm_model", "faux-reasoner");
     app = createApp(runtime);
   });
 
