@@ -1301,7 +1301,12 @@ function ChatMessageItem({
             )}
 
            {/* Answer Content or In-progress Prompt */}
-            {(msg.status === 'streaming' || msg.status === 'approved') && !msg.content ? (
+            {msg.status === 'failed' ? (
+              <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-lg">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span className="break-all">{msg.content || '模型调用失败'}</span>
+              </div>
+            ) : (msg.status === 'streaming' || msg.status === 'approved') && !msg.content ? (
               <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
                 <Sparkles className="w-4 h-4 animate-spin text-primary" />
                 <span className="text-xs">助手正在思考与响应中，请稍候...</span>

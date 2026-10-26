@@ -40,7 +40,7 @@ export interface FormattedMessage {
   session_id: string;
   role: "user" | "assistant";
   content: string;
-  status: "completed" | "streaming" | "interrupted";
+  status: "completed" | "streaming" | "interrupted" | "failed";
   created_at: string;
   sources: Array<{
     text: string;
@@ -432,10 +432,13 @@ export class MemoriaAgentRuntime {
 
     const toolCallSpanMap = new Map<string, NonNullable<FormattedMessage["trace"]>["spans"][number]>();
 
+    // 重试期间每次失败尝试都会落一条 stopReason="error" 的助手条目；只把最后一次保留为一条失败消息。
+    let pendingError: { entryId: number; message: string } | undefined;
+
     const flushAssistantTurn = (
       entryId: number,
       text: string,
-      status: "completed" | "streaming" | "interrupted",
+      status: "completed" | "streaming" | "interrupted" | "failed",
     ) => {
       const reasoningText = currentTurnReasoning.join("\n\n").trim() || null;
       const spans = [...currentTurnSpans];
@@ -480,8 +483,16 @@ export class MemoriaAgentRuntime {
       toolCallSpanMap.clear();
     };
 
+    const flushPendingError = () => {
+      if (pendingError === undefined) return;
+      const { entryId, message } = pendingError;
+      pendingError = undefined;
+      flushAssistantTurn(entryId, message, "failed");
+    };
+
     for (const entry of entries) {
       if (entry.kind === "pi.user") {
+        flushPendingError();
         const userMsg = entry.model?.[0] as any;
         const text =
           typeof userMsg?.content === "string"
@@ -509,6 +520,15 @@ export class MemoriaAgentRuntime {
         const blocks = Array.isArray(asst.content) ? asst.content : [];
         const textParts: string[] = [];
         let hasToolCalls = false;
+
+        if (asst.stopReason === "error") {
+          pendingError = {
+            entryId: Number(entry.id),
+            message: asst.errorMessage || "模型调用失败",
+          };
+          continue;
+        }
+        pendingError = undefined;
 
         if (asst.usage) {
           const inp = Number(asst.usage.input ?? 0);
@@ -609,6 +629,9 @@ export class MemoriaAgentRuntime {
         }
       }
       flushAssistantTurn(Date.now(), textParts.join("\n"), "streaming");
+    } else {
+      // 重试仍在进行时不要提前宣告失败；只有这一轮彻底结束才落失败消息。
+      flushPendingError();
     }
 
     return messages;
