@@ -13,6 +13,10 @@ import type {
   ThinkingLevel,
 } from "../../shared/types.ts";
 
+// QQBot 审计日志的容量上限：防止网关重连风暴时表无限增长。
+const QQ_LOGS_MAX_ROWS = 5000;
+const QQ_LOGS_TRIM_EVERY = 200;
+
 export const DEFAULT_HOST_DANGEROUS_PATTERNS = [
   String.raw`\brm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)\s+(?:/|/\*|\.\.|\./\.\.)(?:\s|$)`,
   String.raw`\brm\s+-[a-zA-Z]*\s+(?:/|/\*)(?:\s|$)`,
@@ -52,6 +56,7 @@ export function maskSecret(value: string): string {
 export class AppDatabase {
   readonly raw: DatabaseSync;
   readonly dbPath: string;
+  private qqbotLogWrites = 0;
 
   constructor(dbPath = process.env.DB_PATH || "./data/memoria.db") {
     this.dbPath = dbPath;
@@ -1037,6 +1042,10 @@ export class AppDatabase {
         entry.durationMs ?? 0,
         entry.details ?? null,
       );
+    // 写入时就地裁剪，避免调用方忘记调用；每 200 条触发一次以免每条都扫全表。
+    if (++this.qqbotLogWrites % QQ_LOGS_TRIM_EVERY === 0) {
+      this.trimQQBotLogs(QQ_LOGS_MAX_ROWS);
+    }
   }
 
   listQQBotLogs(params?: { category?: string; level?: string; limit?: number; offset?: number }) {
@@ -1053,8 +1062,9 @@ export class AppDatabase {
       args.push(params.level);
     }
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    // 同一毫秒内写入的事件时间戳相同，用 rowid 兼作并列次序键，保证新的在前。
     return this.raw
-      .prepare(`SELECT * FROM qqbot_logs ${whereSql} ORDER BY timestamp DESC LIMIT ? OFFSET ?`)
+      .prepare(`SELECT * FROM qqbot_logs ${whereSql} ORDER BY timestamp DESC, rowid DESC LIMIT ? OFFSET ?`)
       .all(...args, limit, offset);
   }
 
@@ -1085,6 +1095,21 @@ export class AppDatabase {
     } else {
       this.raw.prepare("DELETE FROM qqbot_logs").run();
     }
+  }
+
+  /**
+   * 只保留最新的 maxRows 条。QQ 网关重连风暴时事件会成批涌入，
+   * 没有裁剪的话表只增不减。
+   * 同一毫秒内的事件时间戳相同，因此用 rowid 兼作并列次序键。
+   */
+  trimQQBotLogs(maxRows: number): void {
+    this.raw
+      .prepare(
+        `DELETE FROM qqbot_logs WHERE rowid NOT IN (
+           SELECT rowid FROM qqbot_logs ORDER BY timestamp DESC, rowid DESC LIMIT ?
+         )`,
+      )
+      .run(maxRows);
   }
 
   private formatHostRow(r: any) {

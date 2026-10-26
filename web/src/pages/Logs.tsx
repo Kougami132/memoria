@@ -55,7 +55,7 @@ export default function Logs() {
   const [systemSearch, setSystemSearch] = useState<string>('')
   const [systemFileSize, setSystemFileSize] = useState<number | undefined>(undefined)
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true)
-  const terminalEndRef = useRef<HTMLDivElement | null>(null)
+  const terminalScrollRef = useRef<HTMLDivElement | null>(null)
   const [stickToBottom, setStickToBottom] = useState<boolean>(true)
 
   const fetchInvocations = useCallback(async () => {
@@ -163,6 +163,22 @@ export default function Logs() {
     }, 4000)
     return () => clearInterval(timer)
   }, [activeTab, autoRefresh, fetchSystemLogs])
+
+  // 锁定底部时，新日志到达后把滚动容器贴到末尾。
+  // 自动刷新每 4s 整体替换列表，不跟随就永远停在旧内容上。
+  useEffect(() => {
+    if (!stickToBottom) return
+    const el = terminalScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [systemLogs, stickToBottom, activeTab])
+
+  // 用户手动上滚查看历史时自动解除锁定，否则 4s 后会被强行拉回底部。
+  const handleTerminalScroll = () => {
+    const el = terminalScrollRef.current
+    if (!el || !stickToBottom) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    if (!atBottom) setStickToBottom(false)
+  }
 
   const formatTime = (iso: string) => {
     try {
@@ -810,7 +826,7 @@ export default function Logs() {
 
             {/* Embedded Terminal Console */}
             <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-3 font-mono text-[11px] overflow-auto shadow-inner text-zinc-300 flex flex-col justify-between">
-              <div className="space-y-1 overflow-auto flex-1 pr-1 select-text">
+              <div ref={terminalScrollRef} onScroll={handleTerminalScroll} className="space-y-1 overflow-auto flex-1 pr-1 select-text">
                 {systemLogs.length === 0 ? (
                   <div className="text-zinc-500 py-12 text-center">
                     {systemLoading ? '正在拉取系统日志...' : '暂无匹配的系统运行日志'}
@@ -861,7 +877,6 @@ export default function Logs() {
                     )
                   })
                 )}
-                <div ref={terminalEndRef} />
               </div>
 
               {/* Terminal Footer Bar */}

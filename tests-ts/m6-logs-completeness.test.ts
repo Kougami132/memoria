@@ -217,3 +217,45 @@ describe("系统日志：startServer 生命周期", () => {
     }
   }, 40000);
 });
+
+describe("QQBot 审计日志：容量上限", () => {
+  it("超出上限时裁剪最旧记录，且总量不越界", async () => {
+    const db = new AppDatabase(":memory:");
+    for (let i = 0; i < 5; i++) {
+      db.logQQBotEvent({
+        category: "connection",
+        level: "INFO",
+        eventType: "READY",
+        summary: `第 ${i} 条`,
+      });
+    }
+
+    // 上限设为 3：应只保留最新 3 条。
+    db.trimQQBotLogs(3);
+
+    const rows = db.listQQBotLogs({ limit: 100 });
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r: any) => r.summary)).toEqual(["第 4 条", "第 3 条", "第 2 条"]);
+  });
+});
+
+describe("QQBot 审计日志：写入端自动裁剪", () => {
+  it("持续写入时总量不会无限增长", async () => {
+    const db = new AppDatabase(":memory:");
+    // 远超上限地写入，模拟网关重连风暴。
+    for (let i = 0; i < 6000; i++) {
+      db.logQQBotEvent({
+        category: "connection",
+        level: "WARN",
+        eventType: "DISCONNECTED",
+        summary: `重连 ${i}`,
+      });
+    }
+
+    const total = (db.raw.prepare("SELECT COUNT(*) AS c FROM qqbot_logs").get() as any).c;
+    expect(total).toBeLessThanOrEqual(5000);
+    // 最新的记录必须还在。
+    const newest = db.listQQBotLogs({ limit: 1 })[0] as any;
+    expect(newest.summary).toBe("重连 5999");
+  });
+});
