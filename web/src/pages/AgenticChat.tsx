@@ -436,7 +436,7 @@ export function AgenticChat() {
         } else if (event.type === 'thought_delta') {
           setStreamState((prev) => prev ? {
             ...prev,
-            thought: prev.thought + (event.delta || ''),
+            thought: event.replace ? (event.delta || '') : prev.thought + (event.delta || ''),
           } : null)
         } else if (event.type === 'trace_span') {
           if (event.span) {
@@ -466,7 +466,7 @@ export function AgenticChat() {
         } else if (event.type === 'answer_delta') {
           setStreamState((prev) => prev ? {
             ...prev,
-            answer: prev.answer + (event.delta || ''),
+            answer: event.replace ? (event.delta || '') : prev.answer + (event.delta || ''),
           } : null)
         } else if (event.type === 'done') {
           if (event.session_id && event.session_id !== activeSessionId) {

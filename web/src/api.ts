@@ -4,7 +4,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${BASE}${path}`, init)
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
   if (r.status === 204) return undefined as T
-  return r.json()
+  return (await r.json()) as T
 }
 
 const json = (body: unknown) => ({
@@ -365,6 +365,9 @@ export interface AgentStreamEvent {
   user_message_id?: string
   span?: AgentTraceSpan
   delta?: string
+  // `thought_delta` / `answer_delta` 默认由消费端追加；置 true 表示用本事件的文本整体替换已显示内容，
+  // 用于权威全文与已发送文本不一致时（例如模型重试或上游改写已生成内容）。
+  replace?: boolean
   detail?: string
   answer?: string
   sources?: AgentSource[]
@@ -432,6 +435,95 @@ export const submitToConversation = (
     ...json(data),
   })
 
+/**
+ * 将 pi-durable 的 partial 事件归约为增量文本。
+ *
+ * pi-durable 的 partial 是「整条消息的最新快照」而非纯增量：`message_start` / `block` / `message` /
+ * `message_end` 携带权威全文，而节流的 partial 提交（`partialIntervalMs`）会吞掉最后一段 delta。
+ * 所以这里按 `contentIndex` 维护在飞消息的块，增量只追加、快照只对账，再叠加已完成的轮次。
+ */
+export function createStreamTextReconciler() {
+  let committedThought = ''
+  let committedAnswer = ''
+  const live = new Map<number, { kind: 'thought' | 'answer'; text: string }>()
+  let renderedThought = ''
+  let renderedAnswer = ''
+
+  const liveText = (kind: 'thought' | 'answer') => {
+    // 与 runtime.formatTranscriptToMessages 的拼接一致：思维链块之间用空行，文本块之间用换行。
+    const sep = kind === 'thought' ? '\n\n' : '\n'
+    const parts: string[] = []
+    for (const [, block] of [...live].sort((a, b) => a[0] - b[0])) {
+      if (block.kind === kind && block.text) parts.push(block.text)
+    }
+    return parts.join(sep)
+  }
+  /** 用一条权威消息重置在飞块（`snapshot` / `message_start` / `block` / `message` / `message_end`）。 */
+  const loadBlocks = (message: any) => {
+    live.clear()
+    // 只有助手消息携带思维链与回答；工具结果/用户消息也会走 `message_start`。
+    if (message?.role !== undefined && message.role !== 'assistant') return
+    const blocks = Array.isArray(message?.content) ? message.content : []
+    blocks.forEach((block: any, index: number) => {
+      if (block.type === 'thinking' && typeof block.thinking === 'string') {
+        live.set(index, { kind: 'thought', text: block.thinking })
+      } else if (block.type === 'text' && typeof block.text === 'string') {
+        live.set(index, { kind: 'answer', text: block.text })
+      }
+    })
+  }
+
+  return {
+    loadBlocks,
+    /** 把增量变更应用到在飞块（`message_update.changes`）。 */
+    applyChanges(changes: readonly any[]) {
+      for (const ch of changes) {
+        if (ch.type === 'thinking_delta' || ch.type === 'text_delta') {
+          const kind = ch.type === 'thinking_delta' ? 'thought' : 'answer'
+          const block = live.get(ch.contentIndex)
+          if (block && block.kind === kind) block.text += ch.delta
+          else live.set(ch.contentIndex, { kind, text: ch.delta })
+        } else if (ch.type === 'thinking_start' || ch.type === 'text_start') {
+          const kind = ch.type === 'thinking_start' ? 'thought' : 'answer'
+          const text = (kind === 'thought' ? ch.block?.thinking : ch.block?.text) ?? ''
+          live.set(ch.contentIndex, { kind, text })
+        } else if (ch.type === 'block') {
+          if (ch.block?.type === 'thinking') live.set(ch.contentIndex, { kind: 'thought', text: ch.block.thinking ?? '' })
+          else if (ch.block?.type === 'text') live.set(ch.contentIndex, { kind: 'answer', text: ch.block.text ?? '' })
+          else live.delete(ch.contentIndex)
+        } else if (ch.type === 'message') {
+          loadBlocks(ch.message)
+        }
+      }
+    },
+    /** 已渲染文本是权威来源：增量只能追加，快照与已渲染不一致时整体替换。 */
+    *reconcile(): Generator<AgentStreamEvent> {
+      const turn = (committed: string, current: string, sep: string) =>
+        committed && current ? `${committed}${sep}${current}` : committed + current
+      const wantThought = turn(committedThought, liveText('thought'), '\n\n')
+      const wantAnswer = turn(committedAnswer, liveText('answer'), '\n')
+      for (const [kind, want, rendered] of [
+        ['thought', wantThought, renderedThought],
+        ['answer', wantAnswer, renderedAnswer],
+      ] as const) {
+        if (want === rendered) continue
+        if (kind === 'thought') renderedThought = want
+        else renderedAnswer = want
+        const type = kind === 'thought' ? 'thought_delta' : 'answer_delta'
+        yield want.startsWith(rendered)
+          ? { type, delta: want.slice(rendered.length) }
+          : { type, delta: want, replace: true }
+      }
+    },
+    /** 一轮结束：把已渲染文本固化为后续轮次的前缀。 */
+    commit() {
+      committedThought = renderedThought
+      committedAnswer = renderedAnswer
+      live.clear()
+    },
+  }
+}
+
 export async function* streamAgentChat(
   message: string,
   sessionId?: string,
@@ -476,6 +568,7 @@ export async function* streamAgentChat(
   const decoder = new TextDecoder()
   let buffer = ''
   const toolStartTimes = new Map<string, number>()
+  const text = createStreamTextReconciler()
 
   while (true) {
     const { done, value } = await reader.read()
@@ -493,28 +586,23 @@ export async function* streamAgentChat(
         const ev = JSON.parse(dataStr)
         if (ev.type === 'snapshot') {
           const snap = ev.snapshot
-          if (snap?.generation?.message?.content) {
-            for (const block of snap.generation.message.content) {
-              if (block.type === 'thinking' && block.thinking) {
-                yield { type: 'thought_delta', delta: block.thinking }
-              } else if (block.type === 'text' && block.text) {
-                yield { type: 'answer_delta', delta: block.text }
-              }
-            }
-          }
+          text.loadBlocks(snap?.generation?.message)
+          yield* text.reconcile()
           // If the run already finished before we attached (fast response!), finish immediately
           if (!snap?.run && !snap?.generation && (!snap?.tools || snap.tools.length === 0)) {
             yield { type: 'done', session_id: activeSessionId }
             return
           }
+        } else if (ev.type === 'message_start') {
+          text.loadBlocks(ev.message)
+          yield* text.reconcile()
         } else if (ev.type === 'message_update' && Array.isArray(ev.changes)) {
-          for (const ch of ev.changes) {
-            if (ch.type === 'thinking_delta' && ch.delta) {
-              yield { type: 'thought_delta', delta: ch.delta }
-            } else if (ch.type === 'text_delta' && ch.delta) {
-              yield { type: 'answer_delta', delta: ch.delta }
-            }
-          }
+          text.applyChanges(ev.changes)
+          yield* text.reconcile()
+        } else if (ev.type === 'message_end') {
+          text.loadBlocks(ev.entry?.model?.[0])
+          yield* text.reconcile()
+          text.commit()
         } else if (ev.type === 'tool_execution_start') {
           toolStartTimes.set(ev.toolCallId, Date.now())
           const isSubagent = ev.toolName === 'delegate_subagent'
@@ -769,7 +857,7 @@ export const importBackup = async (file: File): Promise<RestoreResult> => {
     body: fd,
   })
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
-  return r.json()
+  return (await r.json()) as RestoreResult
 }
 
 export interface VaultPathEntry {
