@@ -31,6 +31,7 @@ import { MemoriaScopeDoc } from "./documents.ts";
 import {
   createMemoriaExtensions,
   resolveExtensionsForScope,
+  resolveToolAgentMeta,
   type MemoriaExtensionsBundle,
 } from "./extensions.ts";
 import { ModelsRegistryManager } from "./models-registry.ts";
@@ -459,6 +460,7 @@ export class MemoriaAgentRuntime {
     let currentTurnSpans: NonNullable<FormattedMessage["trace"]>["spans"] = [];
     let currentTurnSources: FormattedMessage["sources"] = [];
     let currentTurnTokens = { prompt: 0, completion: 0, total: 0 };
+    const contextMessages: Array<Record<string, unknown>> = [];
 
     const toolCallSpanMap = new Map<string, NonNullable<FormattedMessage["trace"]>["spans"][number]>();
 
@@ -480,6 +482,10 @@ export class MemoriaAgentRuntime {
         !isInFlight && !s.ended_at ? { ...s, ended_at: nowIso } : s,
       );
       const sources = [...currentTurnSources];
+      const hasDuration = spans.some((s) => typeof s.duration_ms === "number");
+      const totalDurationMs = hasDuration
+        ? spans.reduce((acc, s) => acc + (typeof s.duration_ms === "number" ? s.duration_ms : 0), 0)
+        : null;
       const trace =
         spans.length > 0 || reasoningText || currentTurnTokens.total > 0
           ? {
@@ -488,7 +494,7 @@ export class MemoriaAgentRuntime {
               metadata: {},
               spans,
               summary: {
-                duration_ms: null,
+                duration_ms: totalDurationMs,
                 reasoning: reasoningText,
                 span_count: spans.length,
                 tool_count: spans.filter((s) => s.type === "tool").length,
@@ -529,7 +535,17 @@ export class MemoriaAgentRuntime {
     };
 
     for (const entry of entries) {
-      if (entry.kind === "pi.user") {
+      if (entry.kind === "pi.system") {
+        const sysMsg = entry.model?.[0] as any;
+        if (sysMsg) {
+          const sections = sysMsg.sections ? Object.values(sysMsg.sections).filter(Boolean).join("\n\n") : "";
+          const sysContent = typeof sysMsg.content === "string" ? sysMsg.content : "";
+          const combined = [sysContent, sections].filter(Boolean).join("\n\n");
+          if (combined) {
+            contextMessages.push({ role: "system", content: combined });
+          }
+        }
+      } else if (entry.kind === "pi.user") {
         flushPendingError();
         const userMsg = entry.model?.[0] as any;
         const text =
@@ -541,6 +557,7 @@ export class MemoriaAgentRuntime {
                   .map((b: any) => b.text)
                   .join("\n")
               : "";
+        contextMessages.push({ role: "user", content: text });
         messages.push({
           id: `msg_${entry.id}`,
           entry_id: Number(entry.id),
@@ -556,7 +573,9 @@ export class MemoriaAgentRuntime {
         const asst = entry.model?.[0] as any;
         if (!asst) continue;
         const blocks = Array.isArray(asst.content) ? asst.content : [];
+        const genThinkingParts: string[] = [];
         const textParts: string[] = [];
+        const genToolCalls: Array<{ id: string; name: string; arguments: unknown }> = [];
         let hasToolCalls = false;
 
         if (asst.stopReason === "error") {
@@ -568,6 +587,7 @@ export class MemoriaAgentRuntime {
         }
         pendingError = undefined;
 
+        let genUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null;
         if (asst.usage) {
           const inp = Number(asst.usage.input ?? 0);
           const out = Number(asst.usage.output ?? 0);
@@ -575,32 +595,78 @@ export class MemoriaAgentRuntime {
           currentTurnTokens.prompt += inp;
           currentTurnTokens.completion += out;
           currentTurnTokens.total += tot;
+          if (inp > 0 || out > 0 || tot > 0) {
+            genUsage = { prompt_tokens: inp, completion_tokens: out, total_tokens: tot };
+          }
         }
 
         for (const block of blocks) {
           if (block.type === "thinking" && block.thinking) {
             currentTurnReasoning.push(block.thinking);
+            genThinkingParts.push(block.thinking);
           } else if (block.type === "text" && block.text) {
             textParts.push(block.text);
           } else if (block.type === "toolCall") {
             hasToolCalls = true;
-            const span: NonNullable<FormattedMessage["trace"]>["spans"][number] = {
+            genToolCalls.push({
               id: block.id || `call_${entry.id}`,
-              type: "tool",
               name: block.name,
-              agent_id: block.name === "delegate_subagent" ? "subagent" : "main",
-              agent_name: block.name === "delegate_subagent" ? "Subagent" : "Agent",
-              agent_role: block.name === "delegate_subagent" ? "specialist" : "orchestrator",
-              started_at: typeof asst.timestamp === "number" ? new Date(asst.timestamp).toISOString() : undefined,
-              data: {
-                input: block.arguments,
-              } as Record<string, unknown>,
-            };
-            currentTurnSpans.push(span);
-            if (block.id) {
-              toolCallSpanMap.set(block.id, span);
-            }
+              arguments: block.arguments,
+            });
           }
+        }
+
+        const startedMs = typeof asst.timestamp === "number" ? asst.timestamp : undefined;
+        const durationMs = typeof asst.durationMs === "number" ? asst.durationMs : 0;
+        const endedMs = startedMs !== undefined ? startedMs + durationMs : undefined;
+        const genThinking = genThinkingParts.join("\n\n").trim();
+        const genText = textParts.join("\n").trim();
+        const genOutput: Record<string, unknown> = {};
+        if (genThinking) genOutput.thought = genThinking;
+        if (genToolCalls.length > 0) genOutput.tool_calls = genToolCalls;
+        if (genText) genOutput.content = genText;
+        if (genUsage) genOutput.usage = genUsage;
+
+        currentTurnSpans.push({
+          id: `gen_${entry.id}`,
+          type: "generation",
+          name: asst.model || "llm",
+          agent_id: "orchestrator",
+          agent_name: "Orchestrator",
+          agent_role: "orchestrator",
+          started_at: startedMs !== undefined ? new Date(startedMs).toISOString() : new Date().toISOString(),
+          ended_at: endedMs !== undefined ? new Date(endedMs).toISOString() : new Date().toISOString(),
+          duration_ms: durationMs,
+          reasoning: genThinking || null,
+          usage: genUsage,
+          data: {
+            input: [...contextMessages],
+            output: Object.keys(genOutput).length > 0 ? genOutput : genText || null,
+          },
+        });
+
+        contextMessages.push({
+          role: "assistant",
+          ...(genText ? { content: genText } : {}),
+          ...(genToolCalls.length > 0 ? { tool_calls: genToolCalls } : {}),
+        });
+
+        for (const tc of genToolCalls) {
+          const roleMeta = resolveToolAgentMeta(tc.name);
+          const span: NonNullable<FormattedMessage["trace"]>["spans"][number] = {
+            id: tc.id,
+            type: "tool",
+            name: tc.name,
+            agent_id: roleMeta.agent_id,
+            agent_name: roleMeta.agent_name,
+            agent_role: roleMeta.agent_role,
+            started_at: endedMs !== undefined ? new Date(endedMs).toISOString() : undefined,
+            data: {
+              input: tc.arguments,
+            } as Record<string, unknown>,
+          };
+          currentTurnSpans.push(span);
+          toolCallSpanMap.set(tc.id, span);
         }
 
         if (!hasToolCalls) {
@@ -608,7 +674,7 @@ export class MemoriaAgentRuntime {
             asst.stopReason === "aborted"
               ? "interrupted"
               : "completed";
-          flushAssistantTurn(Number(entry.id), textParts.join("\n").trim(), stopStatus);
+          flushAssistantTurn(Number(entry.id), genText, stopStatus);
         }
       } else if (entry.kind === "pi.tool-result") {
         const toolMsg = entry.model?.[0] as any;
@@ -619,6 +685,12 @@ export class MemoriaAgentRuntime {
               .map((b: any) => b.text)
               .join("\n")
           : "";
+        contextMessages.push({
+          role: "tool",
+          tool_call_id: toolMsg.toolCallId,
+          name: toolMsg.toolName,
+          content: outText,
+        });
         const span = toolCallSpanMap.get(toolMsg.toolCallId);
         if (span && span.data) {
           span.data.output = outText;
@@ -637,6 +709,18 @@ export class MemoriaAgentRuntime {
             if (Array.isArray(maybeSources)) {
               currentTurnSources.push(...maybeSources);
             }
+            const maybeUsage = (toolMsg.details as any)?.usage;
+            if (maybeUsage && typeof maybeUsage === "object") {
+              const p = Number(maybeUsage.prompt_tokens ?? 0);
+              const c = Number(maybeUsage.completion_tokens ?? 0);
+              const t = Number(maybeUsage.total_tokens ?? p + c);
+              if (p > 0 || c > 0 || t > 0) {
+                span.usage = { prompt_tokens: p, completion_tokens: c, total_tokens: t };
+                currentTurnTokens.prompt += p;
+                currentTurnTokens.completion += c;
+                currentTurnTokens.total += t;
+              }
+            }
           }
           if (toolMsg.isError) {
             span.error = outText || "Tool execution failed";
@@ -647,15 +731,57 @@ export class MemoriaAgentRuntime {
 
     // If a run is currently active in `pi.live`, append the in-flight streaming assistant message
     if (live?.run || live?.generation || (Array.isArray(live?.tools) && live.tools.length > 0)) {
+      const inFlightId = Number(live?.run?.inputs?.[live.run.inputs.length - 1]) || 0;
       const partialMsg = live?.generation?.message;
       const blocks = Array.isArray(partialMsg?.content) ? partialMsg.content : [];
+      const liveThinkingParts: string[] = [];
       const textParts: string[] = [];
       for (const b of blocks) {
         if (b.type === "thinking" && b.thinking) {
           currentTurnReasoning.push(b.thinking);
+          liveThinkingParts.push(b.thinking);
         } else if (b.type === "text" && b.text) {
           textParts.push(b.text);
         }
+      }
+      if (live?.generation) {
+        const inp = Number(partialMsg?.usage?.input ?? 0);
+        const out = Number(partialMsg?.usage?.output ?? 0);
+        const tot = Number(partialMsg?.usage?.totalTokens ?? inp + out);
+        const liveUsage =
+          inp > 0 || out > 0 || tot > 0
+            ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
+            : null;
+        if (liveUsage) {
+          currentTurnTokens.prompt += inp;
+          currentTurnTokens.completion += out;
+          currentTurnTokens.total += tot;
+        }
+        const liveThought = liveThinkingParts.join("\n\n").trim();
+        const liveText = textParts.join("\n").trim();
+        const liveOut: Record<string, unknown> = {};
+        if (liveThought) liveOut.thought = liveThought;
+        if (liveText) liveOut.content = liveText;
+        if (liveUsage) liveOut.usage = liveUsage;
+        currentTurnSpans.push({
+          id: `gen_live_${inFlightId}_${live.generation.attempt ?? 1}`,
+          type: "generation",
+          name: partialMsg?.model || this.db.getEffectiveSettings().llm_model || "llm",
+          agent_id: "orchestrator",
+          agent_name: "Orchestrator",
+          agent_role: "orchestrator",
+          started_at:
+            typeof partialMsg?.timestamp === "number"
+              ? new Date(partialMsg.timestamp).toISOString()
+              : new Date().toISOString(),
+          ended_at: undefined,
+          reasoning: liveThought || null,
+          usage: liveUsage,
+          data: {
+            input: [...contextMessages],
+            output: Object.keys(liveOut).length > 0 ? liveOut : null,
+          },
+        });
       }
       if (Array.isArray(live?.tools)) {
         for (const t of live.tools) {
@@ -673,13 +799,14 @@ export class MemoriaAgentRuntime {
               existingSpan.ended_at = new Date().toISOString();
             }
           } else {
+            const roleMeta = resolveToolAgentMeta(t.name);
             currentTurnSpans.push({
               id: t.callId,
               type: "tool",
               name: t.name,
-              agent_id: t.name === "delegate_subagent" ? "subagent" : "main",
-              agent_name: t.name === "delegate_subagent" ? "Subagent" : "Agent",
-              agent_role: t.name === "delegate_subagent" ? "specialist" : "orchestrator",
+              agent_id: roleMeta.agent_id,
+              agent_name: roleMeta.agent_name,
+              agent_role: roleMeta.agent_role,
               ended_at: t.status === "done" ? new Date().toISOString() : undefined,
               data: {
                 input: t.args,
@@ -690,10 +817,6 @@ export class MemoriaAgentRuntime {
           }
         }
       }
-      // 在飞消息的身份必须跨轮询保持稳定：之前用 Date.now() 当 entryId，每轮询一次 id 就变一次，
-      // 前端按 id 作 key 于是每 1.5s 重建一次气泡，展开的 CoT / 轨迹被重置为收起。
-      // 以本轮 run 的 submission id 作为稳定身份；同一轮里多次 flush 共享同一个 id。
-      const inFlightId = Number(live?.run?.inputs?.[live.run.inputs.length - 1]) || 0;
       // 审批挂起时把 approval 写进消息，刷新或重新进入会话后才能恢复审批卡片，
       // 否则页面只剩「思考与响应中」，用户无从批准，只能等到 5 分钟审批超时。
       // 注意：只有仍处于 pending 的审批才算数；用户点过允许后 SSH 仍在跑的窗口期不能再当成待审批返回。

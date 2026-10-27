@@ -24,6 +24,173 @@ export interface MemoriaExtensionsBundle {
   all: Extension[];
 }
 
+export function resolveToolAgentMeta(toolName: string): {
+  agent_id: string;
+  agent_name: string;
+  agent_role: "orchestrator" | "specialist";
+} {
+  if (toolName === "delegate_subagent") {
+    return { agent_id: "subagent", agent_name: "Subagent", agent_role: "specialist" };
+  }
+  if (
+    toolName === "kb_search" ||
+    toolName === "kb_read" ||
+    toolName === "list_knowledge_bases" ||
+    toolName === "search_knowledge_base" ||
+    toolName === "read_knowledge_document" ||
+    toolName === "delegate_to_knowledge_agent"
+  ) {
+    return { agent_id: "knowledge_agent", agent_name: "KnowledgeAgent", agent_role: "specialist" };
+  }
+  if (
+    toolName === "host_exec" ||
+    toolName === "host_read_log" ||
+    toolName === "list_hosts" ||
+    toolName === "get_host_info" ||
+    toolName === "run_host_command" ||
+    toolName === "read_host_log_tail" ||
+    toolName === "delegate_to_host_agent"
+  ) {
+    return { agent_id: "host_agent", agent_name: "HostAgent", agent_role: "specialist" };
+  }
+  if (
+    toolName === "web_search" ||
+    toolName === "web_fetch" ||
+    toolName === "delegate_to_web_agent"
+  ) {
+    return { agent_id: "web_agent", agent_name: "WebAgent", agent_role: "specialist" };
+  }
+  return { agent_id: "main", agent_name: "Agent", agent_role: "orchestrator" };
+}
+
+function collectSubagentTrace(entries: readonly any[], parentCallId: string) {
+  const sources: any[] = [];
+  const spans: any[] = [];
+  const toolSpanMap = new Map<string, any>();
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+
+  for (const entry of entries) {
+    if (entry.kind === "pi.assistant") {
+      const asst = entry.model?.[0];
+      if (!asst || asst.stopReason === "error") continue;
+      const inp = Number(asst.usage?.input ?? 0);
+      const out = Number(asst.usage?.output ?? 0);
+      const tot = Number(asst.usage?.totalTokens ?? inp + out);
+      const genUsage =
+        inp > 0 || out > 0 || tot > 0
+          ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
+          : null;
+      if (genUsage) {
+        promptTokens += inp;
+        completionTokens += out;
+        totalTokens += tot;
+      }
+
+      const blocks = Array.isArray(asst.content) ? asst.content : [];
+      const thinkingParts: string[] = [];
+      const textParts: string[] = [];
+      const toolCalls: any[] = [];
+      for (const b of blocks) {
+        if (b.type === "thinking" && b.thinking) thinkingParts.push(b.thinking);
+        else if (b.type === "text" && b.text) textParts.push(b.text);
+        else if (b.type === "toolCall") toolCalls.push(b);
+      }
+
+      const startedMs = typeof asst.timestamp === "number" ? asst.timestamp : undefined;
+      const durationMs = typeof asst.durationMs === "number" ? asst.durationMs : null;
+      const endedMs =
+        startedMs !== undefined ? startedMs + (durationMs !== null ? durationMs : 0) : undefined;
+      const thought = thinkingParts.join("\n\n").trim();
+      const content = textParts.join("\n").trim();
+      const genOutput: Record<string, unknown> = {};
+      if (thought) genOutput.thought = thought;
+      if (toolCalls.length > 0) {
+        genOutput.tool_calls = toolCalls.map((tc) => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+        }));
+      }
+      if (content) genOutput.content = content;
+      if (genUsage) genOutput.usage = genUsage;
+
+      spans.push({
+        id: `sub_gen_${entry.id}`,
+        parent_id: parentCallId,
+        type: "generation",
+        name: asst.model || "llm",
+        agent_id: "subagent",
+        agent_name: "Subagent",
+        agent_role: "specialist",
+        started_at: startedMs !== undefined ? new Date(startedMs).toISOString() : undefined,
+        ended_at: endedMs !== undefined ? new Date(endedMs).toISOString() : new Date().toISOString(),
+        duration_ms: durationMs,
+        reasoning: thought || null,
+        usage: genUsage,
+        data: {
+          output: Object.keys(genOutput).length > 0 ? genOutput : content || null,
+        },
+      });
+
+      for (const tc of toolCalls) {
+        const roleMeta = resolveToolAgentMeta(tc.name);
+        const toolSpan = {
+          id: tc.id || `sub_call_${entry.id}`,
+          parent_id: parentCallId,
+          type: "tool",
+          name: tc.name,
+          agent_id: roleMeta.agent_id,
+          agent_name: roleMeta.agent_name,
+          agent_role: roleMeta.agent_role,
+          started_at: endedMs !== undefined ? new Date(endedMs).toISOString() : undefined,
+          data: { input: tc.arguments } as Record<string, unknown>,
+        };
+        spans.push(toolSpan);
+        if (tc.id) toolSpanMap.set(tc.id, toolSpan);
+      }
+    } else if (entry.kind === "pi.tool-result") {
+      const toolMsg = entry.model?.[0];
+      if (!toolMsg) continue;
+      const outText = Array.isArray(toolMsg.content)
+        ? toolMsg.content
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("\n")
+        : "";
+      const span = toolSpanMap.get(toolMsg.toolCallId);
+      if (span) {
+        span.data.output = outText;
+        span.ended_at =
+          typeof toolMsg.timestamp === "number"
+            ? new Date(toolMsg.timestamp).toISOString()
+            : new Date().toISOString();
+        if (typeof toolMsg.durationMs === "number") {
+          span.duration_ms = toolMsg.durationMs;
+        }
+        if (toolMsg.details) {
+          span.data.details = toolMsg.details;
+          const maybeSources = (toolMsg.details as any)?.sources;
+          if (Array.isArray(maybeSources)) {
+            sources.push(...maybeSources);
+          }
+        }
+        if (toolMsg.isError) {
+          span.error = outText || "Tool execution failed";
+        }
+      }
+    }
+  }
+
+  const usage =
+    promptTokens > 0 || completionTokens > 0 || totalTokens > 0
+      ? { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens }
+      : null;
+
+  return { sources, spans, usage };
+}
+
 function extractAssistantText(entryRecord: { model?: readonly any[] } | undefined): string {
   const msg = entryRecord?.model?.[0];
   if (!msg || !Array.isArray(msg.content)) return "";
@@ -429,6 +596,23 @@ export function createMemoriaExtensions(
         replay: "safe",
         execute: async (args, api, context) => {
           const parentScope = await api.snapshot(MemoriaScopeDoc, api.conversationId, context);
+          const parentAgent = await api.agent(context);
+          const childScopeConfig: ConversationScope = {
+            kbIds: [...(parentScope?.kbIds ?? [])],
+            hostIds: [...(parentScope?.hostIds ?? [])],
+            hostSecurityModes: { ...(parentScope?.hostSecurityModes ?? {}) },
+            webSearch: Boolean(parentScope?.webSearch),
+            subagentEnabled: false,
+          };
+          const childExtensions = resolveExtensionsForScope(childScopeConfig, {
+            base,
+            knowledge,
+            host,
+            web,
+            subagent,
+            all: [base, knowledge, host, web, subagent],
+          });
+
           const childId = await api.commit(async (tx) => {
             const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
             if (existing !== undefined) return existing.id;
@@ -436,16 +620,16 @@ export function createMemoriaExtensions(
             const created = await tx.createConversation({
               ownership: { kind: "task", taskId: api.taskId },
             });
-            if (parentScope) {
-              const childScope = await tx.doc(MemoriaScopeDoc, created.id);
-              childScope.kbIds = [...parentScope.kbIds];
-              childScope.hostIds = [...parentScope.hostIds];
-              childScope.hostSecurityModes = { ...parentScope.hostSecurityModes };
-              childScope.webSearch = parentScope.webSearch;
-              childScope.subagentEnabled = false;
-            }
+            const childScope = await tx.doc(MemoriaScopeDoc, created.id);
+            childScope.kbIds = childScopeConfig.kbIds;
+            childScope.hostIds = childScopeConfig.hostIds;
+            childScope.hostSecurityModes = childScopeConfig.hostSecurityModes;
+            childScope.webSearch = childScopeConfig.webSearch;
+            childScope.subagentEnabled = false;
             await configure(tx, created.id, {
-              extensions: { remove: [subagent] },
+              ...(parentAgent.model ? { model: parentAgent.model } : {}),
+              thinkingLevel: parentAgent.thinkingLevel === "off" ? null : parentAgent.thinkingLevel,
+              extensions: childExtensions,
             });
             return created.id;
           }, context);
@@ -469,16 +653,32 @@ export function createMemoriaExtensions(
             context,
           );
           const settled = await submission.wait(context);
+          const childEntries = await api.commit(
+            async (tx) => (await tx.scanEntries({ conversationId: childId, order: "ascending" }, 200)).items,
+            context,
+          );
+          const childTrace = collectSubagentTrace(childEntries, api.callId);
+          const detailsPayload = {
+            conversationId: Number(childId),
+            task: args.task,
+            sources: childTrace.sources,
+            usage: childTrace.usage,
+            spans: childTrace.spans,
+          };
+          await api.details(detailsPayload, context);
+
           if (settled.status === "done" && settled.type === "input") {
             const answerEntry = await api.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
             const text = extractAssistantText(answerEntry);
             return {
               content: [{ type: "text", text: text || "(子智能体已完成任务，无文本输出)" }],
+              details: detailsPayload,
             };
           }
           return {
             content: [{ type: "text", text: `子智能体未完成: ${settled.status}` }],
             isError: true,
+            details: detailsPayload,
           };
         },
       }),

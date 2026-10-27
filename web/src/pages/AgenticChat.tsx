@@ -99,6 +99,13 @@ const mdComponents: Components = {
 }
 
 const TOOL_CN_MAP: Record<string, string> = {
+  kb_search: '检索知识库内容',
+  kb_read: '查看知识库文档全文',
+  host_exec: '远程执行受控命令',
+  host_read_log: '读取主机日志文件末尾',
+  web_search: '互联网网页检索',
+  web_fetch: '抓取网页正文内容',
+  delegate_subagent: '委派子智能体深入处理 (Subagent)',
   delegate_to_knowledge_agent: '委派知识库专家 (KnowledgeAgent)',
   delegate_to_host_agent: '委派主机运维专家 (HostAgent)',
   delegate_to_web_agent: '委派联网检索 (WebAgent)',
@@ -120,16 +127,19 @@ function getToolDisplayName(name?: string, type?: string): string {
 
 function getToolIcon(name?: string, type?: string) {
   if (type === 'generation') return <Cpu className="w-3.5 h-3.5 text-purple-500" />
+  if (name === 'delegate_subagent') return <BrainCircuit className="w-3.5 h-3.5 text-purple-500" />
   if (name === 'delegate_to_knowledge_agent') return <Database className="w-3.5 h-3.5 text-blue-500" />
   if (name === 'delegate_to_host_agent') return <Server className="w-3.5 h-3.5 text-indigo-500" />
-  if (name === 'delegate_to_web_agent') return <Globe className="w-3.5 h-3.5 text-sky-500" />
+  if (name === 'delegate_to_web_agent' || name === 'web_search' || name === 'web_fetch') {
+    return <Globe className="w-3.5 h-3.5 text-sky-500" />
+  }
   if (name === 'list_knowledge_bases') return <Database className="w-3.5 h-3.5 text-blue-500" />
-  if (name === 'search_knowledge_base') return <Search className="w-3.5 h-3.5 text-amber-500" />
-  if (name === 'read_knowledge_document') return <BookOpen className="w-3.5 h-3.5 text-emerald-500" />
+  if (name === 'search_knowledge_base' || name === 'kb_search') return <Search className="w-3.5 h-3.5 text-amber-500" />
+  if (name === 'read_knowledge_document' || name === 'kb_read') return <BookOpen className="w-3.5 h-3.5 text-emerald-500" />
   if (name === 'list_hosts') return <Server className="w-3.5 h-3.5 text-indigo-500" />
   if (name === 'get_host_info') return <Activity className="w-3.5 h-3.5 text-emerald-500" />
-  if (name === 'run_host_command') return <Terminal className="w-3.5 h-3.5 text-sky-500" />
-  if (name === 'read_host_log_tail') return <Terminal className="w-3.5 h-3.5 text-teal-500" />
+  if (name === 'run_host_command' || name === 'host_exec') return <Terminal className="w-3.5 h-3.5 text-sky-500" />
+  if (name === 'read_host_log_tail' || name === 'host_read_log') return <Terminal className="w-3.5 h-3.5 text-teal-500" />
   return <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
 }
 
@@ -527,7 +537,15 @@ export function AgenticChat() {
               const existingIndex = prev.traces.findIndex((s) => s.id === span.id)
               const updatedTraces = [...prev.traces]
               if (existingIndex >= 0) {
-                updatedTraces[existingIndex] = { ...updatedTraces[existingIndex], ...span }
+                const prevSpan = updatedTraces[existingIndex]
+                updatedTraces[existingIndex] = {
+                  ...prevSpan,
+                  ...span,
+                  data:
+                    prevSpan.data || span.data
+                      ? { ...(prevSpan.data || {}), ...(span.data || {}) }
+                      : undefined,
+                }
               } else {
                 updatedTraces.push(span)
               }
@@ -1646,8 +1664,11 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
   const rawData = span.data || {}
   const rawInput = (rawData as Record<string, unknown>).input ?? (rawData as Record<string, unknown>).args
   const rawOutput = (rawData as Record<string, unknown>).output ?? (rawData as Record<string, unknown>).result ?? (rawData as Record<string, unknown>).content
+  const childSpans: AgentTraceSpan[] = Array.isArray((rawData as any)?.details?.spans)
+    ? (rawData as any).details.spans
+    : []
 
-  const usage = span.usage || (rawData as any)?.usage
+  const usage = span.usage || (rawData as any)?.usage || (rawData as any)?.details?.usage
   const formattedInput = rawInput !== undefined ? (typeof rawInput === 'object' ? JSON.stringify(rawInput, null, 2) : String(rawInput)) : ''
   const formattedOutput = rawOutput !== undefined ? (typeof rawOutput === 'object' ? JSON.stringify(rawOutput, null, 2) : String(rawOutput)) : ''
   const formattedError = span.error ? (typeof span.error === 'object' ? JSON.stringify(span.error, null, 2) : String(span.error)) : ''
@@ -1667,6 +1688,10 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
                 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20'
                 : agentName.includes('Knowledge') || span.agent_id === 'knowledge_agent'
                 ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                : agentName.includes('Host') || span.agent_id === 'host_agent'
+                ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20'
+                : agentName.includes('Web') || span.agent_id === 'web_agent'
+                ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
                 : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
             }`}
           >
@@ -1738,6 +1763,18 @@ function TraceSpanCard({ span }: { span: AgentTraceSpan }) {
               <pre className="p-2 rounded bg-zinc-950 text-zinc-200 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap max-h-48">
                 {formattedOutput}
               </pre>
+            </div>
+          )}
+          {childSpans.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <div className="text-[10px] font-semibold text-muted-foreground">
+                子智能体内部执行轨迹 ({childSpans.length} 个步骤):
+              </div>
+              <div className="pl-2 border-l-2 border-primary/30 space-y-1.5">
+                {childSpans.map((child, idx) => (
+                  <TraceSpanCard key={child.id || idx} span={child} />
+                ))}
+              </div>
             </div>
           )}
           {formattedError && (

@@ -525,6 +525,97 @@ export function createStreamTextReconciler() {
   }
 }
 
+function resolveToolAgentMeta(toolName: string): {
+  agent_id: string
+  agent_name: string
+  agent_role: 'orchestrator' | 'specialist'
+} {
+  if (toolName === 'delegate_subagent') {
+    return { agent_id: 'subagent', agent_name: 'Subagent', agent_role: 'specialist' }
+  }
+  if (
+    toolName === 'kb_search' ||
+    toolName === 'kb_read' ||
+    toolName === 'list_knowledge_bases' ||
+    toolName === 'search_knowledge_base' ||
+    toolName === 'read_knowledge_document' ||
+    toolName === 'delegate_to_knowledge_agent'
+  ) {
+    return { agent_id: 'knowledge_agent', agent_name: 'KnowledgeAgent', agent_role: 'specialist' }
+  }
+  if (
+    toolName === 'host_exec' ||
+    toolName === 'host_read_log' ||
+    toolName === 'list_hosts' ||
+    toolName === 'get_host_info' ||
+    toolName === 'run_host_command' ||
+    toolName === 'read_host_log_tail' ||
+    toolName === 'delegate_to_host_agent'
+  ) {
+    return { agent_id: 'host_agent', agent_name: 'HostAgent', agent_role: 'specialist' }
+  }
+  if (toolName === 'web_search' || toolName === 'web_fetch' || toolName === 'delegate_to_web_agent') {
+    return { agent_id: 'web_agent', agent_name: 'WebAgent', agent_role: 'specialist' }
+  }
+  return { agent_id: 'main', agent_name: 'Agent', agent_role: 'orchestrator' }
+}
+
+function buildCompletedGenerationSpan(
+  spanId: string,
+  asstMsg: any,
+  fallbackModel: string,
+  fallbackStartMs?: number,
+): AgentTraceSpan {
+  const inp = Number(asstMsg?.usage?.input ?? 0)
+  const out = Number(asstMsg?.usage?.output ?? 0)
+  const tot = Number(asstMsg?.usage?.totalTokens ?? inp + out)
+  const usage =
+    inp > 0 || out > 0 || tot > 0
+      ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
+      : null
+  const blocks = Array.isArray(asstMsg?.content) ? asstMsg.content : []
+  const thinkingParts: string[] = []
+  const textParts: string[] = []
+  const toolCalls: Array<{ id: string; name: string; arguments: unknown }> = []
+  for (const b of blocks) {
+    if (b.type === 'thinking' && b.thinking) thinkingParts.push(b.thinking)
+    else if (b.type === 'text' && b.text) textParts.push(b.text)
+    else if (b.type === 'toolCall') {
+      toolCalls.push({ id: b.id, name: b.name, arguments: b.arguments })
+    }
+  }
+  const startedMs = typeof asstMsg?.timestamp === 'number' ? asstMsg.timestamp : (fallbackStartMs ?? Date.now())
+  const durationMs =
+    typeof asstMsg?.durationMs === 'number'
+      ? asstMsg.durationMs
+      : Math.max(0, Date.now() - startedMs)
+  const endedMs = startedMs + durationMs
+  const thought = thinkingParts.join('\n\n').trim()
+  const content = textParts.join('\n').trim()
+  const genOutput: Record<string, unknown> = {}
+  if (thought) genOutput.thought = thought
+  if (toolCalls.length > 0) genOutput.tool_calls = toolCalls
+  if (content) genOutput.content = content
+  if (usage) genOutput.usage = usage
+
+  return {
+    id: spanId,
+    type: 'generation',
+    name: asstMsg?.model || fallbackModel || 'llm',
+    agent_id: 'orchestrator',
+    agent_name: 'Orchestrator',
+    agent_role: 'orchestrator',
+    started_at: new Date(startedMs).toISOString(),
+    ended_at: new Date(endedMs).toISOString(),
+    duration_ms: durationMs,
+    reasoning: thought || null,
+    usage,
+    data: {
+      output: Object.keys(genOutput).length > 0 ? genOutput : content || null,
+    },
+  }
+}
+
 export async function* streamAgentChat(
   message: string,
   sessionId?: string,
@@ -549,6 +640,7 @@ export async function* streamAgentChat(
   })
 
   const activeSessionId = submitRes.conversation.id
+  const fallbackModel = submitRes.conversation.modelId || options?.modelId || 'llm'
   yield {
     type: 'init',
     session_id: activeSessionId,
@@ -570,155 +662,376 @@ export async function* streamAgentChat(
   let buffer = ''
   const toolStartTimes = new Map<string, number>()
   const text = createStreamTextReconciler()
+  let genCounter = 0
+  let activeGenSpanId: string | null = null
+  let activeGenStartMs = Date.now()
+  let activeGenModel = fallbackModel
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
 
-    for (const rawLine of lines) {
-      const line = rawLine.trim()
-      if (!line.startsWith('data:')) continue
-      const dataStr = line.slice(5).trim()
-      if (!dataStr) continue
-      try {
-        const ev = JSON.parse(dataStr)
-        if (ev.type === 'snapshot') {
-          const snap = ev.snapshot
-          text.loadBlocks(snap?.generation?.message)
-          yield* text.reconcile()
-          if (Array.isArray(snap?.tools)) {
-            for (const t of snap.tools) {
-              if (t?.status !== 'done' && t?.details?.approval_id && (!t.details.status || t.details.status === 'pending_approval')) {
-                yield {
-                  type: 'approval_required',
-                  approval_id: t.details.approval_id,
-                  tool_call_id: t.callId,
-                  host_id: t.details.host_id,
-                  host_name: t.details.host_name,
-                  command: t.details.command,
+      for (const rawLine of lines) {
+        const line = rawLine.trim()
+        if (!line.startsWith('data:')) continue
+        const dataStr = line.slice(5).trim()
+        if (!dataStr) continue
+        try {
+          const ev = JSON.parse(dataStr)
+          if (ev.type === 'snapshot') {
+            const snap = ev.snapshot
+            const entries: any[] = Array.isArray(snap?.entries) ? snap.entries : []
+            let lastUserIdx = -1
+            for (let i = entries.length - 1; i >= 0; i--) {
+              if (entries[i]?.kind === 'pi.user') {
+                lastUserIdx = i
+                break
+              }
+            }
+            const endedToolIds = new Set<string>()
+            if (lastUserIdx >= 0) {
+              for (let i = lastUserIdx + 1; i < entries.length; i++) {
+                const entry = entries[i]
+                if (entry?.kind === 'pi.assistant') {
+                  const asst = entry.model?.[0]
+                  if (!asst || asst.stopReason === 'error') continue
+                  text.loadBlocks(asst)
+                  yield* text.reconcile()
+                  text.commit()
+                  yield {
+                    type: 'trace_span',
+                    phase: 'end',
+                    span: buildCompletedGenerationSpan(`gen_${entry.id}`, asst, fallbackModel),
+                  }
+                  const blocks = Array.isArray(asst.content) ? asst.content : []
+                  for (const b of blocks) {
+                    if (b.type === 'toolCall') {
+                      const roleMeta = resolveToolAgentMeta(b.name)
+                      yield {
+                        type: 'trace_span',
+                        phase: 'start',
+                        span: {
+                          id: b.id || `call_${entry.id}`,
+                          type: 'tool',
+                          name: b.name,
+                          agent_id: roleMeta.agent_id,
+                          agent_name: roleMeta.agent_name,
+                          agent_role: roleMeta.agent_role,
+                          started_at:
+                            typeof asst.timestamp === 'number'
+                              ? new Date(asst.timestamp).toISOString()
+                              : new Date().toISOString(),
+                          data: { input: b.arguments },
+                        },
+                      }
+                    }
+                  }
+                } else if (entry?.kind === 'pi.tool-result') {
+                  const toolMsg = entry.model?.[0]
+                  if (!toolMsg) continue
+                  endedToolIds.add(toolMsg.toolCallId)
+                  const roleMeta = resolveToolAgentMeta(toolMsg.toolName)
+                  const outText = Array.isArray(toolMsg.content)
+                    ? toolMsg.content
+                        .filter((b: any) => b.type === 'text')
+                        .map((b: any) => b.text)
+                        .join('\n')
+                    : ''
+                  const errText = toolMsg.isError ? outText || 'Tool execution failed' : undefined
+                  if (Array.isArray(toolMsg.details?.sources)) {
+                    yield { type: 'sources', sources: toolMsg.details.sources }
+                  }
+                  yield {
+                    type: 'trace_span',
+                    phase: 'end',
+                    span: {
+                      id: toolMsg.toolCallId,
+                      type: 'tool',
+                      name: toolMsg.toolName,
+                      agent_id: roleMeta.agent_id,
+                      agent_name: roleMeta.agent_name,
+                      agent_role: roleMeta.agent_role,
+                      duration_ms: typeof toolMsg.durationMs === 'number' ? toolMsg.durationMs : 1,
+                      ended_at:
+                        typeof toolMsg.timestamp === 'number'
+                          ? new Date(toolMsg.timestamp).toISOString()
+                          : new Date().toISOString(),
+                      usage: toolMsg.details?.usage ?? null,
+                      data: {
+                        output: outText,
+                        details: toolMsg.details,
+                      },
+                      error: errText,
+                    },
+                  }
                 }
               }
             }
-          }
-          // If the run already finished before we attached (fast response!), finish immediately
-          if (!snap?.run && !snap?.generation && (!snap?.tools || snap.tools.length === 0)) {
-            yield { type: 'done', session_id: activeSessionId }
+
+            if (snap?.generation) {
+              text.loadBlocks(snap.generation.message)
+              yield* text.reconcile()
+              const partialMsg = snap.generation.message
+              activeGenSpanId = `gen_stream_${++genCounter}`
+              activeGenStartMs =
+                typeof partialMsg?.timestamp === 'number' ? partialMsg.timestamp : Date.now()
+              activeGenModel = partialMsg?.model || fallbackModel
+              const inp = Number(partialMsg?.usage?.input ?? 0)
+              const out = Number(partialMsg?.usage?.output ?? 0)
+              const tot = Number(partialMsg?.usage?.totalTokens ?? inp + out)
+              const usage =
+                inp > 0 || out > 0 || tot > 0
+                  ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
+                  : null
+              yield {
+                type: 'trace_span',
+                phase: 'start',
+                span: {
+                  id: activeGenSpanId,
+                  type: 'generation',
+                  name: activeGenModel,
+                  agent_id: 'orchestrator',
+                  agent_name: 'Orchestrator',
+                  agent_role: 'orchestrator',
+                  started_at: new Date(activeGenStartMs).toISOString(),
+                  usage,
+                },
+              }
+            }
+
+            if (Array.isArray(snap?.tools)) {
+              for (const t of snap.tools) {
+                if (!endedToolIds.has(t.callId)) {
+                  const roleMeta = resolveToolAgentMeta(t.name)
+                  yield {
+                    type: 'trace_span',
+                    phase: t.status === 'done' ? 'end' : 'start',
+                    span: {
+                      id: t.callId,
+                      type: 'tool',
+                      name: t.name,
+                      agent_id: roleMeta.agent_id,
+                      agent_name: roleMeta.agent_name,
+                      agent_role: roleMeta.agent_role,
+                      started_at: new Date().toISOString(),
+                      ended_at: t.status === 'done' ? new Date().toISOString() : undefined,
+                      data: {
+                        input: t.args,
+                        output: t.output,
+                        details: t.details,
+                      },
+                    },
+                  }
+                }
+                if (
+                  t?.status !== 'done' &&
+                  t?.details?.approval_id &&
+                  (!t.details.status || t.details.status === 'pending_approval')
+                ) {
+                  yield {
+                    type: 'approval_required',
+                    approval_id: t.details.approval_id,
+                    tool_call_id: t.callId,
+                    host_id: t.details.host_id,
+                    host_name: t.details.host_name,
+                    command: t.details.command,
+                  }
+                }
+              }
+            }
+            // If the run already finished before we attached (fast response!), finish immediately
+            if (!snap?.run && !snap?.generation && (!snap?.tools || snap.tools.length === 0)) {
+              yield { type: 'done', session_id: activeSessionId }
+              return
+            }
+          } else if (ev.type === 'message_start') {
+            text.loadBlocks(ev.message)
+            yield* text.reconcile()
+            if (ev.message?.role === 'assistant' && !activeGenSpanId) {
+              activeGenSpanId = `gen_stream_${++genCounter}`
+              activeGenStartMs =
+                typeof ev.message?.timestamp === 'number' ? ev.message.timestamp : Date.now()
+              activeGenModel = ev.message?.model || fallbackModel
+              yield {
+                type: 'trace_span',
+                phase: 'start',
+                span: {
+                  id: activeGenSpanId,
+                  type: 'generation',
+                  name: activeGenModel,
+                  agent_id: 'orchestrator',
+                  agent_name: 'Orchestrator',
+                  agent_role: 'orchestrator',
+                  started_at: new Date(activeGenStartMs).toISOString(),
+                },
+              }
+            }
+          } else if (ev.type === 'message_update' && Array.isArray(ev.changes)) {
+            text.applyChanges(ev.changes)
+            yield* text.reconcile()
+            if (ev.usage && activeGenSpanId) {
+              const inp = Number(ev.usage.input ?? 0)
+              const out = Number(ev.usage.output ?? 0)
+              const tot = Number(ev.usage.totalTokens ?? inp + out)
+              if (inp > 0 || out > 0 || tot > 0) {
+                yield {
+                  type: 'trace_span',
+                  phase: 'start',
+                  span: {
+                    id: activeGenSpanId,
+                    type: 'generation',
+                    name: activeGenModel,
+                    agent_id: 'orchestrator',
+                    agent_name: 'Orchestrator',
+                    agent_role: 'orchestrator',
+                    started_at: new Date(activeGenStartMs).toISOString(),
+                    usage: { prompt_tokens: inp, completion_tokens: out, total_tokens: tot },
+                  },
+                }
+              }
+            }
+          } else if (ev.type === 'message_end') {
+            const endedMsg = ev.entry?.model?.[0]
+            text.loadBlocks(endedMsg)
+            yield* text.reconcile()
+            text.commit()
+            if (endedMsg?.role === 'assistant' && endedMsg?.stopReason !== 'error') {
+              const spanId =
+                activeGenSpanId ||
+                (ev.entry?.id ? `gen_${ev.entry.id}` : `gen_stream_${++genCounter}`)
+              activeGenSpanId = null
+              yield {
+                type: 'trace_span',
+                phase: 'end',
+                span: buildCompletedGenerationSpan(
+                  spanId,
+                  endedMsg,
+                  activeGenModel || fallbackModel,
+                  activeGenStartMs,
+                ),
+              }
+            }
+          } else if (ev.type === 'tool_execution_start') {
+            toolStartTimes.set(ev.toolCallId, Date.now())
+            const roleMeta = resolveToolAgentMeta(ev.toolName)
+            yield {
+              type: 'tool_start',
+              tool_name: ev.toolName,
+              tool_agent: roleMeta.agent_name,
+              args: ev.args,
+            }
+            yield {
+              type: 'trace_span',
+              phase: 'start',
+              span: {
+                id: ev.toolCallId,
+                type: 'tool',
+                name: ev.toolName,
+                agent_id: roleMeta.agent_id,
+                agent_name: roleMeta.agent_name,
+                agent_role: roleMeta.agent_role,
+                started_at: new Date().toISOString(),
+                data: { input: ev.args },
+              },
+            }
+          } else if (ev.type === 'tool_execution_update') {
+            if (ev.details?.sources && Array.isArray(ev.details.sources)) {
+              yield {
+                type: 'sources',
+                sources: ev.details.sources,
+              }
+            }
+            if (
+              ev.details?.approval_id &&
+              (!ev.details?.status || ev.details?.status === 'pending_approval')
+            ) {
+              yield {
+                type: 'approval_required',
+                approval_id: ev.details.approval_id,
+                tool_call_id: ev.toolCallId,
+                host_id: ev.details.host_id,
+                host_name: ev.details.host_name,
+                command: ev.details.command,
+              }
+            }
+          } else if (ev.type === 'tool_execution_end') {
+            const started = toolStartTimes.get(ev.toolCallId) ?? Date.now()
+            const roleMeta = resolveToolAgentMeta(ev.toolName)
+            const toolMsg = ev.entry?.model?.[0]
+            const durationMs =
+              typeof toolMsg?.durationMs === 'number'
+                ? toolMsg.durationMs
+                : Math.max(1, Date.now() - started)
+            const outText = Array.isArray(toolMsg?.content)
+              ? toolMsg.content
+                  .filter((b: any) => b.type === 'text')
+                  .map((b: any) => b.text)
+                  .join('\n')
+              : ''
+            const errText = toolMsg?.isError ? outText || 'Tool execution failed' : undefined
+
+            if (Array.isArray(toolMsg?.details?.sources)) {
+              yield {
+                type: 'sources',
+                sources: toolMsg.details.sources,
+              }
+            }
+            yield {
+              type: 'tool_end',
+              tool_name: ev.toolName,
+              tool_agent: roleMeta.agent_name,
+              duration_ms: durationMs,
+              error: errText,
+            }
+            yield {
+              type: 'trace_span',
+              phase: 'end',
+              span: {
+                id: ev.toolCallId,
+                type: 'tool',
+                name: ev.toolName,
+                agent_id: roleMeta.agent_id,
+                agent_name: roleMeta.agent_name,
+                agent_role: roleMeta.agent_role,
+                duration_ms: durationMs,
+                ended_at: new Date().toISOString(),
+                usage: toolMsg?.details?.usage ?? null,
+                data: {
+                  output: outText,
+                  details: toolMsg?.details,
+                },
+                error: errText,
+              },
+            }
+          } else if (ev.type === 'inbox_update') {
+            yield {
+              type: 'inbox_update',
+              inbox: ev.items,
+            }
+          } else if (ev.type === 'task_failed') {
+            yield {
+              type: 'error',
+              detail: ev.message || 'Task failed',
+            }
+            return
+          } else if (ev.type === 'run_end') {
+            yield {
+              type: 'done',
+              session_id: activeSessionId,
+            }
             return
           }
-        } else if (ev.type === 'message_start') {
-          text.loadBlocks(ev.message)
-          yield* text.reconcile()
-        } else if (ev.type === 'message_update' && Array.isArray(ev.changes)) {
-          text.applyChanges(ev.changes)
-          yield* text.reconcile()
-        } else if (ev.type === 'message_end') {
-          text.loadBlocks(ev.entry?.model?.[0])
-          yield* text.reconcile()
-          text.commit()
-        } else if (ev.type === 'tool_execution_start') {
-          toolStartTimes.set(ev.toolCallId, Date.now())
-          const isSubagent = ev.toolName === 'delegate_subagent'
-          yield {
-            type: 'tool_start',
-            tool_name: ev.toolName,
-            tool_agent: isSubagent ? 'Subagent' : 'Agent',
-            args: ev.args,
-          }
-          yield {
-            type: 'trace_span',
-            phase: 'start',
-            span: {
-              id: ev.toolCallId,
-              type: 'tool',
-              name: ev.toolName,
-              agent_id: isSubagent ? 'subagent' : 'main',
-              agent_name: isSubagent ? 'Subagent' : 'Agent',
-              agent_role: isSubagent ? 'specialist' : 'orchestrator',
-              started_at: new Date().toISOString(),
-              data: { input: ev.args },
-            },
-          }
-        } else if (ev.type === 'tool_execution_update') {
-          if (ev.details?.sources && Array.isArray(ev.details.sources)) {
-            yield {
-              type: 'sources',
-              sources: ev.details.sources,
-            }
-          }
-          if (ev.details?.approval_id && (!ev.details?.status || ev.details?.status === 'pending_approval')) {
-            yield {
-              type: 'approval_required',
-              approval_id: ev.details.approval_id,
-              tool_call_id: ev.toolCallId,
-              host_id: ev.details.host_id,
-              host_name: ev.details.host_name,
-              command: ev.details.command,
-            }
-          }
-        } else if (ev.type === 'tool_execution_end') {
-          const started = toolStartTimes.get(ev.toolCallId) ?? Date.now()
-          const durationMs = Math.max(1, Date.now() - started)
-          const isSubagent = ev.toolName === 'delegate_subagent'
-          const toolMsg = ev.entry?.model?.[0]
-          const outText = Array.isArray(toolMsg?.content)
-            ? toolMsg.content
-                .filter((b: any) => b.type === 'text')
-                .map((b: any) => b.text)
-                .join('\n')
-            : ''
-          const errText = toolMsg?.isError ? outText || 'Tool execution failed' : undefined
-
-          yield {
-            type: 'tool_end',
-            tool_name: ev.toolName,
-            tool_agent: isSubagent ? 'Subagent' : 'Agent',
-            duration_ms: durationMs,
-            error: errText,
-          }
-          yield {
-            type: 'trace_span',
-            phase: 'end',
-            span: {
-              id: ev.toolCallId,
-              type: 'tool',
-              name: ev.toolName,
-              agent_id: isSubagent ? 'subagent' : 'main',
-              agent_name: isSubagent ? 'Subagent' : 'Agent',
-              agent_role: isSubagent ? 'specialist' : 'orchestrator',
-              duration_ms: durationMs,
-              ended_at: new Date().toISOString(),
-              data: {
-                output: outText,
-                details: toolMsg?.details,
-              },
-              error: errText,
-            },
-          }
-        } else if (ev.type === 'inbox_update') {
-          yield {
-            type: 'inbox_update',
-            inbox: ev.items,
-          }
-        } else if (ev.type === 'task_failed') {
-          yield {
-            type: 'error',
-            detail: ev.message || 'Task failed',
-          }
-          return
-        } else if (ev.type === 'run_end') {
-          yield {
-            type: 'done',
-            session_id: activeSessionId,
-          }
-          return
+        } catch (err) {
+          console.warn('Failed to parse event:', line, err)
         }
-      } catch (err) {
-        console.warn('Failed to parse event:', line, err)
       }
     }
+  } finally {
+    await reader.cancel().catch(() => {})
   }
 }
 

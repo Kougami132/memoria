@@ -140,8 +140,9 @@ describe("M1: pi-durable TS Foundation, Multi-Provider Settings, Scope Toggles &
     expect(assistantMsg.sources.length).toBe(1);
     expect(assistantMsg.sources[0].filename).toBe("nginx.md");
     expect(assistantMsg.trace.summary.reasoning).toContain("我需要先检索运维手册中的 502 排障记录");
-    expect(assistantMsg.trace.spans.length).toBe(1);
-    expect(assistantMsg.trace.spans[0].name).toBe("kb_search");
+    expect(assistantMsg.trace.spans.map((s: any) => s.type)).toEqual(["generation", "tool", "generation"]);
+    const kbSpan = assistantMsg.trace.spans.find((s: any) => s.type === "tool");
+    expect(kbSpan.name).toBe("kb_search");
   });
 
   it("supports delegate_subagent task-owned child conversation", async () => {
@@ -175,9 +176,10 @@ describe("M1: pi-durable TS Foundation, Multi-Provider Settings, Scope Toggles &
     expect(body.status).toBe("done");
     const assistantMsg = body.messages[1];
     expect(assistantMsg.content).toContain("汇总完毕：所有 3 个节点运行正常");
-    expect(assistantMsg.trace.spans[0].name).toBe("delegate_subagent");
-    expect(assistantMsg.trace.spans[0].data.output).toContain("3 个节点全部健康");
-    expect(typeof assistantMsg.trace.spans[0].data.details?.conversationId).toBe("number");
+    const subSpan = assistantMsg.trace.spans.find((s: any) => s.name === "delegate_subagent");
+    expect(subSpan).toBeTruthy();
+    expect(subSpan.data.output).toContain("3 个节点全部健康");
+    expect(typeof subSpan.data.details?.conversationId).toBe("number");
   });
 
   it("streams watchEvents snapshot and enforces scope isolation when KB is toggled off", async () => {

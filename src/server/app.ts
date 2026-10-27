@@ -602,11 +602,19 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
         }),
       });
 
+      const snap = eventStream.snapshot;
+      if (!snap.run && !snap.generation && (!snap.tools || snap.tools.length === 0)) {
+        await eventStream.stop();
+        return;
+      }
+
       let closed = false;
-      stream.onAbort(() => {
+      const closeStream = () => {
+        if (closed) return;
         closed = true;
         void eventStream.stop();
-      });
+      };
+      stream.onAbort(closeStream);
 
       eventStream.start(async (events) => {
         if (closed) return;
@@ -616,11 +624,19 @@ export function createApp(runtime: MemoriaAgentRuntime): Hono {
             event: ev.type,
             data: JSON.stringify(ev),
           });
+          if (ev.type === "run_end" || ev.type === "task_failed") {
+            closeStream();
+            break;
+          }
         }
       });
 
-      while (!closed) {
-        await stream.sleep(1000);
+      try {
+        while (!closed) {
+          await stream.sleep(200);
+        }
+      } finally {
+        closeStream();
       }
     });
   });

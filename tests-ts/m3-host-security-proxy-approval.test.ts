@@ -245,7 +245,8 @@ describe("M3: Controlled Hosts, AES-GCM Encryption, Proxy Tunneling & pi-durable
       }),
     });
     const dangerBody = (await dangerRes.json()) as any;
-    expect(dangerBody.messages[1].trace.spans[0].error).toContain("potentially dangerous pattern");
+    const dangerToolSpan = dangerBody.messages[1].trace.spans.find((s: any) => s.type === "tool");
+    expect(dangerToolSpan.error).toContain("potentially dangerous pattern");
     expect(executedCommands.length).toBe(0);
 
     // 2. Non-whitelist command (systemctl restart nginx) in ask_confirmation mode suspends until approved
