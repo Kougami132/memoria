@@ -1,7 +1,4 @@
-import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
+import { lazyApi } from "@earendil-works/pi-ai/api/lazy";
 import {
   createModels,
   createProvider,
@@ -9,7 +6,7 @@ import {
   type MutableModels,
   type Provider,
 } from "@earendil-works/pi-ai/models";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model, ProviderStreams } from "@earendil-works/pi-ai";
 import type {
   AvailableModelOption,
   ModelProviderConfig,
@@ -18,24 +15,40 @@ import type {
 } from "../../shared/types.ts";
 import type { AppDatabase } from "../db/database.ts";
 
-function buildApiForProtocol(protocol: ProviderProtocol) {
+const protocolPreloads = new Map<ProviderProtocol, Promise<ProviderStreams>>();
+
+export function preloadProtocol(protocol: ProviderProtocol): Promise<ProviderStreams> {
+  const cached = protocolPreloads.get(protocol);
+  if (cached) return cached;
+  let promise: Promise<ProviderStreams>;
   switch (protocol) {
     case "openai-responses":
-      return openAIResponsesApi();
+      promise = import("@earendil-works/pi-ai/api/openai-responses");
+      break;
     case "anthropic-messages":
-      return anthropicMessagesApi();
+      promise = import("@earendil-works/pi-ai/api/anthropic-messages");
+      break;
     case "google-generative-ai":
-      return googleGenerativeAIApi();
+      promise = import("@earendil-works/pi-ai/api/google-generative-ai");
+      break;
     case "openai-completions":
     default:
-      return openAICompletionsApi();
+      promise = import("@earendil-works/pi-ai/api/openai-completions");
+      break;
   }
+  protocolPreloads.set(protocol, promise);
+  return promise;
+}
+
+function buildApiForProtocol(protocol: ProviderProtocol) {
+  return lazyApi(() => preloadProtocol(protocol));
 }
 
 export class ModelsRegistryManager {
   readonly models: MutableModels;
   private readonly db: AppDatabase;
   private readonly customProviders = new Map<string, Provider>();
+  private autoWarmup = false;
 
   constructor(db: AppDatabase, initialCustomProviders?: Provider[]) {
     this.db = db;
@@ -98,6 +111,9 @@ export class ModelsRegistryManager {
       });
 
       this.models.setProvider(providerInstance);
+      if (this.autoWarmup) {
+        void preloadProtocol(p.protocol || "openai-completions").catch(() => {});
+      }
     }
   }
 
@@ -134,5 +150,17 @@ export class ModelsRegistryManager {
       }
     }
     return out;
+  }
+
+  async warmup(): Promise<void> {
+    this.autoWarmup = true;
+    const dbProviders = this.db.listProviders(true);
+    const protocols = new Set<ProviderProtocol>();
+    for (const p of dbProviders) {
+      if (p.enabled) {
+        protocols.add(p.protocol || "openai-completions");
+      }
+    }
+    await Promise.all([...protocols].map((protocol) => preloadProtocol(protocol)));
   }
 }

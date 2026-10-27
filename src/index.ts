@@ -20,6 +20,10 @@ const MIME_TYPES: Record<string, string> = {
 
 export async function startServer(port = Number(process.env.PORT || 8000)) {
   const runtime = await MemoriaAgentRuntime.create();
+  await runtime.modelsManager.warmup().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`模型协议预热失败: ${message}`);
+  });
   const app = createApp(runtime);
 
   const staticDir = existsSync("./web/dist/index.html")

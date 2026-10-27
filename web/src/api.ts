@@ -353,6 +353,7 @@ export interface AgentStreamEvent {
     | 'thought_delta'
     | 'answer_delta'
     | 'approval_required'
+    | 'retry_status'
     | 'sources'
     | 'tool_start'
     | 'tool_end'
@@ -369,6 +370,7 @@ export interface AgentStreamEvent {
   // 用于权威全文与已发送文本不一致时（例如模型重试或上游改写已生成内容）。
   replace?: boolean
   detail?: string
+  retry_attempt?: number
   answer?: string
   sources?: AgentSource[]
   used_kbs?: string[]
@@ -927,6 +929,14 @@ export async function* streamAgentChat(
                   },
                 },
               }
+              if (snap?.generation?.retry) {
+                yield {
+                  type: 'retry_status',
+                  phase: 'start',
+                  detail: snap.generation.retry.error || 'Connection error',
+                  retry_attempt: snap.generation.attempt ?? 1,
+                }
+              }
             }
 
             if (Array.isArray(snap?.tools)) {
@@ -1230,6 +1240,19 @@ export async function* streamAgentChat(
                 },
                 error: errText,
               },
+            }
+          } else if (ev.type === 'auto_retry_start') {
+            yield {
+              type: 'retry_status',
+              phase: 'start',
+              detail: ev.errorMessage || 'Connection error',
+              retry_attempt: ev.attempt ?? 1,
+            }
+          } else if (ev.type === 'auto_retry_end') {
+            yield {
+              type: 'retry_status',
+              phase: 'end',
+              retry_attempt: ev.attempt,
             }
           } else if (ev.type === 'inbox_update') {
             yield {

@@ -241,4 +241,50 @@ describe("AgenticChat 跨会话状态隔离", () => {
     );
     expect(expanded).toBe(true);
   });
+
+  it("发送消息后立即显示等待占位气泡，新会话路由跳转不闪空用户消息，且自动重试期间展示重试提示", async () => {
+    // 初始在 /agentic-chat 新对话页，且后端 /messages 尚未落盘返回空数组
+    h.state.messages = { s1: [] };
+    renderChat("/agentic-chat");
+    await waitForText("你好！我是 AI Agent 助手");
+
+    const textarea = container.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(textarea, "我的nas运行多久了");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      textarea.closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    // 1. 尚未收到任何 SSE 事件时，用户气泡与助手等待占位气泡必须立即同时出现
+    await waitForText("我的nas运行多久了");
+    await waitForText("助手正在思考与响应中，请稍候...");
+
+    // 2. 收到 init 事件跳转到 /agentic-chat/s1（此时 getAgentMessages('s1') 仍返回 []），用户消息与占位气泡不能闪空
+    await act(async () => {
+      h.push({ type: "init", session_id: "s1", user_message_id: "user_1" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(byText("我的nas运行多久了")).not.toBeNull();
+    expect(byText("助手正在思考与响应中，请稍候...")).not.toBeNull();
+
+    // 3. 上游连接异常触发自动重试时，占位气泡内实时显示重试状态
+    await act(async () => {
+      h.push({ type: "retry_status", phase: "start", detail: "Connection error.", retry_attempt: 1 });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitForText("模型连接异常 (Connection error.)，正在自动重试 (第 1 次)...");
+
+    // 4. 收到回答增量后，占位气泡被真实回答气泡替换
+    await act(async () => {
+      h.push({ type: "answer_delta", delta: "已连续运行 38 天。" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitForText("已连续运行 38 天。");
+    expect(byText("助手正在思考与响应中，请稍候...")).toBeNull();
+    expect(byText("模型连接异常 (Connection error.)，正在自动重试 (第 1 次)...")).toBeNull();
+  });
 });

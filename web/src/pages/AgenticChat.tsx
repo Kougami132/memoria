@@ -165,6 +165,7 @@ interface StreamingAssistantState {
   isStreaming: boolean
   /** 同一轮可能并发触发多个 host_exec 审批，必须按队列保存，不能只留最后一个。 */
   pendingApprovals: HostApprovalPrompt[]
+  retryStatus?: string
   error?: string
 }
 
@@ -385,7 +386,16 @@ export function AgenticChat() {
   // Load messages for current session & poll if background task is streaming
   useEffect(() => {
     // 切会话先清空：否则上一个会话的消息会一直挂在新会话里，直到自己的 fetch 回来。
-    setMessages([])
+    // 但若是从「新对话」(session_id='') 刚提交并在 init 中拿到新 activeSessionId 跳转过来，
+    // 保留当前乐观插入的用户消息，避免跳转瞬间消息列表闪空。
+    setMessages((prev) =>
+      activeSessionId &&
+      currentSessionIdRef.current === activeSessionId &&
+      prev.length > 0 &&
+      prev.every((m) => !m.session_id || m.session_id === activeSessionId)
+        ? prev.map((m) => (m.session_id ? m : { ...m, session_id: activeSessionId }))
+        : [],
+    )
     setEditingMessageId(null)
     setEditingContent('')
     if (!activeSessionId) {
@@ -399,7 +409,16 @@ export function AgenticChat() {
         const rawMsgs = await api.getAgentMessages(activeSessionId)
         if (!isMounted) return
         const msgs = sanitizePolledMessages(rawMsgs)
-        setMessages(msgs)
+        setMessages((prev) => {
+          if (
+            msgs.length === 0 &&
+            currentSessionIdRef.current === activeSessionId &&
+            prev.some((m) => m.id.startsWith('temp-'))
+          ) {
+            return prev
+          }
+          return msgs
+        })
 
       const lastMsg = msgs[msgs.length - 1]
         if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.status === 'streaming' || lastMsg.status === 'pending_approval' || (lastMsg.status === 'approved' && !lastMsg.content))) {
@@ -529,6 +548,15 @@ export function AgenticChat() {
           updateStream((prev) => ({
             ...prev,
             thought: event.replace ? (event.delta || '') : prev.thought + (event.delta || ''),
+            retryStatus: undefined,
+          }))
+        } else if (event.type === 'retry_status') {
+          updateStream((prev) => ({
+            ...prev,
+            retryStatus:
+              event.phase === 'start'
+                ? `模型连接异常${event.detail ? ` (${event.detail})` : ''}，正在自动重试 (第 ${event.retry_attempt ?? 1} 次)...`
+                : undefined,
           }))
         } else if (event.type === 'trace_span') {
           if (event.span) {
@@ -580,6 +608,7 @@ export function AgenticChat() {
           updateStream((prev) => ({
             ...prev,
             answer: event.replace ? (event.delta || '') : prev.answer + (event.delta || ''),
+            retryStatus: undefined,
           }))
         } else if (event.type === 'done') {
           const finalId = event.session_id || currentSessionId
@@ -1632,12 +1661,16 @@ function StreamingMessageItem({
         ))}
 
       {/* Real-time Answer Output */}
-
-       {state.answer && (
-         <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{state.answer}</ReactMarkdown>
-          </div>
-        )}
+      {state.answer ? (
+        <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-foreground">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{state.answer}</ReactMarkdown>
+        </div>
+      ) : state.isStreaming && state.pendingApprovals.length === 0 && !state.error ? (
+        <div className="bg-card border border-border px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm text-muted-foreground flex items-center gap-2">
+          <Sparkles className="w-4 h-4 animate-spin text-primary" />
+          <span className="text-xs">{state.retryStatus || '助手正在思考与响应中，请稍候...'}</span>
+        </div>
+      ) : null}
 
         {/* Error message */}
         {state.error && (

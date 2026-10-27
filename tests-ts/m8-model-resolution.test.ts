@@ -6,6 +6,7 @@ import {
   type FauxProviderHandle,
 } from "@earendil-works/pi-ai/providers/faux";
 import { MemoriaAgentRuntime } from "../src/agent/runtime.ts";
+import { preloadProtocol } from "../src/agent/models-registry.ts";
 import { AppDatabase } from "../src/db/database.ts";
 
 describe("M8: 模型解析 —— 会话不再固持模型，未显式指定时跟随全局设置", () => {
@@ -77,5 +78,17 @@ describe("M8: 模型解析 —— 会话不再固持模型，未显式指定时�
 
     expect(requested).toEqual(["faux-old"]);
     expect(db.getConversation(summary.id)!.modelId).toBe("faux-old");
+  });
+
+  it("warmup() 预热启用渠道的协议实现后，后续解析同一协议复用同一 Promise 实例", async () => {
+    await runtime.modelsManager.warmup();
+    const p1 = preloadProtocol("openai-completions");
+    const p2 = preloadProtocol("openai-completions");
+    expect(p1).toBe(p2);
+    const t0 = performance.now();
+    const mod = await p1;
+    const elapsedMs = performance.now() - t0;
+    expect(typeof mod.streamSimple).toBe("function");
+    expect(elapsedMs).toBeLessThan(50);
   });
 });
