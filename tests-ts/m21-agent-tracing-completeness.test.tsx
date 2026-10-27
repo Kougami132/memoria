@@ -186,11 +186,28 @@ describe("Agent Tracing 完整性回归测试（LLM generation、新工具映射
       }
 
       const spanEvents = events.filter((e) => e.type === "trace_span");
+      const genStarts = spanEvents.filter((e) => e.span?.type === "generation" && e.phase === "start");
+      expect(genStarts.length).toBeGreaterThanOrEqual(2);
+      for (const gs of genStarts) {
+        expect(Array.isArray(gs.span.data?.input)).toBe(true);
+        expect(gs.span.data.input.some((m: any) => m.role === "user" && m.content === "检查运行时间")).toBe(true);
+      }
+
       const genEnds = spanEvents.filter((e) => e.span?.type === "generation" && e.phase === "end");
       expect(genEnds.length).toBe(2);
       expect(genEnds[0].span.name).toBe("faux-reasoner");
       expect(genEnds[0].span.usage?.total_tokens).toBeGreaterThan(0);
       expect(typeof genEnds[0].span.duration_ms).toBe("number");
+      expect(Array.isArray(genEnds[0].span.data?.input)).toBe(true);
+      expect(genEnds[0].span.data.input.some((m: any) => m.role === "user" && m.content === "检查运行时间")).toBe(true);
+
+      // 第二轮 LLM 调用在执行中（phase=start）与结束（phase=end）时，input 均应包含上一轮 assistant tool_calls 与 tool 输出
+      const secondGenId = genEnds[1].span.id;
+      const secondGenStart = genStarts.find((e) => e.span.id === secondGenId);
+      expect(secondGenStart).toBeTruthy();
+      expect(secondGenStart.span.data?.input?.some((m: any) => m.role === "assistant" && Array.isArray(m.tool_calls))).toBe(true);
+      expect(secondGenStart.span.data?.input?.some((m: any) => m.role === "tool" && m.content === "uptime 10 days")).toBe(true);
+      expect(genEnds[1].span.data?.input?.some((m: any) => m.role === "tool" && m.content === "uptime 10 days")).toBe(true);
 
       const toolEnd = spanEvents.find((e) => e.span?.type === "tool" && e.phase === "end");
       expect(toolEnd?.span).toMatchObject({
@@ -272,7 +289,12 @@ describe("Agent Tracing 完整性回归测试（LLM generation、新工具映射
       expect(subSpan.usage?.total_tokens).toBeGreaterThan(0);
       const childSpans = subSpan.data?.details?.spans as any[];
       expect(Array.isArray(childSpans)).toBe(true);
-      expect(childSpans.some((s) => s.type === "generation")).toBe(true);
+      const childGenSpans = childSpans.filter((s) => s.type === "generation");
+      expect(childGenSpans.length).toBeGreaterThan(0);
+      for (const cg of childGenSpans) {
+        expect(Array.isArray(cg.data?.input)).toBe(true);
+        expect(cg.data.input.some((m: any) => m.role === "user" && m.content === "检索 Redis 哨兵故障转移超时时间")).toBe(true);
+      }
       expect(childSpans.some((s) => s.type === "tool" && s.name === "kb_search")).toBe(true);
     } finally {
       await runtime.close();

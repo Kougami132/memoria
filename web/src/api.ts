@@ -522,7 +522,85 @@ export function createStreamTextReconciler() {
       committedAnswer = renderedAnswer
       live.clear()
     },
+    /** 当前在飞 generation 轮次的实时输出快照（供流式 trace_span 展示）。 */
+    currentTurnOutput(
+      usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null,
+    ): Record<string, unknown> | null {
+      const thought = liveText('thought').trim()
+      const content = liveText('answer').trim()
+      const out: Record<string, unknown> = {}
+      if (thought) out.thought = thought
+      if (content) out.content = content
+      if (usage) out.usage = usage
+      return Object.keys(out).length > 0 ? out : null
+    },
   }
+}
+
+function extractContextMessageFromEntry(entry: any): Record<string, unknown> | null {
+  if (!entry) return null
+  if (entry.kind === 'pi.system') {
+    const sysMsg = entry.model?.[0]
+    if (!sysMsg) return null
+    const sections = sysMsg.sections ? Object.values(sysMsg.sections).filter(Boolean).join('\n\n') : ''
+    const sysContent = typeof sysMsg.content === 'string' ? sysMsg.content : ''
+    const combined = [sysContent, sections].filter(Boolean).join('\n\n')
+    return combined ? { role: 'system', content: combined } : null
+  }
+  if (entry.kind === 'pi.user') {
+    const userMsg = entry.model?.[0]
+    if (!userMsg) return null
+    const text =
+      typeof userMsg?.content === 'string'
+        ? userMsg.content
+        : Array.isArray(userMsg?.content)
+          ? userMsg.content
+              .filter((b: any) => b.type === 'text')
+              .map((b: any) => b.text)
+              .join('\n')
+          : ''
+    return { role: 'user', content: text }
+  }
+  if (entry.kind === 'pi.assistant') {
+    const asst = entry.model?.[0]
+    if (!asst || asst.stopReason === 'error') return null
+    const blocks = Array.isArray(asst.content) ? asst.content : []
+    const textParts: string[] = []
+    const toolCalls: Array<{ id: string; name: string; arguments: unknown }> = []
+    for (const b of blocks) {
+      if (b.type === 'text' && b.text) textParts.push(b.text)
+      else if (b.type === 'toolCall') {
+        toolCalls.push({
+          id: b.id || (entry.id !== undefined ? `call_${entry.id}` : ''),
+          name: b.name,
+          arguments: b.arguments,
+        })
+      }
+    }
+    const genText = textParts.join('\n').trim()
+    return {
+      role: 'assistant',
+      ...(genText ? { content: genText } : {}),
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    }
+  }
+  if (entry.kind === 'pi.tool-result') {
+    const toolMsg = entry.model?.[0]
+    if (!toolMsg) return null
+    const outText = Array.isArray(toolMsg.content)
+      ? toolMsg.content
+          .filter((b: any) => b.type === 'text')
+          .map((b: any) => b.text)
+          .join('\n')
+      : ''
+    return {
+      role: 'tool',
+      tool_call_id: toolMsg.toolCallId,
+      name: toolMsg.toolName,
+      content: outText,
+    }
+  }
+  return null
 }
 
 function resolveToolAgentMeta(toolName: string): {
@@ -565,6 +643,7 @@ function buildCompletedGenerationSpan(
   asstMsg: any,
   fallbackModel: string,
   fallbackStartMs?: number,
+  inputContext?: Array<Record<string, unknown>>,
 ): AgentTraceSpan {
   const inp = Number(asstMsg?.usage?.input ?? 0)
   const out = Number(asstMsg?.usage?.output ?? 0)
@@ -611,6 +690,7 @@ function buildCompletedGenerationSpan(
     reasoning: thought || null,
     usage,
     data: {
+      ...(inputContext ? { input: inputContext } : {}),
       output: Object.keys(genOutput).length > 0 ? genOutput : content || null,
     },
   }
@@ -666,6 +746,9 @@ export async function* streamAgentChat(
   let activeGenSpanId: string | null = null
   let activeGenStartMs = Date.now()
   let activeGenModel = fallbackModel
+  const contextMessages: Array<Record<string, unknown>> = []
+  const seenEntryIds = new Set<number | string>()
+  const seenToolResultCallIds = new Set<string>()
 
   try {
     while (true) {
@@ -685,6 +768,11 @@ export async function* streamAgentChat(
           if (ev.type === 'snapshot') {
             const snap = ev.snapshot
             const entries: any[] = Array.isArray(snap?.entries) ? snap.entries : []
+            contextMessages.length = 0
+            seenEntryIds.clear()
+            seenToolResultCallIds.clear()
+            activeGenSpanId = null
+
             let lastUserIdx = -1
             for (let i = entries.length - 1; i >= 0; i--) {
               if (entries[i]?.kind === 'pi.user') {
@@ -692,11 +780,29 @@ export async function* streamAgentChat(
                 break
               }
             }
+            const historyEndIdx = lastUserIdx >= 0 ? lastUserIdx : entries.length - 1
+            for (let i = 0; i <= historyEndIdx; i++) {
+              const entry = entries[i]
+              if (entry?.id !== undefined) seenEntryIds.add(entry.id)
+              if (entry?.kind === 'pi.tool-result' && entry.model?.[0]?.toolCallId) {
+                seenToolResultCallIds.add(entry.model[0].toolCallId)
+              }
+              const ctxMsg = extractContextMessageFromEntry(entry)
+              if (ctxMsg) contextMessages.push(ctxMsg)
+            }
+            if (lastUserIdx < 0 && message) {
+              contextMessages.push({ role: 'user', content: message })
+            }
+
             const endedToolIds = new Set<string>()
             if (lastUserIdx >= 0) {
               for (let i = lastUserIdx + 1; i < entries.length; i++) {
                 const entry = entries[i]
-                if (entry?.kind === 'pi.assistant') {
+                if (entry?.id !== undefined) seenEntryIds.add(entry.id)
+                if (entry?.kind === 'pi.system' || entry?.kind === 'pi.user') {
+                  const ctxMsg = extractContextMessageFromEntry(entry)
+                  if (ctxMsg) contextMessages.push(ctxMsg)
+                } else if (entry?.kind === 'pi.assistant') {
                   const asst = entry.model?.[0]
                   if (!asst || asst.stopReason === 'error') continue
                   text.loadBlocks(asst)
@@ -705,8 +811,16 @@ export async function* streamAgentChat(
                   yield {
                     type: 'trace_span',
                     phase: 'end',
-                    span: buildCompletedGenerationSpan(`gen_${entry.id}`, asst, fallbackModel),
+                    span: buildCompletedGenerationSpan(
+                      `gen_${entry.id}`,
+                      asst,
+                      fallbackModel,
+                      undefined,
+                      [...contextMessages],
+                    ),
                   }
+                  const asstCtx = extractContextMessageFromEntry(entry)
+                  if (asstCtx) contextMessages.push(asstCtx)
                   const blocks = Array.isArray(asst.content) ? asst.content : []
                   for (const b of blocks) {
                     if (b.type === 'toolCall') {
@@ -734,6 +848,9 @@ export async function* streamAgentChat(
                   const toolMsg = entry.model?.[0]
                   if (!toolMsg) continue
                   endedToolIds.add(toolMsg.toolCallId)
+                  if (toolMsg.toolCallId) seenToolResultCallIds.add(toolMsg.toolCallId)
+                  const toolCtx = extractContextMessageFromEntry(entry)
+                  if (toolCtx) contextMessages.push(toolCtx)
                   const roleMeta = resolveToolAgentMeta(toolMsg.toolName)
                   const outText = Array.isArray(toolMsg.content)
                     ? toolMsg.content
@@ -772,10 +889,14 @@ export async function* streamAgentChat(
               }
             }
 
-            if (snap?.generation) {
-              text.loadBlocks(snap.generation.message)
-              yield* text.reconcile()
-              const partialMsg = snap.generation.message
+            const hasRunningTools =
+              Array.isArray(snap?.tools) && snap.tools.some((t: any) => t.status !== 'done')
+            if (snap?.generation || (snap?.run && !hasRunningTools)) {
+              const partialMsg = snap?.generation?.message
+              if (partialMsg) {
+                text.loadBlocks(partialMsg)
+                yield* text.reconcile()
+              }
               activeGenSpanId = `gen_stream_${++genCounter}`
               activeGenStartMs =
                 typeof partialMsg?.timestamp === 'number' ? partialMsg.timestamp : Date.now()
@@ -787,6 +908,7 @@ export async function* streamAgentChat(
                 inp > 0 || out > 0 || tot > 0
                   ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
                   : null
+              const liveOut = text.currentTurnOutput(usage)
               yield {
                 type: 'trace_span',
                 phase: 'start',
@@ -799,6 +921,10 @@ export async function* streamAgentChat(
                   agent_role: 'orchestrator',
                   started_at: new Date(activeGenStartMs).toISOString(),
                   usage,
+                  data: {
+                    input: [...contextMessages],
+                    ...(liveOut ? { output: liveOut } : {}),
+                  },
                 },
               }
             }
@@ -848,14 +974,11 @@ export async function* streamAgentChat(
               yield { type: 'done', session_id: activeSessionId }
               return
             }
-          } else if (ev.type === 'message_start') {
-            text.loadBlocks(ev.message)
-            yield* text.reconcile()
-            if (ev.message?.role === 'assistant' && !activeGenSpanId) {
+          } else if (ev.type === 'turn_start') {
+            if (!activeGenSpanId) {
               activeGenSpanId = `gen_stream_${++genCounter}`
-              activeGenStartMs =
-                typeof ev.message?.timestamp === 'number' ? ev.message.timestamp : Date.now()
-              activeGenModel = ev.message?.model || fallbackModel
+              activeGenStartMs = Date.now()
+              activeGenModel = fallbackModel
               yield {
                 type: 'trace_span',
                 phase: 'start',
@@ -867,17 +990,64 @@ export async function* streamAgentChat(
                   agent_name: 'Orchestrator',
                   agent_role: 'orchestrator',
                   started_at: new Date(activeGenStartMs).toISOString(),
+                  data: {
+                    input: [...contextMessages],
+                  },
+                },
+              }
+            }
+          } else if (ev.type === 'message_start') {
+            text.loadBlocks(ev.message)
+            yield* text.reconcile()
+            if (ev.message?.role === 'assistant') {
+              if (!activeGenSpanId) {
+                activeGenSpanId = `gen_stream_${++genCounter}`
+                activeGenStartMs =
+                  typeof ev.message?.timestamp === 'number' ? ev.message.timestamp : Date.now()
+              } else if (typeof ev.message?.timestamp === 'number') {
+                activeGenStartMs = ev.message.timestamp
+              }
+              activeGenModel = ev.message?.model || activeGenModel || fallbackModel
+              const inp = Number(ev.message?.usage?.input ?? 0)
+              const out = Number(ev.message?.usage?.output ?? 0)
+              const tot = Number(ev.message?.usage?.totalTokens ?? inp + out)
+              const usage =
+                inp > 0 || out > 0 || tot > 0
+                  ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
+                  : null
+              const liveOut = text.currentTurnOutput(usage)
+              yield {
+                type: 'trace_span',
+                phase: 'start',
+                span: {
+                  id: activeGenSpanId,
+                  type: 'generation',
+                  name: activeGenModel,
+                  agent_id: 'orchestrator',
+                  agent_name: 'Orchestrator',
+                  agent_role: 'orchestrator',
+                  started_at: new Date(activeGenStartMs).toISOString(),
+                  ...(usage ? { usage } : {}),
+                  data: {
+                    input: [...contextMessages],
+                    ...(liveOut ? { output: liveOut } : {}),
+                  },
                 },
               }
             }
           } else if (ev.type === 'message_update' && Array.isArray(ev.changes)) {
             text.applyChanges(ev.changes)
             yield* text.reconcile()
-            if (ev.usage && activeGenSpanId) {
-              const inp = Number(ev.usage.input ?? 0)
-              const out = Number(ev.usage.output ?? 0)
-              const tot = Number(ev.usage.totalTokens ?? inp + out)
-              if (inp > 0 || out > 0 || tot > 0) {
+            if (activeGenSpanId) {
+              const inp = Number(ev.usage?.input ?? 0)
+              const out = Number(ev.usage?.output ?? 0)
+              const tot = Number(ev.usage?.totalTokens ?? inp + out)
+              const usage =
+                inp > 0 || out > 0 || tot > 0
+                  ? { prompt_tokens: inp, completion_tokens: out, total_tokens: tot }
+                  : null
+              const liveOut = text.currentTurnOutput(usage)
+              if (usage || liveOut) {
                 yield {
                   type: 'trace_span',
                   phase: 'start',
@@ -889,30 +1059,78 @@ export async function* streamAgentChat(
                     agent_name: 'Orchestrator',
                     agent_role: 'orchestrator',
                     started_at: new Date(activeGenStartMs).toISOString(),
-                    usage: { prompt_tokens: inp, completion_tokens: out, total_tokens: tot },
+                    ...(usage ? { usage } : {}),
+                    data: {
+                      input: [...contextMessages],
+                      ...(liveOut ? { output: liveOut } : {}),
+                    },
                   },
                 }
               }
             }
           } else if (ev.type === 'message_end') {
-            const endedMsg = ev.entry?.model?.[0]
-            text.loadBlocks(endedMsg)
-            yield* text.reconcile()
-            text.commit()
-            if (endedMsg?.role === 'assistant' && endedMsg?.stopReason !== 'error') {
-              const spanId =
-                activeGenSpanId ||
-                (ev.entry?.id ? `gen_${ev.entry.id}` : `gen_stream_${++genCounter}`)
-              activeGenSpanId = null
-              yield {
-                type: 'trace_span',
-                phase: 'end',
-                span: buildCompletedGenerationSpan(
-                  spanId,
-                  endedMsg,
-                  activeGenModel || fallbackModel,
-                  activeGenStartMs,
-                ),
+            const entry = ev.entry
+            if (entry?.kind === 'pi.system' || entry?.kind === 'pi.user') {
+              if (entry.id === undefined || !seenEntryIds.has(entry.id)) {
+                if (entry.id !== undefined) seenEntryIds.add(entry.id)
+                const ctxMsg = extractContextMessageFromEntry(entry)
+                if (ctxMsg) {
+                  contextMessages.push(ctxMsg)
+                  if (activeGenSpanId) {
+                    const liveOut = text.currentTurnOutput()
+                    yield {
+                      type: 'trace_span',
+                      phase: 'start',
+                      span: {
+                        id: activeGenSpanId,
+                        type: 'generation',
+                        name: activeGenModel,
+                        agent_id: 'orchestrator',
+                        agent_name: 'Orchestrator',
+                        agent_role: 'orchestrator',
+                        started_at: new Date(activeGenStartMs).toISOString(),
+                        data: {
+                          input: [...contextMessages],
+                          ...(liveOut ? { output: liveOut } : {}),
+                        },
+                      },
+                    }
+                  }
+                }
+              }
+            } else if (entry?.kind === 'pi.tool-result') {
+              const toolMsg = entry.model?.[0]
+              const callId = toolMsg?.toolCallId
+              if (callId && !seenToolResultCallIds.has(callId)) {
+                seenToolResultCallIds.add(callId)
+                if (entry.id !== undefined) seenEntryIds.add(entry.id)
+                const toolCtx = extractContextMessageFromEntry(entry)
+                if (toolCtx) contextMessages.push(toolCtx)
+              }
+            } else {
+              const endedMsg = entry?.model?.[0]
+              text.loadBlocks(endedMsg)
+              yield* text.reconcile()
+              text.commit()
+              if (endedMsg?.role === 'assistant' && endedMsg?.stopReason !== 'error') {
+                if (entry?.id !== undefined) seenEntryIds.add(entry.id)
+                const spanId =
+                  activeGenSpanId ||
+                  (entry?.id ? `gen_${entry.id}` : `gen_stream_${++genCounter}`)
+                activeGenSpanId = null
+                yield {
+                  type: 'trace_span',
+                  phase: 'end',
+                  span: buildCompletedGenerationSpan(
+                    spanId,
+                    endedMsg,
+                    activeGenModel || fallbackModel,
+                    activeGenStartMs,
+                    [...contextMessages],
+                  ),
+                }
+                const asstCtx = extractContextMessageFromEntry(entry)
+                if (asstCtx) contextMessages.push(asstCtx)
               }
             }
           } else if (ev.type === 'tool_execution_start') {
@@ -962,6 +1180,12 @@ export async function* streamAgentChat(
             const started = toolStartTimes.get(ev.toolCallId) ?? Date.now()
             const roleMeta = resolveToolAgentMeta(ev.toolName)
             const toolMsg = ev.entry?.model?.[0]
+            if (ev.entry && ev.toolCallId && !seenToolResultCallIds.has(ev.toolCallId)) {
+              seenToolResultCallIds.add(ev.toolCallId)
+              if (ev.entry.id !== undefined) seenEntryIds.add(ev.entry.id)
+              const toolCtx = extractContextMessageFromEntry(ev.entry)
+              if (toolCtx) contextMessages.push(toolCtx)
+            }
             const durationMs =
               typeof toolMsg?.durationMs === 'number'
                 ? toolMsg.durationMs

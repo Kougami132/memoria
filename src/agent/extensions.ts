@@ -67,12 +67,35 @@ function collectSubagentTrace(entries: readonly any[], parentCallId: string) {
   const sources: any[] = [];
   const spans: any[] = [];
   const toolSpanMap = new Map<string, any>();
+  const contextMessages: Array<Record<string, unknown>> = [];
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
 
   for (const entry of entries) {
-    if (entry.kind === "pi.assistant") {
+    if (entry.kind === "pi.system") {
+      const sysMsg = entry.model?.[0];
+      if (sysMsg) {
+        const sections = sysMsg.sections ? Object.values(sysMsg.sections).filter(Boolean).join("\n\n") : "";
+        const sysContent = typeof sysMsg.content === "string" ? sysMsg.content : "";
+        const combined = [sysContent, sections].filter(Boolean).join("\n\n");
+        if (combined) {
+          contextMessages.push({ role: "system", content: combined });
+        }
+      }
+    } else if (entry.kind === "pi.user") {
+      const userMsg = entry.model?.[0];
+      const text =
+        typeof userMsg?.content === "string"
+          ? userMsg.content
+          : Array.isArray(userMsg?.content)
+            ? userMsg.content
+                .filter((b: any) => b.type === "text")
+                .map((b: any) => b.text)
+                .join("\n")
+            : "";
+      contextMessages.push({ role: "user", content: text });
+    } else if (entry.kind === "pi.assistant") {
       const asst = entry.model?.[0];
       if (!asst || asst.stopReason === "error") continue;
       const inp = Number(asst.usage?.input ?? 0);
@@ -104,14 +127,15 @@ function collectSubagentTrace(entries: readonly any[], parentCallId: string) {
         startedMs !== undefined ? startedMs + (durationMs !== null ? durationMs : 0) : undefined;
       const thought = thinkingParts.join("\n\n").trim();
       const content = textParts.join("\n").trim();
+      const genToolCalls = toolCalls.map((tc) => ({
+        id: tc.id || `sub_call_${entry.id}`,
+        name: tc.name,
+        arguments: tc.arguments,
+      }));
       const genOutput: Record<string, unknown> = {};
       if (thought) genOutput.thought = thought;
-      if (toolCalls.length > 0) {
-        genOutput.tool_calls = toolCalls.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          arguments: tc.arguments,
-        }));
+      if (genToolCalls.length > 0) {
+        genOutput.tool_calls = genToolCalls;
       }
       if (content) genOutput.content = content;
       if (genUsage) genOutput.usage = genUsage;
@@ -130,8 +154,15 @@ function collectSubagentTrace(entries: readonly any[], parentCallId: string) {
         reasoning: thought || null,
         usage: genUsage,
         data: {
+          input: [...contextMessages],
           output: Object.keys(genOutput).length > 0 ? genOutput : content || null,
         },
+      });
+
+      contextMessages.push({
+        role: "assistant",
+        ...(content ? { content } : {}),
+        ...(genToolCalls.length > 0 ? { tool_calls: genToolCalls } : {}),
       });
 
       for (const tc of toolCalls) {
@@ -159,6 +190,12 @@ function collectSubagentTrace(entries: readonly any[], parentCallId: string) {
             .map((b: any) => b.text)
             .join("\n")
         : "";
+      contextMessages.push({
+        role: "tool",
+        tool_call_id: toolMsg.toolCallId,
+        name: toolMsg.toolName,
+        content: outText,
+      });
       const span = toolSpanMap.get(toolMsg.toolCallId);
       if (span) {
         span.data.output = outText;

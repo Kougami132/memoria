@@ -744,7 +744,9 @@ export class MemoriaAgentRuntime {
           textParts.push(b.text);
         }
       }
-      if (live?.generation) {
+      const hasRunningTools =
+        Array.isArray(live?.tools) && live.tools.some((t: any) => t.status !== "done");
+      if (live?.generation || (live?.run && !hasRunningTools)) {
         const inp = Number(partialMsg?.usage?.input ?? 0);
         const out = Number(partialMsg?.usage?.output ?? 0);
         const tot = Number(partialMsg?.usage?.totalTokens ?? inp + out);
@@ -764,7 +766,7 @@ export class MemoriaAgentRuntime {
         if (liveText) liveOut.content = liveText;
         if (liveUsage) liveOut.usage = liveUsage;
         currentTurnSpans.push({
-          id: `gen_live_${inFlightId}_${live.generation.attempt ?? 1}`,
+          id: `gen_live_${inFlightId}_${live?.generation?.attempt ?? 1}`,
           type: "generation",
           name: partialMsg?.model || this.db.getEffectiveSettings().llm_model || "llm",
           agent_id: "orchestrator",
