@@ -141,6 +141,7 @@ function formatDuration(ms?: number | null): string | null {
 
 interface HostApprovalPrompt {
   approval_id: string
+  tool_call_id?: string
   host_id: string
   host_name: string
   command: string
@@ -152,8 +153,15 @@ interface StreamingAssistantState {
   traces: AgentTraceSpan[]
   answer: string
   isStreaming: boolean
-  pendingApproval?: HostApprovalPrompt | null
+  /** 同一轮可能并发触发多个 host_exec 审批，必须按队列保存，不能只留最后一个。 */
+  pendingApprovals: HostApprovalPrompt[]
   error?: string
+}
+
+/** 一路流式运行只属于它自己的会话：切走时不能继续渲染在别人的会话里。 */
+interface ActiveStream {
+  sessionId: string
+  state: StreamingAssistantState
 }
 
 export function AgenticChat() {
@@ -167,17 +175,28 @@ export function AgenticChat() {
   const [input, setInput] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
-  const [streamState, setStreamState] = useState<StreamingAssistantState | null>(null)
+  // 会话 id 未知时（新会话首次提交前）用空串作为归属。
+  const [activeStream, setActiveStream] = useState<ActiveStream | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingContent, setEditingContent] = useState('')
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
 
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // 用户手动上滚查看历史时解除底部锁定，避免轮询或流式增量把视口强行拉回底部。
+  const stickToBottomRef = useRef(true)
+  // 已点击过允许/拒绝的审批 ID：防止轮询在途响应或重复事件把已处理的审批卡片再次弹出来。
+  const respondedApprovalIdsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
   const currentSendingTextRef = useRef<string>('')
   const currentUserMsgIdRef = useRef<string | null>(null)
   const currentTempUserMsgIdRef = useRef<string | null>(null)
   const currentSessionIdRef = useRef<string | null>(null)
+  // 当前页面正在展示的会话：异步回调回来时用它判断消息列表是否还属于同一个会话。
+  const viewedSessionIdRef = useRef<string | null>(activeSessionId)
+  useEffect(() => {
+    viewedSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
   const isStoppingRef = useRef(false)
 
   const { data: sessions = [], refetch: refetchSessions } = useQuery({
@@ -308,17 +327,58 @@ export function AgenticChat() {
     const handleGlobalNewChat = () => {
       setMessages([])
       setInput('')
-      setStreamState(null)
+      setActiveStream(null)
       navigate('/agentic-chat')
     }
     window.addEventListener('memoria:new-chat', handleGlobalNewChat)
     return () => window.removeEventListener('memoria:new-chat', handleGlobalNewChat)
   }, [navigate])
 
+  // 离开页面时断开事件流（只断开本地监听，服务端的运行继续，回来后靠轮询接上）。
+  // 之前不清理，每离开一次就留一条挂着的 SSE 连接。
+  useEffect(() => () => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+  }, [])
+
+  // 切换会话时清空草稿并恢复底部跟随，避免把 A 会话没发出去的内容发进 B 会话。
+  useEffect(() => {
+    setInput('')
+    stickToBottomRef.current = true
+  }, [activeSessionId])
+
+  const sanitizePolledMessages = (msgs: Message[]): Message[] =>
+    msgs.map((m) => {
+      if (m.status !== 'pending_approval') return m
+      const rawList: Array<Record<string, any>> = Array.isArray(m.metadata?.pending_approvals)
+        ? m.metadata!.pending_approvals
+        : m.metadata?.approval_id
+          ? [m.metadata]
+          : []
+      const remaining = rawList.filter(
+        (item) => item?.approval_id && !respondedApprovalIdsRef.current.has(String(item.approval_id)),
+      )
+      if (remaining.length === 0) {
+        return { ...m, status: 'streaming', metadata: undefined }
+      }
+      const first = remaining[0]
+      return {
+        ...m,
+        metadata: {
+          ...m.metadata,
+          ...first,
+          pending_approvals: remaining,
+        },
+      }
+    })
+
   // Load messages for current session & poll if background task is streaming
   useEffect(() => {
+    // 切会话先清空：否则上一个会话的消息会一直挂在新会话里，直到自己的 fetch 回来。
+    setMessages([])
+    setEditingMessageId(null)
+    setEditingContent('')
     if (!activeSessionId) {
-      setMessages([])
       return
     }
     let isMounted = true
@@ -326,8 +386,9 @@ export function AgenticChat() {
 
     const fetchAndCheckStatus = async () => {
       try {
-        const msgs = await api.getAgentMessages(activeSessionId)
+        const rawMsgs = await api.getAgentMessages(activeSessionId)
         if (!isMounted) return
+        const msgs = sanitizePolledMessages(rawMsgs)
         setMessages(msgs)
 
       const lastMsg = msgs[msgs.length - 1]
@@ -347,14 +408,25 @@ export function AgenticChat() {
     }
   }, [activeSessionId])
 
+  const handleMessagesScroll = () => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 64
+    stickToBottomRef.current = atBottom
+  }
+
   useEffect(() => {
+    if (!stickToBottomRef.current) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamState])
+  }, [messages, activeStream])
+
+  // 只有当前会话自己的运行才算「本页正在响应」。
+  const streamState = activeStream && activeStream.sessionId === (activeSessionId ?? '') ? activeStream.state : null
 
   // Prevent accidental navigation/refresh during streaming or pending approval
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (streamState?.isStreaming || streamState?.pendingApproval) {
+      if (streamState?.isStreaming || (streamState?.pendingApprovals?.length ?? 0) > 0) {
         e.preventDefault()
         e.returnValue = ''
       }
@@ -366,7 +438,7 @@ export function AgenticChat() {
   const handleCreateSession = () => {
     setMessages([])
     setInput('')
-    setStreamState(null)
+    setActiveStream(null)
     navigate('/agentic-chat')
   }
 
@@ -406,13 +478,20 @@ export function AgenticChat() {
     const abortController = new AbortController()
     abortControllerRef.current = abortController
 
-    setStreamState({
-      thought: '',
-      thoughtExpanded: true,
-      traces: [],
-      answer: '',
-      isStreaming: true,
+    // 先归到目标会话（新会话尚未分配 id 时用空串），init 拿到真实 id 后再改归属。
+    let streamOwner = targetSessionId || activeSessionId || ''
+    stickToBottomRef.current = true
+    setActiveStream({
+      sessionId: streamOwner,
+      state: { thought: '', thoughtExpanded: true, traces: [], answer: '', isStreaming: true, pendingApprovals: [] },
     })
+    const updateStream = (updater: (prev: StreamingAssistantState) => StreamingAssistantState | null) => {
+      setActiveStream((prev) => {
+        if (!prev) return null
+        const next = updater(prev.state)
+        return next ? { sessionId: prev.sessionId, state: next } : null
+      })
+    }
 
     let currentSessionId = targetSessionId || activeSessionId || undefined
     currentSessionIdRef.current = currentSessionId || null
@@ -427,22 +506,24 @@ export function AgenticChat() {
           if (event.user_message_id) {
             currentUserMsgIdRef.current = event.user_message_id
           }
-          if (event.session_id && event.session_id !== activeSessionId) {
+          if (event.session_id && event.session_id !== streamOwner) {
             currentSessionId = event.session_id
             currentSessionIdRef.current = event.session_id
+            // 归属必须和路由同步改，否则跳转后自己的气泡会立刻消失。
+            streamOwner = event.session_id
+            setActiveStream((prev) => (prev ? { ...prev, sessionId: event.session_id! } : null))
             navigate(`/agentic-chat/${encodeURIComponent(event.session_id)}`, { replace: true })
             refetchSessions()
           }
         } else if (event.type === 'thought_delta') {
-          setStreamState((prev) => prev ? {
+          updateStream((prev) => ({
             ...prev,
             thought: event.replace ? (event.delta || '') : prev.thought + (event.delta || ''),
-          } : null)
+          }))
         } else if (event.type === 'trace_span') {
           if (event.span) {
             const span = event.span
-            setStreamState((prev) => {
-              if (!prev) return null
+            updateStream((prev) => {
               const existingIndex = prev.traces.findIndex((s) => s.id === span.id)
               const updatedTraces = [...prev.traces]
               if (existingIndex >= 0) {
@@ -450,55 +531,63 @@ export function AgenticChat() {
               } else {
                 updatedTraces.push(span)
               }
-              return { ...prev, traces: updatedTraces }
+              const nextApprovals =
+                event.phase === 'end'
+                  ? prev.pendingApprovals.filter((a) => a.tool_call_id !== span.id)
+                  : prev.pendingApprovals
+              return { ...prev, traces: updatedTraces, pendingApprovals: nextApprovals }
             })
           }
         } else if (event.type === 'approval_required') {
-          setStreamState((prev) => prev ? {
-            ...prev,
-            pendingApproval: {
-              approval_id: event.approval_id || "",
-              host_id: event.host_id || "",
-              host_name: event.host_name || event.host_id || "",
-              command: event.command || "",
-            },
-          } : null)
+          const approvalId = event.approval_id || ''
+          if (approvalId && !respondedApprovalIdsRef.current.has(approvalId)) {
+            updateStream((prev) => {
+              if (prev.pendingApprovals.some((a) => a.approval_id === approvalId)) return prev
+              return {
+                ...prev,
+                pendingApprovals: [
+                  ...prev.pendingApprovals,
+                  {
+                    approval_id: approvalId,
+                    tool_call_id: event.tool_call_id,
+                    host_id: event.host_id || '',
+                    host_name: event.host_name || event.host_id || '',
+                    command: event.command || '',
+                  },
+                ],
+              }
+            })
+          }
         } else if (event.type === 'answer_delta') {
-          setStreamState((prev) => prev ? {
+          updateStream((prev) => ({
             ...prev,
             answer: event.replace ? (event.delta || '') : prev.answer + (event.delta || ''),
-          } : null)
+          }))
         } else if (event.type === 'done') {
-          if (event.session_id && event.session_id !== activeSessionId) {
+          const finalId = event.session_id || currentSessionId
+          if (event.session_id && event.session_id !== streamOwner) {
+            streamOwner = event.session_id
             navigate(`/agentic-chat/${encodeURIComponent(event.session_id)}`, { replace: true })
             refetchSessions()
           }
-          if (currentSessionId || event.session_id) {
-            const finalId = event.session_id || currentSessionId!
+          if (finalId) {
             const updatedMsgs = await api.getAgentMessages(finalId)
-            setMessages(updatedMsgs)
+            // 用户可能已经切到别的会话，不要把 A 的消息灌进 B 的列表。
+            if (viewedSessionIdRef.current === finalId) setMessages(sanitizePolledMessages(updatedMsgs))
           }
-          setStreamState(null)
+          setActiveStream(null)
           break
         } else if (event.type === 'error') {
-          setStreamState((prev) => (prev ? {
-            ...prev,
-            isStreaming: false,
-            error: event.detail || '处理失败',
-          } : null))
+          updateStream((prev) => ({ ...prev, isStreaming: false, error: event.detail || '处理失败' }))
           break
         }
       }
    } catch (err: any) {
      if (err.name === 'AbortError') {
-       setStreamState(null)
+       setActiveStream(null)
        return
      }
-     setStreamState((prev) => prev ? {
-       ...prev,
-       isStreaming: false,
-       error: err.message || '请求发生错误',
-     } : null)
+     updateStream((prev) => ({ ...prev, isStreaming: false, error: err.message || '请求发生错误' }))
    } finally {
      abortControllerRef.current = null
      currentSendingTextRef.current = ''
@@ -562,7 +651,7 @@ export function AgenticChat() {
       }
       return prev.filter((m) => m.status !== 'streaming' && (!tempId || m.id !== tempId))
     })
-    setStreamState(null)
+    setActiveStream(null)
 
     const sessId = currentSessionIdRef.current || activeSessionId
     if (sessId) {
@@ -573,7 +662,7 @@ export function AgenticChat() {
       }
       try {
         const msgs = await api.getAgentMessages(sessId)
-        setMessages(msgs)
+        if (viewedSessionIdRef.current === sessId) setMessages(msgs)
       } catch (err) {
         console.error('Failed to reload messages after abort:', err)
       }
@@ -693,30 +782,51 @@ export function AgenticChat() {
     }
   }
 
-  const handleRespondApproval = async (approved: boolean) => {
-    if (!streamState?.pendingApproval) return
-    const approvalId = streamState.pendingApproval.approval_id
+  const handleRespondApproval = async (approvalId: string, approved: boolean) => {
+    if (!approvalId) return
+    respondedApprovalIdsRef.current.add(approvalId)
+    setActiveStream((prev) =>
+      prev
+        ? {
+            ...prev,
+            state: {
+              ...prev.state,
+              pendingApprovals: prev.state.pendingApprovals.filter((a) => a.approval_id !== approvalId),
+            },
+          }
+        : null,
+    )
     try {
       await api.respondHostApproval(approvalId, approved)
-      setStreamState(prev => prev ? { ...prev, pendingApproval: null } : null)
     } catch (err) {
       console.error('Failed to respond to approval:', err)
     }
   }
 
  const handleRespondHistoricalApproval = async (approvalId: string, approved: boolean) => {
+   respondedApprovalIdsRef.current.add(approvalId)
+   setActiveStream((prev) =>
+     prev
+       ? {
+           ...prev,
+           state: {
+             ...prev.state,
+             pendingApprovals: prev.state.pendingApprovals.filter((a) => a.approval_id !== approvalId),
+           },
+         }
+       : null,
+   )
+   setMessages((prev) => sanitizePolledMessages(prev))
    try {
      await api.respondHostApproval(approvalId, approved)
-     setMessages(prev => prev.map(m => {
-       if (m.metadata?.approval_id === approvalId) {
-         return { ...m, status: approved ? 'approved' : 'rejected' }
-       }
-       return m
-     }))
       if (activeSessionId) {
         const checkAfterDecision = async () => {
+          // 用户可能已经切走，不要把旧会话的消息灌进新会话。
+          if (viewedSessionIdRef.current !== activeSessionId) return
           try {
-            const msgs = await api.getAgentMessages(activeSessionId)
+            const rawMsgs = await api.getAgentMessages(activeSessionId)
+            if (viewedSessionIdRef.current !== activeSessionId) return
+            const msgs = sanitizePolledMessages(rawMsgs)
             setMessages(msgs)
             const lastMsg = msgs[msgs.length - 1]
             if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.status === 'streaming' || lastMsg.status === 'pending_approval' || (lastMsg.status === 'approved' && !lastMsg.content))) {
@@ -953,7 +1063,11 @@ export function AgenticChat() {
         </div>
 
         {/* Message Container */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
+          className="flex-1 overflow-y-auto p-4 space-y-6"
+        >
           {messages.length === 0 && !streamState ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2">
@@ -1264,41 +1378,50 @@ function ChatMessageItem({
             )}
 
            {/* Answer Content */}
-            {msg.status === 'pending_approval' && msg.metadata?.approval_id && (
-               <div className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
-                    <Terminal className="w-4 h-4 text-blue-500" />
-                    <span>主机操作执行审批请求</span>
+            {msg.status === 'pending_approval' &&
+              (Array.isArray(msg.metadata?.pending_approvals)
+                ? msg.metadata!.pending_approvals
+                : msg.metadata?.approval_id
+                  ? [msg.metadata]
+                  : []
+              ).map((approval: any) => (
+                <div
+                  key={approval.approval_id}
+                  className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
+                      <Terminal className="w-4 h-4 text-blue-500" />
+                      <span>主机操作执行审批请求</span>
+                    </div>
+                    <Badge variant="outline" className="text-xs border-blue-400 text-blue-600 dark:text-blue-400">待审批</Badge>
                   </div>
-                  <Badge variant="outline" className="text-xs border-blue-400 text-blue-600 dark:text-blue-400">待审批</Badge>
+                  <p className="text-xs text-muted-foreground">
+                    助手请求在主机 <strong className="text-foreground">{approval.host_name || approval.host_id}</strong> 上执行如下受控命令：
+                  </p>
+                  <div className="bg-background/80 dark:bg-muted/60 p-2.5 rounded-lg border border-border font-mono text-xs text-foreground select-all break-all">
+                    {approval.command}
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onRespondApproval?.(approval.approval_id, false)}
+                      className="rounded-lg h-8 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                    >
+                      拒绝执行
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => onRespondApproval?.(approval.approval_id, true)}
+                      className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      允许执行
+                    </Button>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  助手请求在主机 <strong className="text-foreground">{msg.metadata?.host_name || msg.metadata?.host_id}</strong> 上执行如下受控命令：
-                </p>
-                <div className="bg-background/80 dark:bg-muted/60 p-2.5 rounded-lg border border-border font-mono text-xs text-foreground select-all break-all">
-                  {msg.metadata?.command}
-                </div>
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onRespondApproval?.(msg.metadata!.approval_id, false)}
-                    className="rounded-lg h-8 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                  >
-                    拒绝执行
-                  </Button>
-                 <Button
-                   size="sm"
-                   onClick={() => onRespondApproval?.(msg.metadata!.approval_id, true)}
-                   className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
-                 >
-                   <Check className="w-3.5 h-3.5" />
-                   允许执行
-                 </Button>
-               </div>
-             </div>
-            )}
+              ))}
 
            {/* Answer Content or In-progress Prompt */}
             {msg.status === 'failed' ? (
@@ -1374,7 +1497,7 @@ function StreamingMessageItem({
   onRespondApproval,
 }: {
   state: StreamingAssistantState
-  onRespondApproval?: (approved: boolean) => void
+  onRespondApproval?: (approvalId: string, approved: boolean) => void
 }) {
   const [thoughtExpanded, setThoughtExpanded] = useState(true)
   const [traceExpanded, setTraceExpanded] = useState(true)
@@ -1450,9 +1573,12 @@ function StreamingMessageItem({
           </div>
         )}
 
-        {/* Interactive Host Command Approval Card */}
-        {state.pendingApproval && (
-          <div className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3">
+        {/* Interactive Host Command Approval Cards */}
+        {state.pendingApprovals.map((approval) => (
+          <div
+            key={approval.approval_id}
+            className="rounded-xl border border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/30 p-4 shadow-sm space-y-3"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
                 <Terminal className="w-4 h-4 text-blue-500" />
@@ -1461,23 +1587,23 @@ function StreamingMessageItem({
               <span className="text-xs text-blue-600/80 dark:text-blue-400/80">等待您的许可</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              助手请求在主机 <strong className="text-foreground">{state.pendingApproval.host_name}</strong> 上执行如下受控命令：
+              助手请求在主机 <strong className="text-foreground">{approval.host_name}</strong> 上执行如下受控命令：
             </p>
             <div className="bg-background/80 dark:bg-muted/60 p-2.5 rounded-lg border border-border font-mono text-xs text-foreground select-all break-all">
-              {state.pendingApproval.command}
+              {approval.command}
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onRespondApproval?.(false)}
+                onClick={() => onRespondApproval?.(approval.approval_id, false)}
                 className="rounded-lg h-8 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
               >
                 拒绝执行
               </Button>
               <Button
                 size="sm"
-                onClick={() => onRespondApproval?.(true)}
+                onClick={() => onRespondApproval?.(approval.approval_id, true)}
                 className="rounded-lg h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-sm"
               >
                 <Check className="w-3.5 h-3.5" />
@@ -1485,7 +1611,7 @@ function StreamingMessageItem({
               </Button>
             </div>
           </div>
-        )}
+        ))}
 
       {/* Real-time Answer Output */}
 

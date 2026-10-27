@@ -244,6 +244,15 @@ export function createMemoriaExtensions(
               );
               const decision = await hostManager.approvalManager.waitForDecision(approval.id, context.abortSignal);
               if (decision !== "approved") {
+                await api.details(
+                  {
+                    host_id: args.host_id,
+                    host_name: targetHost.name,
+                    command: args.command,
+                    status: decision,
+                  },
+                  context,
+                );
                 return {
                   content: [
                     {
@@ -254,6 +263,17 @@ export function createMemoriaExtensions(
                   isError: true,
                 };
               }
+              // 审批通过后立即把 details 切到 running（清掉 approval_id），避免 SSH 执行期间
+              // 轮询 /messages 仍看到 pending_approval 导致已同意的审批卡片反复弹出。
+              await api.details(
+                {
+                  host_id: args.host_id,
+                  host_name: targetHost.name,
+                  command: args.command,
+                  status: "running",
+                },
+                context,
+              );
             } else {
               throw err;
             }

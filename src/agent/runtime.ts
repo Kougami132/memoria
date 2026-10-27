@@ -13,6 +13,7 @@ import {
   type ConversationId,
   type EntryId,
   type EntryRecord,
+  type SubmissionId,
   type Registry,
 } from "@earendil-works/pi-durable";
 import type {
@@ -40,7 +41,9 @@ export interface FormattedMessage {
   session_id: string;
   role: "user" | "assistant";
   content: string;
-  status: "completed" | "streaming" | "interrupted" | "failed";
+  status: "completed" | "streaming" | "pending_approval" | "interrupted" | "failed";
+  /** 审批挂起时携带 `approval_id` / `host_*` / `command`，供刷新或重新进入会话后恢复审批卡片。 */
+  metadata?: Record<string, unknown>;
   created_at: string;
   sources: Array<{
     text: string;
@@ -400,14 +403,33 @@ export class MemoriaAgentRuntime {
 
     await this.abortConversation(id, context).catch(() => {});
 
-    const rawId = String(messageId).replace(/^msg_/, "").trim();
-    const entryId = Number(rawId);
-    if (Number.isNaN(entryId)) {
+    const rawId = String(messageId).trim();
+    // Web 端的流式入口手里只有 init 事件给的 `user_<submissionId>`，没有条目 id。
+    // 之前只剥 `msg_` 就 Number()，`user_1` 得到 NaN 后静默返回 deleted_count: 0，
+    // 于是「停止生成」的回滚彻底失效：页面先删掉用户消息，重新拉取又把它放回来。
+    const entryId = await this.resolveEntryId(existing.durableId as ConversationId, rawId, context);
+    if (entryId === undefined) {
       return { session_id: existing.id, deleted_count: 0 };
     }
 
     const deletedCount = this.db.truncateConversationEntries(existing.durableId, entryId, inclusive);
     return { session_id: existing.id, deleted_count: deletedCount };
+  }
+
+  /** 把 `msg_<entryId>` / `user_<submissionId>` / 裸数字统一解析成条目 id。 */
+  private async resolveEntryId(
+    conversationId: ConversationId,
+    messageId: string,
+    context: Context,
+  ): Promise<number | undefined> {
+    const submissionMatch = /^user_(\d+)$/.exec(messageId);
+    if (submissionMatch) {
+      const submission = await this.harness.submission(Number(submissionMatch[1]) as SubmissionId, context);
+      const record = await submission?.status(context);
+      return record?.entry === undefined ? undefined : Number(record.entry);
+    }
+    const entryId = Number(messageId.replace(/^msg_/, ""));
+    return Number.isNaN(entryId) ? undefined : entryId;
   }
 
   async getConversationMessages(
@@ -446,10 +468,17 @@ export class MemoriaAgentRuntime {
     const flushAssistantTurn = (
       entryId: number,
       text: string,
-      status: "completed" | "streaming" | "interrupted" | "failed",
+      status: FormattedMessage["status"],
+      metadata?: Record<string, unknown>,
+      /** 在飞轮次没有 entry id，用稳定前缀避免与已落库的 `msg_<entryId>` 撞号。 */
+      idPrefix = "msg_",
     ) => {
       const reasoningText = currentTurnReasoning.join("\n\n").trim() || null;
-      const spans = [...currentTurnSpans];
+      const isInFlight = status === "streaming" || status === "pending_approval";
+      const nowIso = new Date().toISOString();
+      const spans = currentTurnSpans.map((s) =>
+        !isInFlight && !s.ended_at ? { ...s, ended_at: nowIso } : s,
+      );
       const sources = [...currentTurnSources];
       const trace =
         spans.length > 0 || reasoningText || currentTurnTokens.total > 0
@@ -473,12 +502,13 @@ export class MemoriaAgentRuntime {
           : null;
 
       messages.push({
-        id: `msg_${entryId}`,
+        id: `${idPrefix}${entryId}`,
         entry_id: entryId,
         session_id: sessionId,
         role: "assistant",
         content: text,
         status,
+        ...(metadata ? { metadata } : {}),
         created_at: new Date().toISOString(),
         sources,
         trace,
@@ -554,13 +584,14 @@ export class MemoriaAgentRuntime {
             textParts.push(block.text);
           } else if (block.type === "toolCall") {
             hasToolCalls = true;
-            const span = {
+            const span: NonNullable<FormattedMessage["trace"]>["spans"][number] = {
               id: block.id || `call_${entry.id}`,
               type: "tool",
               name: block.name,
               agent_id: block.name === "delegate_subagent" ? "subagent" : "main",
               agent_name: block.name === "delegate_subagent" ? "Subagent" : "Agent",
               agent_role: block.name === "delegate_subagent" ? "specialist" : "orchestrator",
+              started_at: typeof asst.timestamp === "number" ? new Date(asst.timestamp).toISOString() : undefined,
               data: {
                 input: block.arguments,
               } as Record<string, unknown>,
@@ -591,6 +622,15 @@ export class MemoriaAgentRuntime {
         const span = toolCallSpanMap.get(toolMsg.toolCallId);
         if (span && span.data) {
           span.data.output = outText;
+          // 落盘了 pi.tool-result 说明该工具已执行完毕；之前没填 ended_at，
+          // 前端按 `!span.ended_at && !span.error` 判定，导致所有历史成功工具永远显示「执行中」。
+          span.ended_at =
+            typeof toolMsg.timestamp === "number"
+              ? new Date(toolMsg.timestamp).toISOString()
+              : new Date().toISOString();
+          if (typeof toolMsg.durationMs === "number") {
+            span.duration_ms = toolMsg.durationMs;
+          }
           if (toolMsg.details) {
             span.data.details = toolMsg.details;
             const maybeSources = (toolMsg.details as any)?.sources;
@@ -619,7 +659,20 @@ export class MemoriaAgentRuntime {
       }
       if (Array.isArray(live?.tools)) {
         for (const t of live.tools) {
-          if (!toolCallSpanMap.has(t.callId)) {
+          const existingSpan = toolCallSpanMap.get(t.callId);
+          if (existingSpan) {
+            if (existingSpan.data) {
+              if (t.output !== undefined && existingSpan.data.output === undefined) {
+                existingSpan.data.output = t.output;
+              }
+              if (t.details !== undefined && existingSpan.data.details === undefined) {
+                existingSpan.data.details = t.details;
+              }
+            }
+            if (t.status === "done" && !existingSpan.ended_at) {
+              existingSpan.ended_at = new Date().toISOString();
+            }
+          } else {
             currentTurnSpans.push({
               id: t.callId,
               type: "tool",
@@ -627,6 +680,7 @@ export class MemoriaAgentRuntime {
               agent_id: t.name === "delegate_subagent" ? "subagent" : "main",
               agent_name: t.name === "delegate_subagent" ? "Subagent" : "Agent",
               agent_role: t.name === "delegate_subagent" ? "specialist" : "orchestrator",
+              ended_at: t.status === "done" ? new Date().toISOString() : undefined,
               data: {
                 input: t.args,
                 output: t.output,
@@ -636,7 +690,35 @@ export class MemoriaAgentRuntime {
           }
         }
       }
-      flushAssistantTurn(Date.now(), textParts.join("\n"), "streaming");
+      // 在飞消息的身份必须跨轮询保持稳定：之前用 Date.now() 当 entryId，每轮询一次 id 就变一次，
+      // 前端按 id 作 key 于是每 1.5s 重建一次气泡，展开的 CoT / 轨迹被重置为收起。
+      // 以本轮 run 的 submission id 作为稳定身份；同一轮里多次 flush 共享同一个 id。
+      const inFlightId = Number(live?.run?.inputs?.[live.run.inputs.length - 1]) || 0;
+      // 审批挂起时把 approval 写进消息，刷新或重新进入会话后才能恢复审批卡片，
+      // 否则页面只剩「思考与响应中」，用户无从批准，只能等到 5 分钟审批超时。
+      // 注意：只有仍处于 pending 的审批才算数；用户点过允许后 SSH 仍在跑的窗口期不能再当成待审批返回。
+      // 同一轮可能并发挂起多个工具审批，全部放进 pending_approvals 一并返回，避免审批卡片逐个延迟蹦出。
+      const pendingApprovalTools = Array.isArray(live?.tools)
+        ? live.tools.filter((t: any) => {
+            const approvalId = t?.details?.approval_id;
+            if (!approvalId || t?.status === "done") return false;
+            if (t?.details?.status && t.details.status !== "pending_approval") return false;
+            const record = this.hostManager.approvalManager.getApproval(String(approvalId));
+            return record?.status === "pending";
+          })
+        : [];
+      const pendingApprovals = pendingApprovalTools.map((t: any) => ({
+        ...(t.details as Record<string, unknown>),
+        tool_call_id: t.callId,
+      }));
+      const firstApproval = pendingApprovals[0];
+      flushAssistantTurn(
+        inFlightId,
+        textParts.join("\n"),
+        firstApproval ? "pending_approval" : "streaming",
+        firstApproval ? { ...firstApproval, pending_approvals: pendingApprovals } : undefined,
+        "inflight_",
+      );
     } else {
       // 重试仍在进行时不要提前宣告失败；只有这一轮彻底结束才落失败消息。
       flushPendingError();

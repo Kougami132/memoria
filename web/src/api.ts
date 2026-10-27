@@ -374,6 +374,7 @@ export interface AgentStreamEvent {
   used_kbs?: string[]
   trace?: AgentTrace | null
   approval_id?: string
+  tool_call_id?: string
   host_id?: string
   host_name?: string
   command?: string
@@ -588,6 +589,20 @@ export async function* streamAgentChat(
           const snap = ev.snapshot
           text.loadBlocks(snap?.generation?.message)
           yield* text.reconcile()
+          if (Array.isArray(snap?.tools)) {
+            for (const t of snap.tools) {
+              if (t?.status !== 'done' && t?.details?.approval_id && (!t.details.status || t.details.status === 'pending_approval')) {
+                yield {
+                  type: 'approval_required',
+                  approval_id: t.details.approval_id,
+                  tool_call_id: t.callId,
+                  host_id: t.details.host_id,
+                  host_name: t.details.host_name,
+                  command: t.details.command,
+                }
+              }
+            }
+          }
           // If the run already finished before we attached (fast response!), finish immediately
           if (!snap?.run && !snap?.generation && (!snap?.tools || snap.tools.length === 0)) {
             yield { type: 'done', session_id: activeSessionId }
@@ -633,10 +648,11 @@ export async function* streamAgentChat(
               sources: ev.details.sources,
             }
           }
-          if (ev.details?.approval_id) {
+          if (ev.details?.approval_id && (!ev.details?.status || ev.details?.status === 'pending_approval')) {
             yield {
               type: 'approval_required',
               approval_id: ev.details.approval_id,
+              tool_call_id: ev.toolCallId,
               host_id: ev.details.host_id,
               host_name: ev.details.host_name,
               command: ev.details.command,
